@@ -1,0 +1,4029 @@
+import { useState, useEffect } from "react";
+import AdScriptRenderer from "../components/AdScriptRenderer";
+
+export default function AdminDashboard() {
+  const [activeTab, setActiveTab] = useState('Overview');
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  const [withdrawals, setWithdrawals] = useState<any[]>([]);
+  const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
+  const [withdrawalsError, setWithdrawalsError] = useState("");
+  
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [ticketsError, setTicketsError] = useState("");
+  const [ticketSearch, setTicketSearch] = useState("");
+  
+  const [selectedWithdrawal, setSelectedWithdrawal] = useState<any>(null);
+  const [selectedTicket, setSelectedTicket] = useState<any>(null);
+  const [modalAction, setModalAction] = useState<string>('none');
+  const [modalInput, setModalInput] = useState("");
+  const [modalLoading, setModalLoading] = useState(false);
+
+  const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [announcementsLoading, setAnnouncementsLoading] = useState(false);
+  const [announcementsError, setAnnouncementsError] = useState("");
+  const [announcementForm, setAnnouncementForm] = useState({
+    title: "", message: "", imageUrl: "", videoUrl: "", buttonText: "", buttonLink: "", type: "📢 Update", priority: "🟢 Normal", status: "Published", scheduledAt: ""
+  });
+
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [tasksError, setTasksError] = useState("");
+  const [taskLogs, setTaskLogs] = useState<any[]>([]);
+  const [taskLogsLoading, setTaskLogsLoading] = useState(false);
+  const [taskForm, setTaskForm] = useState({
+    title: "", description: "", rewardAmount: "", timerDuration: "", totalPages: "", imageUrl: "", status: "🟢 Active"
+  });
+  const [taskView, setTaskView] = useState<'tasks' | 'stats'>('tasks');
+
+  const [bonusSettings, setBonusSettings] = useState<any>(null);
+  const [bonusSettingsLoading, setBonusSettingsLoading] = useState(false);
+  const [bonusHistory, setBonusHistory] = useState<any[]>([]);
+  const [bonusHistoryLoading, setBonusHistoryLoading] = useState(false);
+  const [bonusView, setBonusView] = useState<'settings' | 'rewards' | 'stats' | 'history'>('settings');
+  const [bonusSearch, setBonusSearch] = useState("");
+
+  const [users, setUsers] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState("");
+  const [userSearch, setUserSearch] = useState("");
+  const [userView, setUserView] = useState<'all' | 'banned' | 'stats'>('all');
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+
+  const [ads, setAds] = useState<any[]>([]);
+  const [adsLoading, setAdsLoading] = useState(false);
+  const [adsError, setAdsError] = useState("");
+  const [adPlacements, setAdPlacements] = useState<any>({});
+  const [adPlacementsLoading, setAdPlacementsLoading] = useState(false);
+  const [showAdPreview, setShowAdPreview] = useState(false);
+  const [fullAdPreview, setFullAdPreview] = useState(false);
+  const [adView, setAdView] = useState<'ads' | 'analytics' | 'placement'>('ads');
+  const [adForm, setAdForm] = useState<any>({
+    adName: "", adSource: "Adsterra", adType: "Banner Ad", targetPage: "All Pages", placement: "Header Banner", status: "🟢 Active", scriptCode: "", revenue: 0
+  });
+
+  const [systemSettings, setSystemSettings] = useState<any>({
+    botSettings: {},
+    earningSettings: {},
+    withdrawalSettings: {},
+    referralSettings: {},
+    bonusSettings: {},
+    notificationSettings: {},
+    websiteSettings: {},
+    maintenanceMode: "🟢 OFF"
+  });
+  const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('🤖 Bot Settings');
+  
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsView, setAnalyticsView] = useState('Overview');
+
+  const [broadcasts, setBroadcasts] = useState<any[]>([]);
+  const [broadcastsLoading, setBroadcastsLoading] = useState(false);
+  const [broadcastTab, setBroadcastTab] = useState('📝 Text Broadcast');
+  const [broadcastForm, setBroadcastForm] = useState({
+    type: 'text',
+    message: '',
+    caption: '',
+    mediaUrl: '',
+    buttonText: '',
+    buttonLink: '',
+    targetAudience: '👥 All Users',
+    scheduledAtDate: '',
+    scheduledAtTime: ''
+  });
+  const [isScheduling, setIsScheduling] = useState(false);
+
+  const [securityLogs, setSecurityLogs] = useState<any[]>([]);
+  const [securityStats, setSecurityStats] = useState<any>({});
+  const [securityLoading, setSecurityLoading] = useState(false);
+  const [securityTab, setSecurityTab] = useState('Overview');
+
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [activityLogsStats, setActivityLogsStats] = useState<any>({});
+  const [activityLogsLoading, setActivityLogsLoading] = useState(false);
+  const [activityLogTab, setActivityLogTab] = useState('📋 View Logs');
+  const [activityLogSearch, setActivityLogSearch] = useState('');
+
+  const [backups, setBackups] = useState<any[]>([]);
+  const [backupSettings, setBackupSettings] = useState<any>({ autoBackupEnabled: false, backupFrequency: 'Daily', retentionDays: 30 });
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [backupTab, setBackupTab] = useState('📦 Create Backup');
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/dashboard");
+      if (!res.ok) throw new Error("Failed to fetch dashboard data");
+      const json = await res.json();
+      setData(json);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchWithdrawals = async () => {
+    setWithdrawalsLoading(true);
+    setWithdrawalsError("");
+    try {
+      const res = await fetch("/api/admin/withdrawals");
+      if (!res.ok) throw new Error("Failed to fetch withdrawals");
+      const json = await res.json();
+      setWithdrawals(json);
+    } catch (err: any) {
+      setWithdrawalsError(err.message);
+    } finally {
+      setWithdrawalsLoading(false);
+    }
+  };
+
+  const fetchTickets = async () => {
+    setTicketsLoading(true);
+    setTicketsError("");
+    try {
+      const res = await fetch("/api/admin/tickets");
+      if (!res.ok) throw new Error("Failed to fetch tickets");
+      const json = await res.json();
+      setTickets(json);
+    } catch (err: any) {
+      setTicketsError(err.message);
+    } finally {
+      setTicketsLoading(false);
+    }
+  };
+
+  const fetchAnnouncements = async () => {
+    setAnnouncementsLoading(true);
+    setAnnouncementsError("");
+    try {
+      const res = await fetch("/api/admin/announcements");
+      if (!res.ok) throw new Error("Failed to fetch announcements");
+      const json = await res.json();
+      setAnnouncements(json);
+    } catch (err: any) {
+      setAnnouncementsError(err.message);
+    } finally {
+      setAnnouncementsLoading(false);
+    }
+  };
+
+  const fetchTasks = async () => {
+    setTasksLoading(true);
+    setTasksError("");
+    try {
+      const res = await fetch("/api/admin/tasks");
+      if (!res.ok) throw new Error("Failed to fetch tasks");
+      const json = await res.json();
+      setTasks(json);
+    } catch (err: any) {
+      setTasksError(err.message);
+    } finally {
+      setTasksLoading(false);
+    }
+  };
+
+  const fetchTaskLogs = async () => {
+    setTaskLogsLoading(true);
+    try {
+      const res = await fetch("/api/admin/task-logs");
+      if (res.ok) {
+        const json = await res.json();
+        setTaskLogs(json);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTaskLogsLoading(false);
+    }
+  };
+
+  const fetchBonusSettings = async () => {
+    setBonusSettingsLoading(true);
+    try {
+      const res = await fetch("/api/admin/daily-bonus/settings");
+      if (res.ok) setBonusSettings(await res.json());
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBonusSettingsLoading(false);
+    }
+  };
+
+  const fetchBonusHistory = async () => {
+    setBonusHistoryLoading(true);
+    try {
+      const res = await fetch("/api/admin/daily-bonus/history");
+      if (res.ok) setBonusHistory(await res.json());
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBonusHistoryLoading(false);
+    }
+  };
+
+  const saveBonusSettings = async (newSettings: any) => {
+    try {
+      const res = await fetch("/api/admin/daily-bonus/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newSettings)
+      });
+      if (res.ok) {
+        setBonusSettings(newSettings);
+        alert("Daily Bonus settings saved successfully!");
+      } else {
+        alert("Failed to save settings");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error saving settings");
+    }
+  };
+
+  const fetchUsers = async () => {
+    setUsersLoading(true);
+    setUsersError("");
+    try {
+      const res = await fetch("/api/admin/users");
+      if (!res.ok) throw new Error("Failed to fetch users");
+      setUsers(await res.json());
+    } catch (err: any) {
+      setUsersError(err.message);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const fetchAds = async () => {
+    setAdsLoading(true);
+    setAdsError("");
+    try {
+      const res = await fetch("/api/admin/ads");
+      if (!res.ok) throw new Error("Failed to fetch ads");
+      setAds(await res.json());
+    } catch (err: any) {
+      setAdsError(err.message);
+    } finally {
+      setAdsLoading(false);
+    }
+  };
+
+  const fetchAdPlacements = async () => {
+    setAdPlacementsLoading(true);
+    try {
+      const res = await fetch("/api/admin/ad-placements");
+      if (res.ok) setAdPlacements(await res.json());
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAdPlacementsLoading(false);
+    }
+  };
+
+  const saveAdPlacements = async (newPlacements: any) => {
+    try {
+      const res = await fetch("/api/admin/ad-placements", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newPlacements)
+      });
+      if (res.ok) {
+        setAdPlacements(newPlacements);
+        alert("Ad placements saved successfully!");
+      } else {
+        alert("Failed to save ad placements");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error saving ad placements");
+    }
+  };
+
+  const fetchSystemSettings = async () => {
+    setSystemSettingsLoading(true);
+    try {
+      const res = await fetch("/api/admin/system-settings");
+      if (res.ok) {
+        const data = await res.json();
+        setSystemSettings(data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSystemSettingsLoading(false);
+    }
+  };
+
+  const saveSystemSettings = async (settingsToSave: any = systemSettings) => {
+    setSystemSettingsLoading(true);
+    try {
+      const res = await fetch("/api/admin/system-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settingsToSave)
+      });
+      if (res.ok) {
+        alert("System settings saved successfully!");
+        setSystemSettings(settingsToSave);
+      } else {
+        alert("Failed to save system settings.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error saving system settings.");
+    } finally {
+      setSystemSettingsLoading(false);
+    }
+  };
+
+  const fetchAnalytics = async () => {
+    setAnalyticsLoading(true);
+    try {
+      const res = await fetch("/api/admin/analytics-full");
+      if (res.ok) {
+        setAnalyticsData(await res.json());
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const fetchBroadcasts = async () => {
+    setBroadcastsLoading(true);
+    try {
+      const res = await fetch("/api/admin/broadcasts");
+      if (res.ok) {
+        setBroadcasts(await res.json());
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBroadcastsLoading(false);
+    }
+  };
+
+  const sendBroadcast = async (status: string) => {
+    if (!broadcastForm.message && !broadcastForm.mediaUrl) {
+      alert("Please provide a message or media content.");
+      return;
+    }
+    
+    setBroadcastsLoading(true);
+    try {
+      let scheduledAt = null;
+      if (status === 'Scheduled' && broadcastForm.scheduledAtDate && broadcastForm.scheduledAtTime) {
+        scheduledAt = `${broadcastForm.scheduledAtDate}T${broadcastForm.scheduledAtTime}:00`;
+      }
+      
+      const payload = {
+        type: broadcastForm.type,
+        message: broadcastForm.message,
+        caption: broadcastForm.caption,
+        mediaUrl: broadcastForm.mediaUrl,
+        buttonText: broadcastForm.buttonText,
+        buttonLink: broadcastForm.buttonLink,
+        targetAudience: broadcastForm.targetAudience,
+        status,
+        scheduledAt
+      };
+      
+      const res = await fetch("/api/admin/broadcasts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      
+      if (res.ok) {
+        alert("✅ Broadcast " + (status === 'Sent' ? "Sent" : "Scheduled") + " Successfully");
+        setBroadcastForm({
+          type: 'text', message: '', caption: '', mediaUrl: '', buttonText: '', buttonLink: '', targetAudience: '👥 All Users', scheduledAtDate: '', scheduledAtTime: ''
+        });
+        setIsScheduling(false);
+        if (broadcastTab === '📊 Broadcast History') fetchBroadcasts();
+      } else {
+        alert("Failed to send broadcast");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error sending broadcast");
+    } finally {
+      setBroadcastsLoading(false);
+    }
+  };
+
+  const fetchSecurityData = async () => {
+    setSecurityLoading(true);
+    try {
+      const res = await fetch("/api/admin/security");
+      if (res.ok) {
+        const data = await res.json();
+        setSecurityLogs(data.logs || []);
+        setSecurityStats(data.stats || {});
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSecurityLoading(false);
+    }
+  };
+
+  const handleSecurityAction = async (logId: string | null, userId: string | null, action: string, reason?: string) => {
+    try {
+      const res = await fetch("/api/admin/security/action", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logId, userId, action, reason })
+      });
+      if (res.ok) {
+        alert(`Action ${action} successful`);
+        fetchSecurityData();
+      } else {
+        alert("Action failed");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error performing action");
+    }
+  };
+
+  const fetchActivityLogs = async () => {
+    setActivityLogsLoading(true);
+    try {
+      const res = await fetch("/api/admin/activity-logs");
+      if (res.ok) {
+        const data = await res.json();
+        setActivityLogs(data.logs || []);
+        setActivityLogsStats(data.stats || {});
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActivityLogsLoading(false);
+    }
+  };
+
+  const fetchBackups = async () => {
+    setBackupLoading(true);
+    try {
+      const res = await fetch("/api/admin/backups");
+      if (res.ok) setBackups(await res.json());
+      const settingsRes = await fetch("/api/admin/backup-settings");
+      if (settingsRes.ok) setBackupSettings(await settingsRes.json());
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleCreateBackup = async () => {
+    setBackupLoading(true);
+    try {
+      const res = await fetch("/api/admin/backups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: 'Manual' })
+      });
+      if (res.ok) {
+        const newBackup = await res.json();
+        alert(`✅ Backup Created Successfully\n\nBackup ID: ${newBackup.backupId}\nDate: ${new Date(newBackup.backupDate).toLocaleString()}\nSize: ${newBackup.backupSize}`);
+        fetchBackups();
+      } else {
+        alert("Failed to create backup.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error creating backup");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleRestoreBackup = async (id: string, backupId: string) => {
+    if (!confirm(`⚠️ WARNING: Restoring a backup may overwrite current data.\n\nAre you sure you want to restore Backup ID: ${backupId}?`)) return;
+    
+    setBackupLoading(true);
+    try {
+      const res = await fetch(`/api/admin/backups/${id}/restore`, { method: "POST" });
+      if (res.ok) {
+        alert(`✅ Backup Restored Successfully\n\nBackup ID: ${backupId}`);
+        fetchBackups();
+      } else {
+        alert("Failed to restore backup.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error restoring backup");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleDeleteBackup = async (id: string) => {
+    if (!confirm("⚠️ WARNING: Deleted backups cannot be recovered.\n\nAre you sure you want to delete this backup?")) return;
+    
+    setBackupLoading(true);
+    try {
+      const res = await fetch(`/api/admin/backups/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        fetchBackups();
+      } else {
+        alert("Failed to delete backup.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error deleting backup");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleUpdateBackupSettings = async (newSettings: any) => {
+    setBackupLoading(true);
+    try {
+      const res = await fetch("/api/admin/backup-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newSettings)
+      });
+      if (res.ok) {
+        setBackupSettings(newSettings);
+        alert("Settings updated successfully.");
+      } else {
+        alert("Failed to update settings.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error updating settings");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'Overview') {
+      fetchDashboardData();
+    } else if (activeTab === '💸 Withdrawals') {
+      fetchWithdrawals();
+    } else if (activeTab === '🎫 Support') {
+      fetchTickets();
+    } else if (activeTab === '📢 Announcements') {
+      fetchAnnouncements();
+    } else if (activeTab === '💰 Rewards') {
+      fetchTasks();
+      if (taskView === 'stats') {
+        fetchTaskLogs();
+      }
+    } else if (activeTab === '🎁 Daily Bonus') {
+      if (bonusView === 'settings' || bonusView === 'rewards' || bonusView === 'stats') {
+        fetchBonusSettings();
+      }
+      if (bonusView === 'history' || bonusView === 'stats') {
+        fetchBonusHistory();
+      }
+    } else if (activeTab === '👥 Users') {
+      fetchUsers();
+    } else if (activeTab === '📢 Ads Manager') {
+      if (adView === 'ads' || adView === 'analytics' || adView === 'placement') {
+        fetchAds();
+      }
+      if (adView === 'placement') {
+        fetchAdPlacements();
+      }
+    } else if (activeTab === '📈 Analytics') {
+      fetchAnalytics();
+    } else if (activeTab === '📢 Broadcast') {
+      if (broadcastTab === '📊 Broadcast History') fetchBroadcasts();
+    } else if (activeTab === '⚙️ System Settings') {
+      fetchSystemSettings();
+    } else if (activeTab === '🛡 Security Center') {
+      fetchSecurityData();
+    } else if (activeTab === '📜 Activity Logs') {
+      fetchActivityLogs();
+    } else if (activeTab === '📥 Backup & Restore') {
+      fetchBackups();
+    }
+  }, [activeTab, taskView, bonusView, adView, analyticsView, broadcastTab]);
+
+  const handleActionSubmit = async () => {
+    if (modalAction.endsWith('_ticket') && !selectedTicket) return;
+    if (modalAction.endsWith('_announcement') && !announcementForm) return;
+    if (modalAction.endsWith('_task') && !taskForm) return;
+    if (modalAction.endsWith('_ad') && !adForm) return;
+    if (['add_balance', 'deduct_balance', 'ban_user', 'unban_user', 'message_user'].includes(modalAction) && !selectedUser) return;
+    if (!modalAction.endsWith('_ticket') && !modalAction.endsWith('_announcement') && !modalAction.endsWith('_task') && !modalAction.endsWith('_ad') && !['add_balance', 'deduct_balance', 'ban_user', 'unban_user', 'message_user'].includes(modalAction) && !selectedWithdrawal) return;
+    setModalLoading(true);
+    try {
+      let endpoint = '';
+      let body: any = {};
+      let method = 'POST';
+      if (modalAction === 'approve') {
+        endpoint = `/api/admin/withdrawals/${selectedWithdrawal.id}/approve`;
+      } else if (modalAction === 'paid') {
+        endpoint = `/api/admin/withdrawals/${selectedWithdrawal.id}/paid`;
+        body = { transactionReference: modalInput };
+      } else if (modalAction === 'reject') {
+        endpoint = `/api/admin/withdrawals/${selectedWithdrawal.id}/reject`;
+        body = { rejectReason: modalInput };
+      } else if (modalAction === 'reply_ticket') {
+        endpoint = `/api/admin/tickets/${selectedTicket.id}/reply`;
+        body = { replyMessage: modalInput };
+      } else if (modalAction === 'resolve_ticket') {
+        endpoint = `/api/admin/tickets/${selectedTicket.id}/resolve`;
+      } else if (modalAction === 'close_ticket') {
+        endpoint = `/api/admin/tickets/${selectedTicket.id}/close`;
+      } else if (modalAction === 'create_announcement') {
+        endpoint = `/api/admin/announcements`;
+        body = announcementForm;
+      } else if (modalAction === 'edit_announcement') {
+        endpoint = `/api/admin/announcements/${(announcementForm as any).id}`;
+        method = 'PUT';
+        body = announcementForm;
+      } else if (modalAction === 'create_task') {
+        endpoint = `/api/admin/tasks`;
+        body = taskForm;
+      } else if (modalAction === 'edit_task') {
+        endpoint = `/api/admin/tasks/${(taskForm as any).id}`;
+        method = 'PUT';
+        body = taskForm;
+      } else if (modalAction === 'create_ad') {
+        if (!adForm.scriptCode?.trim()) {
+          alert("Ad Script/URL cannot be empty.");
+          setModalLoading(false);
+          return;
+        }
+        endpoint = `/api/admin/ads`;
+        body = adForm;
+      } else if (modalAction === 'edit_ad') {
+        if (!adForm.scriptCode?.trim()) {
+          alert("Ad Script/URL cannot be empty.");
+          setModalLoading(false);
+          return;
+        }
+        endpoint = `/api/admin/ads/${(adForm as any).id}`;
+        method = 'PUT';
+        body = adForm;
+      } else if (modalAction === 'add_balance' || modalAction === 'deduct_balance') {
+        endpoint = `/api/admin/users/${selectedUser.id}/balance`;
+        method = 'PUT';
+        const parsed = JSON.parse(modalInput || '{}');
+        body = { amount: parsed.amount, reason: parsed.reason, action: modalAction === 'add_balance' ? 'add' : 'deduct' };
+      } else if (modalAction === 'ban_user') {
+        endpoint = `/api/admin/users/${selectedUser.id}/status`;
+        method = 'PUT';
+        body = { status: 'Banned', reason: modalInput };
+      } else if (modalAction === 'unban_user') {
+        endpoint = `/api/admin/users/${selectedUser.id}/status`;
+        method = 'PUT';
+        body = { status: 'Active', reason: null };
+      } else if (modalAction === 'message_user') {
+        endpoint = `/api/admin/users/${selectedUser.id}/message`;
+        method = 'POST';
+        const parsed = JSON.parse(modalInput || '{}');
+        body = { type: parsed.type, content: parsed.content };
+      }
+
+      const res = await fetch(endpoint, {
+        method: method,
+        headers: { "Content-Type": "application/json" },
+        body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined
+      });
+      if (!res.ok) throw new Error("Action failed");
+      
+      setModalAction('none');
+      setModalInput("");
+      if (modalAction.endsWith('_ticket')) {
+        fetchTickets();
+      } else if (modalAction.endsWith('_announcement')) {
+        fetchAnnouncements();
+      } else if (modalAction.endsWith('_task')) {
+        fetchTasks();
+      } else if (modalAction.endsWith('_ad')) {
+        fetchAds();
+        alert("Ad saved successfully!");
+      } else if (['add_balance', 'deduct_balance', 'ban_user', 'unban_user', 'message_user'].includes(modalAction)) {
+        fetchUsers();
+      } else {
+        fetchWithdrawals();
+      }
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const pendingCount = withdrawals.filter(w => w.status === 'Pending').length;
+  const approvedCount = withdrawals.filter(w => w.status === 'Approved').length;
+  const paidCount = withdrawals.filter(w => w.status === 'Paid').length;
+  const rejectedCount = withdrawals.filter(w => w.status === 'Rejected').length;
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans pt-20">
+      {/* Header */}
+      <div className="mb-8 border-b border-slate-800 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl md:text-4xl font-extrabold text-white flex items-center gap-3">
+            📊 RoyShare Admin Dashboard
+          </h1>
+          <div className="flex flex-wrap items-center gap-4 mt-3 text-sm font-medium">
+            <span className="flex items-center gap-1.5 text-emerald-400 bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-400/20">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              🟢 System Status: Online
+            </span>
+            <span className="text-slate-400 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
+              📅 Current Date: {currentTime.toLocaleDateString()}
+            </span>
+            <span className="text-slate-400 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
+              🕒 Current Time: {currentTime.toLocaleTimeString()}
+            </span>
+          </div>
+        </div>
+        <button
+          onClick={fetchDashboardData}
+          disabled={loading}
+          className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/20 transition-all disabled:opacity-50"
+        >
+          🔄 Refresh Dashboard
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center items-center py-20">
+          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      ) : error ? (
+        <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-6 rounded-2xl text-center">
+          <p className="text-lg font-medium">⚠️ No dashboard data available.</p>
+          <p className="text-sm mt-2 opacity-80">{error}</p>
+        </div>
+      ) : data ? (
+        <div className="space-y-8 max-w-7xl mx-auto">
+          {/* Navigation Buttons */}
+          <div className="flex flex-wrap gap-3">
+            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "📈 Analytics", "📢 Broadcast", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "⚙️ System Settings"].map((btn) => (
+              <button 
+                key={btn} 
+                onClick={() => setActiveTab(btn)}
+                className={`px-4 py-2 hover:bg-slate-800 border border-slate-800 rounded-xl text-sm font-medium transition-colors ${activeTab === btn ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-900 text-slate-300'}`}
+              >
+                {btn}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'Overview' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-8">
+              {/* Overview Cards */}
+              <section>
+                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                  <span className="text-blue-400">⚡</span> Overview Cards
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                  <StatCard title="👥 Total Users" value={data.overview.totalUsers} />
+                  <StatCard title="📤 Total Uploads" value={data.overview.totalUploads} />
+                  <StatCard title="🔗 Total Short Links" value={data.overview.totalLinks} />
+                  <StatCard title="💰 Total User Earnings" value={`$${data.overview.totalEarnings}`} />
+                  <StatCard title="💸 Total Withdrawals" value={data.overview.totalWithdrawals} />
+                  <StatCard title="🎁 Total Bonus Claims" value={data.overview.totalBonusClaims} />
+                  <StatCard title="💰 Total Reward Claims" value={data.overview.totalRewardClaims} />
+                  <StatCard title="👥 Total Referrals" value={data.overview.totalReferrals} />
+                  <StatCard title="🎫 Open Support Tickets" value={data.overview.openTickets} highlight={data.overview.openTickets > 0} />
+                  <StatCard title="📢 Total Announcements" value={data.overview.totalAnnouncements} />
+                </div>
+              </section>
+
+              {/* Quick Statistics */}
+              <section>
+                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                  <span className="text-emerald-400">📅</span> Today Statistics
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <StatCard title="👤 New Users Today" value={data.today.newUsersToday} bg="bg-emerald-900/20" border="border-emerald-500/20" />
+                  <StatCard title="📤 Uploads Today" value={data.today.uploadsToday} bg="bg-emerald-900/20" border="border-emerald-500/20" />
+                  <StatCard title="🔗 Links Created Today" value={data.today.linksToday} bg="bg-emerald-900/20" border="border-emerald-500/20" />
+                  <StatCard title="💰 Rewards Claimed Today" value={data.today.rewardsClaimedToday} bg="bg-emerald-900/20" border="border-emerald-500/20" />
+                  <StatCard title="🎁 Bonus Claims Today" value={data.today.bonusClaimsToday} bg="bg-emerald-900/20" border="border-emerald-500/20" />
+                  <StatCard title="💸 Withdraw Requests Today" value={data.today.withdrawalsToday} bg="bg-emerald-900/20" border="border-emerald-500/20" />
+                </div>
+              </section>
+            </div>
+
+            <div className="space-y-8">
+              {/* Latest Activities */}
+              <section>
+                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                  <span className="text-purple-400">🔔</span> Latest Activities
+                </h2>
+                <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                  {data.activities.length > 0 ? (
+                    <div className="space-y-4">
+                      {data.activities.map((act: any, i: number) => (
+                        <div key={i} className="flex items-start gap-3 border-b border-slate-800/50 pb-3 last:border-0 last:pb-0">
+                          <div className="text-xl">{act.type === 'system' ? '⚙️' : '👤'}</div>
+                          <div>
+                            <p className="text-sm font-medium text-slate-200">{act.text}</p>
+                            <p className="text-xs text-slate-500 mt-1">{new Date(act.time).toLocaleString()}</p>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="text-xs text-slate-500 pt-2 text-center italic">More activities hidden</div>
+                    </div>
+                  ) : (
+                    <p className="text-slate-500 text-sm text-center py-4">No recent activity</p>
+                  )}
+                </div>
+              </section>
+
+              {/* System Health */}
+              <section>
+                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                  <span className="text-red-400">❤️‍🩹</span> System Health Section
+                </h2>
+                <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
+                  <HealthItem name="🟢 Firestore Status" status={data.health.firestore} />
+                  <HealthItem name="🟢 Telegram Bot Status" status={data.health.telegram} />
+                  <HealthItem name="🟢 Web Server Status" status={data.health.web} />
+                  <HealthItem name="🟢 Reward System Status" status={data.health.rewards} />
+                  <HealthItem name="🟢 Bonus System Status" status={data.health.bonus} />
+                </div>
+              </section>
+            </div>
+          </div>
+          )}
+
+          {activeTab === '💸 Withdrawals' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  💸 Withdrawal Manager
+                </h2>
+                <button
+                  onClick={fetchWithdrawals}
+                  disabled={withdrawalsLoading}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 border border-slate-700"
+                >
+                  🔄 Refresh
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">🟡 Pending</h3>
+                  <p className="text-2xl font-bold text-yellow-400">{pendingCount}</p>
+                </div>
+                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">🟢 Approved</h3>
+                  <p className="text-2xl font-bold text-emerald-400">{approvedCount}</p>
+                </div>
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">💸 Paid</h3>
+                  <p className="text-2xl font-bold text-blue-400">{paidCount}</p>
+                </div>
+                <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">🔴 Rejected</h3>
+                  <p className="text-2xl font-bold text-red-400">{rejectedCount}</p>
+                </div>
+              </div>
+
+              {withdrawalsLoading ? (
+                <div className="flex justify-center items-center py-10">
+                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : withdrawalsError ? (
+                <div className="text-red-400 p-4 bg-red-500/10 rounded-xl">{withdrawalsError}</div>
+              ) : withdrawals.length === 0 ? (
+                <div className="text-center p-8 bg-slate-900/50 rounded-2xl border border-slate-800 text-slate-400">
+                  No withdrawal requests found.
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                        <tr>
+                          <th className="px-4 py-3">ID</th>
+                          <th className="px-4 py-3">User</th>
+                          <th className="px-4 py-3">Amount</th>
+                          <th className="px-4 py-3">Method</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Date</th>
+                          <th className="px-4 py-3 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {withdrawals.map((w: any) => (
+                          <tr key={w.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+                            <td className="px-4 py-3 font-mono text-xs">{w.id.substring(0, 8)}...</td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-white">{w.firstName} {w.lastName}</div>
+                              <div className="text-xs text-slate-500">@{w.username || 'unknown'}</div>
+                            </td>
+                            <td className="px-4 py-3 font-bold text-emerald-400">${w.amount}</td>
+                            <td className="px-4 py-3 font-medium">{w.method}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                w.status === 'Pending' ? 'bg-yellow-500/20 text-yellow-400' :
+                                w.status === 'Approved' ? 'bg-emerald-500/20 text-emerald-400' :
+                                w.status === 'Paid' ? 'bg-blue-500/20 text-blue-400' :
+                                'bg-red-500/20 text-red-400'
+                              }`}>
+                                {w.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-slate-400">
+                              {new Date(w.createdAt).toLocaleDateString()}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button 
+                                onClick={() => {
+                                  setSelectedWithdrawal(w);
+                                  setModalAction('view_withdrawal');
+                                }}
+                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded-lg transition-colors"
+                              >
+                                👁 View Details
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === '🎫 Support' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  🎫 Support Manager
+                </h2>
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                  <input
+                    type="text"
+                    placeholder="Search ID, Username..."
+                    value={ticketSearch}
+                    onChange={e => setTicketSearch(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full md:w-64"
+                  />
+                  <button
+                    onClick={fetchTickets}
+                    disabled={ticketsLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 border border-slate-700 shrink-0"
+                  >
+                    🔄 Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">🟡 Open</h3>
+                  <p className="text-2xl font-bold text-yellow-400">{tickets.filter(t => t.status === 'open').length}</p>
+                </div>
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">💬 Replied</h3>
+                  <p className="text-2xl font-bold text-blue-400">{tickets.filter(t => t.status === 'replied').length}</p>
+                </div>
+                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">🟢 Resolved</h3>
+                  <p className="text-2xl font-bold text-emerald-400">{tickets.filter(t => t.status === 'resolved').length}</p>
+                </div>
+                <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">🔴 Closed</h3>
+                  <p className="text-2xl font-bold text-red-400">{tickets.filter(t => t.status === 'closed').length}</p>
+                </div>
+              </div>
+
+              {ticketsLoading ? (
+                <div className="flex justify-center items-center py-10">
+                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : ticketsError ? (
+                <div className="text-red-400 p-4 bg-red-500/10 rounded-xl">{ticketsError}</div>
+              ) : tickets.length === 0 ? (
+                <div className="text-center p-8 bg-slate-900/50 rounded-2xl border border-slate-800 text-slate-400">
+                  No support tickets found.
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                        <tr>
+                          <th className="px-4 py-3">ID</th>
+                          <th className="px-4 py-3">User</th>
+                          <th className="px-4 py-3">Issue Type</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Date</th>
+                          <th className="px-4 py-3 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tickets
+                          .filter(t => 
+                            ticketSearch === "" || 
+                            t.id.toLowerCase().includes(ticketSearch.toLowerCase()) || 
+                            String(t.userId).includes(ticketSearch) || 
+                            (t.username || "").toLowerCase().includes(ticketSearch.toLowerCase())
+                          )
+                          .map((t: any) => (
+                          <tr key={t.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+                            <td className="px-4 py-3 font-mono text-xs">{t.id.substring(0, 8)}...</td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-white">{t.name}</div>
+                              <div className="text-xs text-slate-500">@{t.username || 'unknown'}</div>
+                            </td>
+                            <td className="px-4 py-3 font-medium">{t.issueType}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                t.status === 'open' ? 'bg-yellow-500/20 text-yellow-400' :
+                                t.status === 'replied' ? 'bg-blue-500/20 text-blue-400' :
+                                t.status === 'resolved' ? 'bg-emerald-500/20 text-emerald-400' :
+                                'bg-red-500/20 text-red-400'
+                              }`}>
+                                {t.status === 'open' ? '🟡 Open' : 
+                                 t.status === 'replied' ? '💬 Replied' : 
+                                 t.status === 'resolved' ? '🟢 Resolved' : '🔴 Closed'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-slate-400">
+                              {new Date(t.createdAt).toLocaleDateString()}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button 
+                                onClick={() => {
+                                  setSelectedTicket(t);
+                                  setModalAction('view_ticket');
+                                }}
+                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded-lg transition-colors"
+                              >
+                                👁 View Ticket
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === '📢 Announcements' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  📢 Announcement Manager
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button
+                    onClick={() => {
+                      setAnnouncementForm({
+                        title: "", message: "", imageUrl: "", videoUrl: "", buttonText: "", buttonLink: "", type: "📢 Update", priority: "🟢 Normal", status: "Published", scheduledAt: ""
+                      });
+                      setModalAction('create_announcement');
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-all"
+                  >
+                    ➕ Create Announcement
+                  </button>
+                  <button
+                    onClick={fetchAnnouncements}
+                    disabled={announcementsLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 border border-slate-700"
+                  >
+                    🔄 Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">📢 Total</h3>
+                  <p className="text-2xl font-bold text-white">{announcements.length}</p>
+                </div>
+                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">🟢 Published</h3>
+                  <p className="text-2xl font-bold text-emerald-400">{announcements.filter(a => a.status === 'Published').length}</p>
+                </div>
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">🟡 Scheduled</h3>
+                  <p className="text-2xl font-bold text-yellow-400">{announcements.filter(a => a.status === 'Scheduled').length}</p>
+                </div>
+                <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">🔴 Drafts</h3>
+                  <p className="text-2xl font-bold text-red-400">{announcements.filter(a => a.status === 'Draft').length}</p>
+                </div>
+              </div>
+
+              {announcementsLoading ? (
+                <div className="flex justify-center items-center py-10">
+                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : announcementsError ? (
+                <div className="text-red-400 p-4 bg-red-500/10 rounded-xl">{announcementsError}</div>
+              ) : announcements.length === 0 ? (
+                <div className="text-center p-8 bg-slate-900/50 rounded-2xl border border-slate-800 text-slate-400">
+                  No announcements found.
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                        <tr>
+                          <th className="px-4 py-3">ID</th>
+                          <th className="px-4 py-3">Title</th>
+                          <th className="px-4 py-3">Type</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Views</th>
+                          <th className="px-4 py-3">Date</th>
+                          <th className="px-4 py-3 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {announcements.map((a: any) => (
+                          <tr key={a.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+                            <td className="px-4 py-3 font-mono text-xs">{a.id.substring(0, 8)}...</td>
+                            <td className="px-4 py-3 font-medium text-white">{a.title}</td>
+                            <td className="px-4 py-3">{a.type}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                a.status === 'Published' ? 'bg-emerald-500/20 text-emerald-400' :
+                                a.status === 'Scheduled' ? 'bg-yellow-500/20 text-yellow-400' :
+                                'bg-slate-500/20 text-slate-400'
+                              }`}>
+                                {a.status === 'Published' ? '🟢 Published' : 
+                                 a.status === 'Scheduled' ? '🟡 Scheduled' : '🔴 Draft'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 font-medium text-blue-400">{a.viewCount || 0}</td>
+                            <td className="px-4 py-3 text-xs text-slate-400">
+                              {new Date(a.createdAt).toLocaleDateString()}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button 
+                                  onClick={() => {
+                                    setAnnouncementForm(a);
+                                    setModalAction('view_announcement');
+                                  }}
+                                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
+                                  title="View/Edit"
+                                >
+                                  👁
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    if (confirm('Are you sure you want to delete this announcement?')) {
+                                      // inline delete for simplicity since it's just one request
+                                      fetch(`/api/admin/announcements/${a.id}`, { method: 'DELETE' }).then(() => fetchAnnouncements());
+                                    }
+                                  }}
+                                  className="p-1.5 bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded-lg transition-colors"
+                                  title="Delete"
+                                >
+                                  🗑
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {activeTab === '💰 Rewards' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  💰 Reward Task Manager
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button
+                    onClick={() => {
+                      setTaskForm({
+                        title: "", description: "", rewardAmount: "", timerDuration: "", totalPages: "", imageUrl: "", status: "🟢 Active"
+                      });
+                      setModalAction('create_task');
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-all"
+                  >
+                    ➕ Create Task
+                  </button>
+                  <button
+                    onClick={() => setTaskView('tasks')}
+                    className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${taskView === 'tasks' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                  >
+                    📋 View Tasks
+                  </button>
+                  <button
+                    onClick={() => {
+                      setTaskView('stats');
+                      fetchTaskLogs();
+                    }}
+                    className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${taskView === 'stats' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                  >
+                    📊 Task Statistics
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (taskView === 'tasks') fetchTasks();
+                      else fetchTaskLogs();
+                    }}
+                    disabled={tasksLoading || taskLogsLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 border border-slate-700"
+                  >
+                    🔄 Refresh
+                  </button>
+                </div>
+              </div>
+
+              {taskView === 'tasks' && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">📋 Total Tasks</h3>
+                      <p className="text-2xl font-bold text-white">{tasks.length}</p>
+                    </div>
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">🟢 Active Tasks</h3>
+                      <p className="text-2xl font-bold text-emerald-400">{tasks.filter(t => t.status === '🟢 Active').length}</p>
+                    </div>
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">🔴 Disabled Tasks</h3>
+                      <p className="text-2xl font-bold text-red-400">{tasks.filter(t => t.status === '🔴 Disabled').length}</p>
+                    </div>
+                  </div>
+
+                  {tasksLoading ? (
+                    <div className="flex justify-center items-center py-10">
+                      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                  ) : tasksError ? (
+                    <div className="text-red-400 p-4 bg-red-500/10 rounded-xl">{tasksError}</div>
+                  ) : tasks.length === 0 ? (
+                    <div className="text-center p-8 bg-slate-900/50 rounded-2xl border border-slate-800 text-slate-400">
+                      No tasks found.
+                    </div>
+                  ) : (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm text-slate-300">
+                          <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                            <tr>
+                              <th className="px-4 py-3">Task ID</th>
+                              <th className="px-4 py-3">📝 Task Name</th>
+                              <th className="px-4 py-3">💰 Reward</th>
+                              <th className="px-4 py-3">📄 Pages</th>
+                              <th className="px-4 py-3">📌 Status</th>
+                              <th className="px-4 py-3 text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tasks.map((t: any) => (
+                              <tr key={t.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+                                <td className="px-4 py-3 font-mono text-xs">{t.id.substring(0, 8)}...</td>
+                                <td className="px-4 py-3 font-medium text-white">{t.title}</td>
+                                <td className="px-4 py-3 font-medium text-yellow-400">₹{t.rewardAmount}</td>
+                                <td className="px-4 py-3">{t.totalPages}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                    t.status === '🟢 Active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                                  }`}>
+                                    {t.status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button 
+                                      onClick={() => {
+                                        setTaskForm(t);
+                                        setModalAction('view_task');
+                                      }}
+                                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
+                                      title="View"
+                                    >
+                                      👁
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        setTaskForm(t);
+                                        setModalAction('edit_task');
+                                      }}
+                                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
+                                      title="Edit"
+                                    >
+                                      ✏️
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        const newStatus = t.status === '🟢 Active' ? '🔴 Disabled' : '🟢 Active';
+                                        fetch(`/api/admin/tasks/${t.id}`, { 
+                                          method: 'PUT', 
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ status: newStatus }) 
+                                        }).then(() => fetchTasks());
+                                      }}
+                                      className={`p-1.5 rounded-lg transition-colors ${t.status === '🟢 Active' ? 'bg-red-900/30 hover:bg-red-900/50 text-red-400' : 'bg-emerald-900/30 hover:bg-emerald-900/50 text-emerald-400'}`}
+                                      title={t.status === '🟢 Active' ? 'Disable' : 'Enable'}
+                                    >
+                                      {t.status === '🟢 Active' ? '🔴' : '🟢'}
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        if (confirm('Are you sure you want to delete this task?')) {
+                                          fetch(`/api/admin/tasks/${t.id}`, { method: 'DELETE' }).then(() => fetchTasks());
+                                        }
+                                      }}
+                                      className="p-1.5 bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded-lg transition-colors"
+                                      title="Delete"
+                                    >
+                                      🗑
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {taskView === 'stats' && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">👥 Total Participants</h3>
+                      <p className="text-2xl font-bold text-white">{taskLogs.length}</p>
+                    </div>
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">✅ Completed</h3>
+                      <p className="text-2xl font-bold text-emerald-400">{taskLogs.filter(l => l.status === 'completed').length}</p>
+                    </div>
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">❌ Failed</h3>
+                      <p className="text-2xl font-bold text-red-400">{taskLogs.filter(l => l.status === 'failed').length}</p>
+                    </div>
+                    <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">💰 Rewards Distributed</h3>
+                      <p className="text-2xl font-bold text-yellow-400">₹{taskLogs.filter(l => l.status === 'completed').reduce((sum, l) => sum + (Number(l.rewardEarned) || 0), 0)}</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                    <div className="p-4 border-b border-slate-800 bg-slate-950/50">
+                      <h3 className="font-bold text-white">Task Completion Logs</h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm text-slate-300">
+                        <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                          <tr>
+                            <th className="px-4 py-3">📅 Date</th>
+                            <th className="px-4 py-3">👤 User</th>
+                            <th className="px-4 py-3">📋 Task</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3">💰 Earned</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {taskLogsLoading ? (
+                            <tr><td colSpan={5} className="text-center py-8"><div className="inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></td></tr>
+                          ) : taskLogs.length === 0 ? (
+                            <tr><td colSpan={5} className="text-center py-8 text-slate-500">No logs found</td></tr>
+                          ) : (
+                            taskLogs.map((log: any) => (
+                              <tr key={log.id} className="border-b border-slate-800/50">
+                                <td className="px-4 py-3 text-xs text-slate-400">{new Date(log.completedAt || log.createdAt).toLocaleString()}</td>
+                                <td className="px-4 py-3">
+                                  <p className="font-medium text-white">{log.userName || 'Unknown'}</p>
+                                  <p className="text-xs font-mono text-slate-500">{log.userId?.substring(0, 8)}</p>
+                                </td>
+                                <td className="px-4 py-3 text-white">{log.taskName || log.taskId}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                    log.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                                  }`}>
+                                    {log.status === 'completed' ? '✅ Completed' : '❌ Failed'}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 font-medium text-yellow-400">
+                                  {log.status === 'completed' ? `₹${log.rewardEarned}` : '-'}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {activeTab === '🎁 Daily Bonus' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  🎁 Daily Bonus Manager
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button onClick={() => setBonusView('settings')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'settings' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>⚙️ Bonus Settings</button>
+                  <button onClick={() => setBonusView('rewards')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'rewards' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🎡 Spin Rewards</button>
+                  <button onClick={() => setBonusView('stats')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'stats' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 Statistics</button>
+                  <button onClick={() => setBonusView('history')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'history' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📜 Claim History</button>
+                  <button onClick={() => { if(bonusView === 'history') fetchBonusHistory(); else fetchBonusSettings(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700">🔄 Refresh</button>
+                </div>
+              </div>
+
+              {bonusSettingsLoading && bonusView !== 'history' ? (
+                <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+              ) : bonusView === 'settings' && bonusSettings ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl">
+                  <h3 className="text-lg font-bold text-white mb-6 border-b border-slate-800 pb-4">⚙️ General Settings</h3>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
+                      <div>
+                        <p className="font-bold text-white">Daily Bonus System</p>
+                        <p className="text-sm text-slate-400">Enable or disable the entire daily bonus feature</p>
+                      </div>
+                      <button 
+                        onClick={() => saveBonusSettings({...bonusSettings, dailyBonusEnabled: !bonusSettings.dailyBonusEnabled})}
+                        className={`px-4 py-2 font-bold rounded-xl transition-all ${bonusSettings.dailyBonusEnabled ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'}`}
+                      >
+                        {bonusSettings.dailyBonusEnabled ? '🟢 Enabled' : '🔴 Disabled'}
+                      </button>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">🎡 Free Spins Per Day</label>
+                      <input type="number" value={bonusSettings.freeSpinsPerDay} onChange={e => setBonusSettings({...bonusSettings, freeSpinsPerDay: Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">🕒 Reset Time (UTC)</label>
+                      <input type="time" value={bonusSettings.resetTime} onChange={e => setBonusSettings({...bonusSettings, resetTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">⏱ Claim Timer (seconds delay between spins)</label>
+                      <input type="number" value={bonusSettings.claimTimer} onChange={e => setBonusSettings({...bonusSettings, claimTimer: Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white" />
+                    </div>
+                    <div className="pt-4">
+                      <button onClick={() => saveBonusSettings(bonusSettings)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all">
+                        💾 Save Settings
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : bonusView === 'rewards' && bonusSettings ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-lg font-bold text-white">🎡 Wheel Rewards</h3>
+                    <button onClick={() => {
+                      const newRewards = [...(bonusSettings.rewardList || []), { id: Date.now().toString(), amount: "0.00", probability: "0", status: "Active" }];
+                      setBonusSettings({...bonusSettings, rewardList: newRewards});
+                    }} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl text-sm">➕ Add Reward</button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                        <tr>
+                          <th className="px-4 py-3">Reward Amount (₹)</th>
+                          <th className="px-4 py-3">Probability %</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(bonusSettings.rewardList || []).map((reward: any, idx: number) => (
+                          <tr key={reward.id} className="border-b border-slate-800/50">
+                            <td className="px-4 py-3">
+                              <input type="text" value={reward.amount} onChange={e => {
+                                const newRewards = [...bonusSettings.rewardList];
+                                newRewards[idx].amount = e.target.value;
+                                setBonusSettings({...bonusSettings, rewardList: newRewards});
+                              }} className="w-24 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white" />
+                            </td>
+                            <td className="px-4 py-3">
+                              <input type="text" value={reward.probability} onChange={e => {
+                                const newRewards = [...bonusSettings.rewardList];
+                                newRewards[idx].probability = e.target.value;
+                                setBonusSettings({...bonusSettings, rewardList: newRewards});
+                              }} className="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white" />
+                            </td>
+                            <td className="px-4 py-3">
+                              <select value={reward.status} onChange={e => {
+                                const newRewards = [...bonusSettings.rewardList];
+                                newRewards[idx].status = e.target.value;
+                                setBonusSettings({...bonusSettings, rewardList: newRewards});
+                              }} className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-xs">
+                                <option>Active</option>
+                                <option>Disabled</option>
+                              </select>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button onClick={() => {
+                                const newRewards = bonusSettings.rewardList.filter((_: any, i: number) => i !== idx);
+                                setBonusSettings({...bonusSettings, rewardList: newRewards});
+                              }} className="text-red-400 hover:text-red-300 p-1">🗑</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <button onClick={() => saveBonusSettings(bonusSettings)} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all">
+                      💾 Save Rewards
+                    </button>
+                  </div>
+                </div>
+              ) : bonusView === 'stats' && bonusSettings ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">🎡 Total Spins</h3>
+                    <p className="text-2xl font-bold text-white">{bonusSettings.totalSpins || 0}</p>
+                  </div>
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">💰 Total Rewards Given</h3>
+                    <p className="text-2xl font-bold text-yellow-400">₹{bonusSettings.totalRewardsDistributed?.toFixed(2) || "0.00"}</p>
+                  </div>
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">👥 Unique Users</h3>
+                    <p className="text-2xl font-bold text-blue-400">{new Set(bonusHistory.map(h => h.userId)).size}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">📅 Today's Claims</h3>
+                    <p className="text-2xl font-bold text-emerald-400">{bonusHistory.filter(h => new Date(h.date).toDateString() === new Date().toDateString()).length}</p>
+                  </div>
+                </div>
+              ) : bonusView === 'history' ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex flex-wrap gap-4 items-center justify-between">
+                    <h3 className="font-bold text-white">📜 Claim History</h3>
+                    <input type="text" placeholder="Search User ID or Name..." value={bonusSearch} onChange={e => setBonusSearch(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500" />
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                        <tr>
+                          <th className="px-4 py-3">📅 Date & Time</th>
+                          <th className="px-4 py-3">👤 User</th>
+                          <th className="px-4 py-3">🆔 User ID</th>
+                          <th className="px-4 py-3">💰 Reward Won</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bonusHistoryLoading ? (
+                          <tr><td colSpan={4} className="text-center py-8"><div className="inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></td></tr>
+                        ) : bonusHistory.filter(h => !bonusSearch || h.userId?.includes(bonusSearch) || h.userName?.toLowerCase().includes(bonusSearch.toLowerCase())).length === 0 ? (
+                          <tr><td colSpan={4} className="text-center py-8 text-slate-500">No history found</td></tr>
+                        ) : (
+                          bonusHistory.filter(h => !bonusSearch || h.userId?.includes(bonusSearch) || h.userName?.toLowerCase().includes(bonusSearch.toLowerCase())).map((h: any) => (
+                            <tr key={h.id} className="border-b border-slate-800/50">
+                              <td className="px-4 py-3 text-xs text-slate-400">{new Date(h.date).toLocaleString()}</td>
+                              <td className="px-4 py-3 font-medium text-white">{h.userName || 'Unknown'}</td>
+                              <td className="px-4 py-3 font-mono text-xs text-slate-500">{h.userId}</td>
+                              <td className="px-4 py-3 font-bold text-yellow-400">₹{h.amount}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+          {activeTab === '👥 Users' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  👥 User Manager
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button onClick={() => setUserView('all')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${userView === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📋 All Users</button>
+                  <button onClick={() => setUserView('banned')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${userView === 'banned' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🚫 Banned Users</button>
+                  <button onClick={() => setUserView('stats')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${userView === 'stats' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 User Statistics</button>
+                  <button onClick={fetchUsers} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700">🔄 Refresh</button>
+                </div>
+              </div>
+
+              {usersLoading ? (
+                <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+              ) : userView === 'stats' ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">👥 Total Users</h3>
+                    <p className="text-2xl font-bold text-white">{users.length}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">🟢 Active Users</h3>
+                    <p className="text-2xl font-bold text-emerald-400">{users.filter(u => u.status !== 'Banned').length}</p>
+                  </div>
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">🔴 Banned Users</h3>
+                    <p className="text-2xl font-bold text-red-400">{users.filter(u => u.status === 'Banned').length}</p>
+                  </div>
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">💰 Total Balance</h3>
+                    <p className="text-2xl font-bold text-blue-400">₹{users.reduce((acc, u) => acc + Number(u.availableBalance || 0), 0).toFixed(2)}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex flex-wrap gap-4 items-center justify-between">
+                    <h3 className="font-bold text-white">{userView === 'banned' ? '🚫 Banned Users' : '📋 All Users'}</h3>
+                    <div className="flex items-center bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 w-full md:w-auto">
+                      <span className="text-slate-400 mr-2">🔍</span>
+                      <input type="text" placeholder="Search by ID, Username, Phone..." value={userSearch} onChange={e => setUserSearch(e.target.value)} className="bg-transparent text-sm text-white focus:outline-none w-full md:w-64" />
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                        <tr>
+                          <th className="px-4 py-3">👤 User Info</th>
+                          <th className="px-4 py-3">💰 Balance</th>
+                          <th className="px-4 py-3">📈 Stats</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {users.filter(u => userView === 'banned' ? u.status === 'Banned' : true).filter(u => !userSearch || u.id?.includes(userSearch) || u.username?.toLowerCase().includes(userSearch.toLowerCase()) || u.phone?.includes(userSearch) || u.name?.toLowerCase().includes(userSearch.toLowerCase())).length === 0 ? (
+                          <tr><td colSpan={5} className="text-center py-8 text-slate-500">No users found</td></tr>
+                        ) : (
+                          users.filter(u => userView === 'banned' ? u.status === 'Banned' : true).filter(u => !userSearch || u.id?.includes(userSearch) || u.username?.toLowerCase().includes(userSearch.toLowerCase()) || u.phone?.includes(userSearch) || u.name?.toLowerCase().includes(userSearch.toLowerCase())).map((u: any) => (
+                            <tr key={u.id} className="border-b border-slate-800/50 hover:bg-slate-800/20">
+                              <td className="px-4 py-3">
+                                <div className="font-medium text-white">{u.name || 'Unknown'}</div>
+                                <div className="text-xs text-slate-400">@{u.username || 'N/A'}</div>
+                                <div className="font-mono text-xs text-slate-500 mt-1">{u.id}</div>
+                                {u.phone && <div className="text-xs text-slate-400 mt-0.5">📱 {u.phone}</div>}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="font-bold text-emerald-400">₹{Number(u.availableBalance || 0).toFixed(2)}</div>
+                                <div className="text-xs text-yellow-400">🎁 ₹{Number(u.bonusBalance || 0).toFixed(2)}</div>
+                              </td>
+                              <td className="px-4 py-3 text-xs space-y-1">
+                                <div>📤 {u.uploads || 0} files</div>
+                                <div>🔗 {u.links || 0} links</div>
+                                <div>👥 {u.referrals || 0} refs</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded text-xs font-bold ${u.status === 'Banned' ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                                  {u.status === 'Banned' ? '🚫 Banned' : '🟢 Active'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <button onClick={() => { setSelectedUser(u); setModalAction('view_user'); }} className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-xs font-medium transition-colors">
+                                  View Details
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {activeTab === '📢 Ads Manager' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  📢 Advertisement Manager
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button onClick={() => setAdView('ads')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${adView === 'ads' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📋 View Ads</button>
+                  <button onClick={() => setAdView('analytics')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${adView === 'analytics' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 Ad Analytics</button>
+                  <button onClick={() => window.open('/ad-test', '_blank')} className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-purple-900/20">🧪 Debug Mode</button>
+                  <button onClick={() => { setShowAdPreview(false); setAdForm({ adName: "", adSource: "Adsterra", adType: "Banner Ad", targetPage: "All Pages", placement: "Header Banner", status: "🟢 Active", scriptCode: "", revenue: 0 }); setModalAction('create_ad'); }} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20">➕ Create Ad</button>
+                  <button onClick={() => { fetchAds(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700">🔄 Refresh</button>
+                </div>
+              </div>
+
+              {adsLoading && adView !== 'placement' ? (
+                <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+              ) : adView === 'analytics' ? (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">👀 Total Views</h3>
+                      <p className="text-2xl font-bold text-white">{ads.reduce((acc, ad) => acc + Number(ad.views || 0), 0)}</p>
+                    </div>
+                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">🖱 Total Clicks</h3>
+                      <p className="text-2xl font-bold text-blue-400">{ads.reduce((acc, ad) => acc + Number(ad.clicks || 0), 0)}</p>
+                    </div>
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">📈 CTR</h3>
+                      <p className="text-2xl font-bold text-emerald-400">
+                        {(() => {
+                          const v = ads.reduce((acc, ad) => acc + Number(ad.views || 0), 0);
+                          const c = ads.reduce((acc, ad) => acc + Number(ad.clicks || 0), 0);
+                          return v > 0 ? ((c / v) * 100).toFixed(2) + '%' : '0.00%';
+                        })()}
+                      </p>
+                    </div>
+                    <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-purple-500/80 uppercase tracking-wider mb-1">💵 Revenue</h3>
+                      <p className="text-2xl font-bold text-purple-400">${ads.reduce((acc, ad) => acc + Number(ad.revenue || 0), 0).toFixed(2)}</p>
+                    </div>
+                    <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">🟢 Active Ads</h3>
+                      <p className="text-2xl font-bold text-yellow-400">{ads.filter(ad => ad.status === '🟢 Active').length}</p>
+                    </div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                    <h3 className="text-lg font-bold text-white mb-4">🏆 Top Performing Ads</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm text-slate-300">
+                        <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                          <tr>
+                            <th className="px-4 py-3">Ad Name</th>
+                            <th className="px-4 py-3">Views</th>
+                            <th className="px-4 py-3">Clicks</th>
+                            <th className="px-4 py-3">CTR</th>
+                            <th className="px-4 py-3">Revenue</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...ads].sort((a, b) => (Number(b.clicks) || 0) - (Number(a.clicks) || 0)).slice(0, 5).map(ad => {
+                            const v = Number(ad.views || 0);
+                            const c = Number(ad.clicks || 0);
+                            const ctr = v > 0 ? ((c / v) * 100).toFixed(2) + '%' : '0.00%';
+                            return (
+                              <tr key={ad.id} className="border-b border-slate-800/50">
+                                <td className="px-4 py-3 font-medium text-white">{ad.adName}</td>
+                                <td className="px-4 py-3">{v}</td>
+                                <td className="px-4 py-3 text-blue-400">{c}</td>
+                                <td className="px-4 py-3 text-emerald-400">{ctr}</td>
+                                <td className="px-4 py-3 text-purple-400">${Number(ad.revenue || 0).toFixed(2)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                        <tr>
+                          <th className="px-4 py-3">Ad Name</th>
+                          <th className="px-4 py-3">Ad Source</th>
+                          <th className="px-4 py-3">Page & Placement</th>
+                          <th className="px-4 py-3">Stats (V / C / CTR)</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ads.length === 0 ? (
+                          <tr><td colSpan={6} className="text-center py-8 text-slate-500">No ads found. Create one!</td></tr>
+                        ) : (
+                          ads.map(ad => {
+                            const views = Number(ad.views) || 0;
+                            const clicks = Number(ad.clicks) || 0;
+                            const ctr = views > 0 ? ((clicks / views) * 100).toFixed(2) : "0.00";
+                            return (
+                              <tr key={ad.id} className="border-b border-slate-800/50 hover:bg-slate-800/20">
+                                <td className="px-4 py-3">
+                                  <div className="font-bold text-white">{ad.adName}</div>
+                                  <div className="text-xs text-slate-400 font-mono mt-0.5">{ad.id}</div>
+                                </td>
+                                <td className="px-4 py-3 text-xs">{ad.adSource}</td>
+                                <td className="px-4 py-3 text-xs">
+                                  <div className="font-bold text-slate-200">{ad.targetPage || 'All Pages'}</div>
+                                  <div className="text-slate-400 mt-0.5">{ad.placement}</div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex gap-3 text-xs font-medium">
+                                    <span className="text-slate-400">👀 {views}</span>
+                                    <span className="text-blue-400">🖱 {clicks}</span>
+                                    <span className="text-emerald-400">📈 {ctr}%</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`px-2 py-1 rounded text-xs font-bold ${ad.status === '🟢 Active' ? 'bg-emerald-500/20 text-emerald-400' : ad.status === '🟡 Paused' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>
+                                    {ad.status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right space-x-2">
+                                  <button onClick={() => { setShowAdPreview(false); setAdForm(ad); setModalAction('edit_ad'); }} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 text-xs transition-colors">✏️ Edit</button>
+                                  <button onClick={async () => {
+                                    if(confirm('Delete ad?')) {
+                                      await fetch(`/api/admin/ads/${ad.id}`, { method: 'DELETE' });
+                                      fetchAds();
+                                    }
+                                  }} className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded border border-red-500/20 text-xs transition-colors">🗑 Delete</button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {activeTab === '📈 Analytics' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  📈 RoyShare Analytics Center
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button onClick={() => setAnalyticsView('Overview')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${analyticsView === 'Overview' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 Overview</button>
+                  <button onClick={() => setAnalyticsView('User Analytics')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${analyticsView === 'User Analytics' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 User Analytics</button>
+                  <button onClick={() => setAnalyticsView('Earnings Analytics')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${analyticsView === 'Earnings Analytics' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>💰 Earnings Analytics</button>
+                  <button onClick={() => setAnalyticsView('Withdrawal Analytics')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${analyticsView === 'Withdrawal Analytics' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>💸 Withdrawal Analytics</button>
+                  <button onClick={() => setAnalyticsView('Upload Analytics')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${analyticsView === 'Upload Analytics' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📤 Upload Analytics</button>
+                  <button onClick={() => setAnalyticsView('Referral Analytics')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${analyticsView === 'Referral Analytics' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>👥 Referral Analytics</button>
+                  <button onClick={() => setAnalyticsView('Ad Analytics')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${analyticsView === 'Ad Analytics' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📢 Ad Analytics</button>
+                  <button onClick={() => alert('Export functionality to be implemented')} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20">📥 Export Reports</button>
+                  <button onClick={fetchAnalytics} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700">🔄 Refresh</button>
+                </div>
+              </div>
+
+              {analyticsLoading || !analyticsData ? (
+                <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+              ) : analyticsView === 'Overview' ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">👥 Total Users</h3>
+                    <p className="text-2xl font-bold text-white">{analyticsData.overview?.totalUsers}</p>
+                  </div>
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">📤 Total Uploads</h3>
+                    <p className="text-2xl font-bold text-white">{analyticsData.overview?.totalUploads}</p>
+                  </div>
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">🔗 Total Links</h3>
+                    <p className="text-2xl font-bold text-white">{analyticsData.overview?.totalLinks}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">💰 Total Earnings</h3>
+                    <p className="text-2xl font-bold text-emerald-400">${Number(analyticsData.overview?.totalEarnings || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">💸 Total Withdrawals</h3>
+                    <p className="text-2xl font-bold text-red-400">{analyticsData.overview?.totalWithdrawals}</p>
+                  </div>
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">🎁 Total Bonus Claims</h3>
+                    <p className="text-2xl font-bold text-yellow-400">{analyticsData.overview?.totalBonusClaims}</p>
+                  </div>
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">💰 Total Reward Claims</h3>
+                    <p className="text-2xl font-bold text-blue-400">{analyticsData.overview?.totalRewardClaims}</p>
+                  </div>
+                  <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-purple-500/80 uppercase tracking-wider mb-1">👥 Total Referrals</h3>
+                    <p className="text-2xl font-bold text-purple-400">{analyticsData.overview?.totalReferrals}</p>
+                  </div>
+                </div>
+              ) : analyticsView === 'User Analytics' ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">👥 Total Users</h3>
+                    <p className="text-2xl font-bold text-white">{analyticsData.userAnalytics?.totalUsers}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">🟢 Active Users</h3>
+                    <p className="text-2xl font-bold text-emerald-400">{analyticsData.userAnalytics?.activeUsers}</p>
+                  </div>
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">🆕 New Users Today</h3>
+                    <p className="text-2xl font-bold text-blue-400">{analyticsData.userAnalytics?.newUsersToday}</p>
+                  </div>
+                  <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-purple-500/80 uppercase tracking-wider mb-1">📅 New This Week</h3>
+                    <p className="text-2xl font-bold text-purple-400">{analyticsData.userAnalytics?.newUsersThisWeek}</p>
+                  </div>
+                </div>
+              ) : analyticsView === 'Earnings Analytics' ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">Today's Earnings</h3>
+                    <p className="text-2xl font-bold text-emerald-400">${Number(analyticsData.earningsAnalytics?.todayEarnings || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">Weekly Earnings</h3>
+                    <p className="text-2xl font-bold text-emerald-400">${Number(analyticsData.earningsAnalytics?.weeklyEarnings || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">Monthly Earnings</h3>
+                    <p className="text-2xl font-bold text-emerald-400">${Number(analyticsData.earningsAnalytics?.monthlyEarnings || 0).toFixed(2)}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">Lifetime Earnings</h3>
+                    <p className="text-2xl font-bold text-emerald-400">${Number(analyticsData.earningsAnalytics?.lifetimeEarnings || 0).toFixed(2)}</p>
+                  </div>
+                </div>
+              ) : analyticsView === 'Withdrawal Analytics' ? (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">Pending</h3>
+                    <p className="text-2xl font-bold text-yellow-400">{analyticsData.withdrawalAnalytics?.pendingWithdrawals}</p>
+                  </div>
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">Approved</h3>
+                    <p className="text-2xl font-bold text-blue-400">{analyticsData.withdrawalAnalytics?.approvedWithdrawals}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">Paid</h3>
+                    <p className="text-2xl font-bold text-emerald-400">{analyticsData.withdrawalAnalytics?.paidWithdrawals}</p>
+                  </div>
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">Rejected</h3>
+                    <p className="text-2xl font-bold text-red-400">{analyticsData.withdrawalAnalytics?.rejectedWithdrawals}</p>
+                  </div>
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-indigo-500/80 uppercase tracking-wider mb-1">Total Amount</h3>
+                    <p className="text-2xl font-bold text-indigo-400">${Number(analyticsData.withdrawalAnalytics?.totalWithdrawAmount || 0).toFixed(2)}</p>
+                  </div>
+                </div>
+              ) : analyticsView === 'Upload Analytics' ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Uploaded Today</h3>
+                    <p className="text-2xl font-bold text-white">{analyticsData.uploadAnalytics?.filesUploadedToday}</p>
+                  </div>
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Uploaded This Week</h3>
+                    <p className="text-2xl font-bold text-white">{analyticsData.uploadAnalytics?.filesUploadedThisWeek}</p>
+                  </div>
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Uploaded This Month</h3>
+                    <p className="text-2xl font-bold text-white">{analyticsData.uploadAnalytics?.filesUploadedThisMonth}</p>
+                  </div>
+                </div>
+              ) : analyticsView === 'Referral Analytics' ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-purple-500/80 uppercase tracking-wider mb-1">Total Referrals</h3>
+                    <p className="text-2xl font-bold text-purple-400">{analyticsData.referralAnalytics?.totalReferrals}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">Valid Referrals</h3>
+                    <p className="text-2xl font-bold text-emerald-400">{analyticsData.referralAnalytics?.validReferrals}</p>
+                  </div>
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">Rejected Referrals</h3>
+                    <p className="text-2xl font-bold text-red-400">{analyticsData.referralAnalytics?.rejectedReferrals}</p>
+                  </div>
+                </div>
+              ) : analyticsView === 'Ad Analytics' ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">Total Ad Views</h3>
+                    <p className="text-2xl font-bold text-blue-400">{analyticsData.adAnalytics?.totalAdViews}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">Total Ad Clicks</h3>
+                    <p className="text-2xl font-bold text-emerald-400">{analyticsData.adAnalytics?.totalAdClicks}</p>
+                  </div>
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">Overall CTR</h3>
+                    <p className="text-2xl font-bold text-yellow-400">{analyticsData.adAnalytics?.ctr}</p>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+          {activeTab === '📢 Broadcast' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  📢 Broadcast Center
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button onClick={() => { setBroadcastTab('📝 Text Broadcast'); setBroadcastForm({...broadcastForm, type: 'text'}); }} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${broadcastTab === '📝 Text Broadcast' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📝 Text</button>
+                  <button onClick={() => { setBroadcastTab('🖼 Image Broadcast'); setBroadcastForm({...broadcastForm, type: 'image'}); }} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${broadcastTab === '🖼 Image Broadcast' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🖼 Image</button>
+                  <button onClick={() => { setBroadcastTab('🎥 Video Broadcast'); setBroadcastForm({...broadcastForm, type: 'video'}); }} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${broadcastTab === '🎥 Video Broadcast' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🎥 Video</button>
+                  <button onClick={() => { setBroadcastTab('📄 Document Broadcast'); setBroadcastForm({...broadcastForm, type: 'document'}); }} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${broadcastTab === '📄 Document Broadcast' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📄 Document</button>
+                  <button onClick={() => setBroadcastTab('🎯 Targeted Broadcast')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${broadcastTab === '🎯 Targeted Broadcast' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🎯 Targeted</button>
+                  <button onClick={() => setBroadcastTab('📊 Broadcast History')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${broadcastTab === '📊 Broadcast History' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 History</button>
+                </div>
+              </div>
+
+              {broadcastTab === '📊 Broadcast History' ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  {broadcastsLoading ? (
+                    <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm text-slate-300">
+                        <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                          <tr>
+                            <th className="px-4 py-3">Type</th>
+                            <th className="px-4 py-3">Date</th>
+                            <th className="px-4 py-3">Target</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3">Stats (Delivered / Failed)</th>
+                            <th className="px-4 py-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {broadcasts.length === 0 ? (
+                            <tr><td colSpan={6} className="text-center py-8 text-slate-500">No broadcast history found.</td></tr>
+                          ) : (
+                            broadcasts.map((b: any) => (
+                              <tr key={b.id} className="border-b border-slate-800/50 hover:bg-slate-800/20">
+                                <td className="px-4 py-3 font-medium text-white">{b.type.toUpperCase()}</td>
+                                <td className="px-4 py-3 text-xs">{new Date(b.createdAt).toLocaleString()}</td>
+                                <td className="px-4 py-3 text-xs">{b.targetAudience}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`px-2 py-1 rounded text-xs font-bold ${b.status === 'Sent' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                                    {b.status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex gap-2 text-xs">
+                                    <span className="text-emerald-400">✅ {b.deliveredCount}</span>
+                                    <span className="text-red-400">❌ {b.failedCount}</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-right space-x-2">
+                                  <button onClick={async () => {
+                                    if(confirm('Delete broadcast history?')) {
+                                      await fetch(`/api/admin/broadcasts/${b.id}`, { method: 'DELETE' });
+                                      fetchBroadcasts();
+                                    }
+                                  }} className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded border border-red-500/20 text-xs transition-colors">🗑 Delete</button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col lg:flex-row gap-6">
+                  {/* Form Side */}
+                  <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                    <h3 className="text-xl font-bold text-white mb-6 border-b border-slate-800 pb-4">{broadcastTab}</h3>
+                    
+                    <div className="space-y-4">
+                      {broadcastTab === '🎯 Targeted Broadcast' && (
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">🎯 Select Audience</label>
+                          <select 
+                            value={broadcastForm.targetAudience}
+                            onChange={(e) => setBroadcastForm({...broadcastForm, targetAudience: e.target.value})}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                          >
+                            <option value="👥 All Users">👥 All Users</option>
+                            <option value="🆕 New Users">🆕 New Users</option>
+                            <option value="💰 Users With Balance">💰 Users With Balance</option>
+                            <option value="💸 Users With Pending Withdrawals">💸 Users With Pending Withdrawals</option>
+                            <option value="👥 Users With Referrals">👥 Users With Referrals</option>
+                            <option value="📤 Active Uploaders">📤 Active Uploaders</option>
+                          </select>
+                        </div>
+                      )}
+
+                      {broadcastTab === '📝 Text Broadcast' || broadcastTab === '🎯 Targeted Broadcast' ? (
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">📝 Message</label>
+                          <textarea 
+                            value={broadcastForm.message}
+                            onChange={(e) => setBroadcastForm({...broadcastForm, message: e.target.value})}
+                            placeholder="Enter your message here..."
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white h-32 resize-none focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">
+                              {broadcastTab.includes('Image') ? '🖼 Image URL' : broadcastTab.includes('Video') ? '🎥 Video URL' : '📄 Document URL'}
+                            </label>
+                            <input 
+                              type="text" 
+                              value={broadcastForm.mediaUrl}
+                              onChange={(e) => setBroadcastForm({...broadcastForm, mediaUrl: e.target.value})}
+                              placeholder="https://..."
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">📄 Caption</label>
+                            <textarea 
+                              value={broadcastForm.caption}
+                              onChange={(e) => setBroadcastForm({...broadcastForm, caption: e.target.value})}
+                              placeholder="Media caption..."
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white h-24 resize-none focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Optional Button Text</label>
+                          <input 
+                            type="text" 
+                            value={broadcastForm.buttonText}
+                            onChange={(e) => setBroadcastForm({...broadcastForm, buttonText: e.target.value})}
+                            placeholder="e.g. Click Here"
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Optional Button Link</label>
+                          <input 
+                            type="text" 
+                            value={broadcastForm.buttonLink}
+                            onChange={(e) => setBroadcastForm({...broadcastForm, buttonLink: e.target.value})}
+                            placeholder="https://..."
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                      </div>
+                      
+                      {isScheduling && (
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-700 space-y-4">
+                          <h4 className="font-bold text-white text-sm">📅 Schedule Time</h4>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <input type="date" value={broadcastForm.scheduledAtDate} onChange={(e) => setBroadcastForm({...broadcastForm, scheduledAtDate: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                            </div>
+                            <div>
+                              <input type="time" value={broadcastForm.scheduledAtTime} onChange={(e) => setBroadcastForm({...broadcastForm, scheduledAtTime: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-800">
+                        {isScheduling ? (
+                          <>
+                            <button onClick={() => setIsScheduling(false)} className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all">❌ Cancel</button>
+                            <button onClick={() => sendBroadcast('Scheduled')} disabled={broadcastsLoading} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/20 transition-all">✅ Confirm Schedule</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => setIsScheduling(true)} className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-xl border border-slate-700 transition-all">⏰ Schedule</button>
+                            <button onClick={() => sendBroadcast('Sent')} disabled={broadcastsLoading} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-900/20 transition-all">📤 Send Now</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Preview Side */}
+                  <div className="w-full lg:w-80">
+                    <h3 className="text-sm font-bold text-slate-400 mb-3 uppercase tracking-wider">👁 Preview Broadcast</h3>
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden relative shadow-2xl">
+                      <div className="bg-slate-800 px-4 py-2 text-xs font-bold text-center border-b border-slate-700">Message Preview</div>
+                      <div className="p-4 bg-slate-950/50 min-h-[200px]">
+                        {(broadcastForm.message || broadcastForm.caption || broadcastForm.mediaUrl) ? (
+                          <div className="space-y-3">
+                            {broadcastForm.mediaUrl && (
+                              <div className="w-full h-32 bg-slate-800 rounded-lg border border-slate-700 flex items-center justify-center overflow-hidden">
+                                {broadcastForm.type === 'image' && <img src={broadcastForm.mediaUrl} className="w-full h-full object-cover" alt="Preview" />}
+                                {broadcastForm.type === 'video' && <div className="text-2xl">🎥</div>}
+                                {broadcastForm.type === 'document' && <div className="text-2xl">📄</div>}
+                              </div>
+                            )}
+                            {(broadcastForm.message || broadcastForm.caption) && (
+                              <p className="text-sm text-slate-200 whitespace-pre-wrap">{broadcastForm.type === 'text' || broadcastTab === '🎯 Targeted Broadcast' ? broadcastForm.message : broadcastForm.caption}</p>
+                            )}
+                            {broadcastForm.buttonText && (
+                              <div className="w-full text-center py-2 bg-indigo-600/20 text-indigo-400 rounded-lg text-sm font-bold border border-indigo-500/20">
+                                {broadcastForm.buttonText}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="h-full flex items-center justify-center text-slate-600 text-sm italic">
+                            Empty preview
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {activeTab === '🛡 Security Center' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  🛡 RoyShare Security Center
+                </h2>
+                <div className="flex flex-wrap items-center gap-2 justify-end">
+                  <button onClick={() => setSecurityTab('Overview')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${securityTab === 'Overview' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Overview</button>
+                  <button onClick={() => setSecurityTab('User Security')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${securityTab === 'User Security' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>👥 User Security</button>
+                  <button onClick={() => setSecurityTab('Referral Protection')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${securityTab === 'Referral Protection' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>👥 Referral Protection</button>
+                  <button onClick={() => setSecurityTab('Reward Protection')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${securityTab === 'Reward Protection' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>💰 Reward Protection</button>
+                  <button onClick={() => setSecurityTab('Bonus Protection')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${securityTab === 'Bonus Protection' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🎁 Bonus Protection</button>
+                  <button onClick={() => setSecurityTab('VPN Detection')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${securityTab === 'VPN Detection' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🌐 VPN Detection</button>
+                  <button onClick={() => setSecurityTab('Device Detection')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${securityTab === 'Device Detection' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📱 Device Detection</button>
+                  <button onClick={() => setSecurityTab('Security Logs')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${securityTab === 'Security Logs' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📜 Security Logs</button>
+                  <button onClick={fetchSecurityData} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700 flex items-center gap-2 text-sm">🔄 Refresh</button>
+                </div>
+              </div>
+
+              {securityLoading ? (
+                <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+              ) : securityTab === 'Overview' ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">🚨 Fraud Alerts</h3>
+                    <p className="text-2xl font-bold text-red-400">{securityStats.fraudAlerts || 0}</p>
+                  </div>
+                  <div className="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-orange-500/80 uppercase tracking-wider mb-1">🚫 Banned Users</h3>
+                    <p className="text-2xl font-bold text-orange-400">{securityStats.bannedUsers || 0}</p>
+                  </div>
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">⚠️ Suspicious Users</h3>
+                    <p className="text-2xl font-bold text-yellow-400">{securityStats.suspiciousUsers || 0}</p>
+                  </div>
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">🔍 Pending Reviews</h3>
+                    <p className="text-2xl font-bold text-blue-400">{securityStats.pendingReviews || 0}</p>
+                  </div>
+                </div>
+              ) : securityTab === 'Security Logs' ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                        <tr>
+                          <th className="px-4 py-3">Date</th>
+                          <th className="px-4 py-3">User ID</th>
+                          <th className="px-4 py-3">Action</th>
+                          <th className="px-4 py-3">Risk Level</th>
+                          <th className="px-4 py-3 text-right">Admin Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {securityLogs.length === 0 ? (
+                          <tr><td colSpan={5} className="text-center py-8 text-slate-500">No security logs found.</td></tr>
+                        ) : (
+                          securityLogs.map((log: any) => (
+                            <tr key={log.id} className="border-b border-slate-800/50 hover:bg-slate-800/20">
+                              <td className="px-4 py-3 text-xs">{new Date(log.createdAt).toLocaleString()}</td>
+                              <td className="px-4 py-3 text-xs font-mono">{log.userId}</td>
+                              <td className="px-4 py-3">{log.actionDesc}</td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                  log.riskLevel === 'Critical' ? 'bg-red-500/20 text-red-400' :
+                                  log.riskLevel === 'High' ? 'bg-orange-500/20 text-orange-400' :
+                                  log.riskLevel === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                                  'bg-emerald-500/20 text-emerald-400'
+                                }`}>
+                                  {log.riskLevel === 'Critical' ? '🚨' : log.riskLevel === 'High' ? '🔴' : log.riskLevel === 'Medium' ? '🟡' : '🟢'} {log.riskLevel}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right space-x-2">
+                                <button onClick={() => handleSecurityAction(log.id, log.userId, 'Warn')} className="px-2 py-1 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 rounded border border-yellow-500/20 text-xs transition-colors">⚠️ Warn User</button>
+                                <button onClick={() => handleSecurityAction(log.id, log.userId, 'Ban')} className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded border border-red-500/20 text-xs transition-colors">🚫 Ban User</button>
+                                <button onClick={() => handleSecurityAction(log.id, log.userId, 'Whitelist')} className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/20 text-xs transition-colors">🟢 Whitelist User</button>
+                                <button onClick={() => handleSecurityAction(log.id, null, 'Ignore')} className="px-2 py-1 bg-slate-500/10 hover:bg-slate-500/20 text-slate-400 rounded border border-slate-500/20 text-xs transition-colors">❌ Ignore Alert</button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center text-slate-400">
+                  <div className="mb-4">
+                    {securityTab === 'User Security' && 'Detecting Multiple Accounts, Duplicate Devices, Duplicate Telegram IDs, and Repeated Abuse Attempts...'}
+                    {securityTab === 'Referral Protection' && 'Detecting Self Referrals, Circular Referrals, Duplicate Referrals, and Fake Referral Chains...'}
+                    {securityTab === 'Reward Protection' && 'Preventing Duplicate Reward Claims, Task Abuse, Multi-Account Reward Farming, and Repeated Task Completions...'}
+                    {securityTab === 'Bonus Protection' && 'Preventing Multiple Daily Claims, Spin Abuse, and Bonus Farming...'}
+                    {securityTab === 'VPN Detection' && 'Status: 🟢 Clean | ⚠️ Possible VPN | 🚨 High Risk VPN'}
+                    {securityTab === 'Device Detection' && 'Tracking Device ID, Browser Fingerprint, Platform, and Last Active...'}
+                  </div>
+                  <p className="text-sm italic">Detailed view for {securityTab} is actively monitoring but no suspicious records matched the current filter.</p>
+                </div>
+              )}
+              
+              {securityTab === 'Overview' && (
+                <div className="mt-8">
+                  <h3 className="text-lg font-bold text-white mb-4">Security Statistics</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4 text-center">
+                      <p className="text-sm text-slate-400 uppercase">🚨 Total Alerts</p>
+                      <p className="text-2xl font-bold text-white mt-1">{securityStats.totalAlerts || 0}</p>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4 text-center">
+                      <p className="text-sm text-slate-400 uppercase">🚫 Total Bans</p>
+                      <p className="text-2xl font-bold text-white mt-1">{securityStats.totalBans || 0}</p>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4 text-center">
+                      <p className="text-sm text-slate-400 uppercase">⚠️ Pending Reviews</p>
+                      <p className="text-2xl font-bold text-white mt-1">{securityStats.pendingReviews || 0}</p>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4 text-center">
+                      <p className="text-sm text-slate-400 uppercase">🟢 Whitelisted Users</p>
+                      <p className="text-2xl font-bold text-white mt-1">{securityStats.whitelistedUsers || 0}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {activeTab === '📜 Activity Logs' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  📜 Admin Activity Logs
+                </h2>
+                <div className="flex flex-wrap items-center gap-2 justify-end">
+                  <button onClick={() => setActivityLogTab('📋 View Logs')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${activityLogTab === '📋 View Logs' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📋 View Logs</button>
+                  <button onClick={() => setActivityLogTab('🔍 Search Logs')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${activityLogTab === '🔍 Search Logs' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🔍 Search Logs</button>
+                  <button onClick={() => setActivityLogTab('📊 Statistics')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${activityLogTab === '📊 Statistics' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 Statistics</button>
+                  <button onClick={() => alert('Exporting PDF...')} className="px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 font-medium rounded-xl transition-all border border-emerald-600/30 text-sm">📥 Export Logs</button>
+                  <button onClick={fetchActivityLogs} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700 text-sm">🔄 Refresh</button>
+                </div>
+              </div>
+
+              {activityLogsLoading ? (
+                <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+              ) : activityLogTab === '📋 View Logs' ? (
+                <div className="space-y-4">
+                  {activityLogs.length === 0 ? (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center text-slate-400">
+                      No activity logs found.
+                    </div>
+                  ) : (
+                    activityLogs.map((log: any) => (
+                      <div key={log.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:bg-slate-800/50 transition-colors">
+                        <div className="flex items-center gap-2 text-xs text-slate-400 mb-2">
+                          <span>🕒 {new Date(log.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                          <span>•</span>
+                          <span className="font-bold text-slate-300">👤 {log.adminName || 'Admin'}</span>
+                        </div>
+                        <h4 className="text-white font-bold mb-1 flex items-center gap-2">{log.actionDesc || log.action}</h4>
+                        {log.targetId && (
+                          <div className="text-sm text-slate-400 mt-2 bg-slate-950 inline-block px-3 py-1.5 rounded-lg border border-slate-800">
+                            <span className="opacity-70">{log.targetType || 'Target'} ID:</span> <span className="font-mono text-indigo-400">{log.targetId}</span>
+                          </div>
+                        )}
+                        {log.description && (
+                          <p className="text-sm text-slate-300 mt-2">{log.description}</p>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : activityLogTab === '🔍 Search Logs' ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                  <div className="mb-6 flex gap-3">
+                    <input 
+                      type="text" 
+                      placeholder="Search by User ID, Username, Ticket ID, Announcement ID..." 
+                      className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                      value={activityLogSearch}
+                      onChange={(e) => setActivityLogSearch(e.target.value)}
+                    />
+                    <button className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-900/20">Search</button>
+                  </div>
+                  <div className="space-y-4">
+                    {activityLogs.filter((log: any) => 
+                      !activityLogSearch || 
+                      (log.targetId && log.targetId.includes(activityLogSearch)) || 
+                      (log.actionDesc && log.actionDesc.toLowerCase().includes(activityLogSearch.toLowerCase())) ||
+                      (log.description && log.description.toLowerCase().includes(activityLogSearch.toLowerCase()))
+                    ).map((log: any) => (
+                      <div key={log.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                        <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
+                          <span>🕒 {new Date(log.createdAt).toLocaleString()}</span>
+                          <span>•</span>
+                          <span className="font-bold text-slate-300">👤 {log.adminName || 'Admin'}</span>
+                        </div>
+                        <h4 className="text-white font-medium">{log.actionDesc || log.action}</h4>
+                        {log.targetId && <div className="text-xs text-slate-500 mt-1">{log.targetType || 'ID'}: {log.targetId}</div>}
+                      </div>
+                    ))}
+                    {activityLogs.filter((log: any) => 
+                      !activityLogSearch || 
+                      (log.targetId && log.targetId.includes(activityLogSearch)) || 
+                      (log.actionDesc && log.actionDesc.toLowerCase().includes(activityLogSearch.toLowerCase())) ||
+                      (log.description && log.description.toLowerCase().includes(activityLogSearch.toLowerCase()))
+                    ).length === 0 && (
+                      <div className="text-center py-8 text-slate-500">No logs match your search.</div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5 text-center">
+                      <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">👤 Total Admin Actions</p>
+                      <p className="text-3xl font-bold text-white">{activityLogsStats.totalActions || 0}</p>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5 text-center">
+                      <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">📅 Today's Actions</p>
+                      <p className="text-3xl font-bold text-white">{activityLogsStats.todayActions || 0}</p>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5 text-center">
+                      <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">📅 Weekly Actions</p>
+                      <p className="text-3xl font-bold text-white">{activityLogsStats.weeklyActions || 0}</p>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5 text-center">
+                      <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">📅 Monthly Actions</p>
+                      <p className="text-3xl font-bold text-white">{activityLogsStats.monthlyActions || 0}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Most Common Action</h3>
+                      <p className="text-xl font-bold text-indigo-400">{activityLogsStats.mostCommonAction || 'N/A'}</p>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Most Active Admin</h3>
+                      <p className="text-xl font-bold text-emerald-400">{activityLogsStats.mostActiveAdmin || 'Admin'}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {activeTab === '📥 Backup & Restore' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  📥 Backup & Restore Center
+                </h2>
+                <div className="flex flex-wrap items-center gap-2 justify-end">
+                  <button onClick={() => setBackupTab('📦 Create Backup')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${backupTab === '📦 Create Backup' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📦 Create Backup</button>
+                  <button onClick={() => setBackupTab('📂 View Backups')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${backupTab === '📂 View Backups' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📂 View Backups</button>
+                  <button onClick={() => setBackupTab('⚙️ Automatic Backup')} className={`px-4 py-2 font-medium rounded-xl transition-all text-sm ${backupTab === '⚙️ Automatic Backup' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>⚙️ Automatic Backup</button>
+                  <button onClick={fetchBackups} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700 text-sm">🔄 Refresh</button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5 text-center">
+                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">📦 Total Backups</p>
+                  <p className="text-3xl font-bold text-white">{backups.length}</p>
+                </div>
+                <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5 text-center">
+                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">📅 Last Backup Date</p>
+                  <p className="text-lg font-bold text-white mt-2">{backups.length > 0 ? new Date(backups[0].backupDate).toLocaleDateString() : 'None'}</p>
+                </div>
+                <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5 text-center">
+                  <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">💾 Backup Storage Used</p>
+                  <p className="text-3xl font-bold text-emerald-400">
+                    {backups.reduce((acc, b) => acc + parseFloat(b.backupSize || '0'), 0).toFixed(2)} MB
+                  </p>
+                </div>
+              </div>
+
+              {backupLoading ? (
+                <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+              ) : backupTab === '📦 Create Backup' ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                  <h3 className="text-lg font-bold text-white mb-4">Create Manual Backup</h3>
+                  <p className="text-sm text-slate-400 mb-6">Create a secure snapshot of your current database state. This backup will include:</p>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-3">
+                      <span className="text-2xl">👥</span>
+                      <span className="text-sm font-medium text-white">Users</span>
+                    </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-3">
+                      <span className="text-2xl">💰</span>
+                      <span className="text-sm font-medium text-white">Balances</span>
+                    </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-3">
+                      <span className="text-2xl">💸</span>
+                      <span className="text-sm font-medium text-white">Withdrawals</span>
+                    </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-3">
+                      <span className="text-2xl">🎫</span>
+                      <span className="text-sm font-medium text-white">Support Tickets</span>
+                    </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-3">
+                      <span className="text-2xl">📢</span>
+                      <span className="text-sm font-medium text-white">Announcements</span>
+                    </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-3">
+                      <span className="text-2xl">💰</span>
+                      <span className="text-sm font-medium text-white">Reward Tasks</span>
+                    </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-3">
+                      <span className="text-2xl">🎁</span>
+                      <span className="text-sm font-medium text-white">Daily Bonus Data</span>
+                    </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center gap-3">
+                      <span className="text-2xl">⚙️</span>
+                      <span className="text-sm font-medium text-white">System Settings</span>
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-end">
+                    <button onClick={handleCreateBackup} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-900/20 transition-all flex items-center gap-2">
+                      <span className="text-lg">📦</span> Start Full Backup
+                    </button>
+                  </div>
+                </div>
+              ) : backupTab === '📂 View Backups' ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-slate-300">
+                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                        <tr>
+                          <th className="px-4 py-3">Backup ID</th>
+                          <th className="px-4 py-3">Date</th>
+                          <th className="px-4 py-3">Size</th>
+                          <th className="px-4 py-3">Type</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {backups.length === 0 ? (
+                          <tr><td colSpan={6} className="text-center py-8 text-slate-500">No backups found.</td></tr>
+                        ) : (
+                          backups.map((bkp: any) => (
+                            <tr key={bkp.id} className="border-b border-slate-800/50 hover:bg-slate-800/20">
+                              <td className="px-4 py-3 font-mono text-indigo-400">{bkp.backupId}</td>
+                              <td className="px-4 py-3 text-xs">{new Date(bkp.backupDate).toLocaleString()}</td>
+                              <td className="px-4 py-3 font-medium">{bkp.backupSize}</td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded text-xs font-bold ${bkp.backupType === 'Auto' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
+                                  {bkp.backupType}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded text-xs font-bold ${bkp.backupStatus === 'Completed' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                                  {bkp.backupStatus}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right space-x-2">
+                                <button onClick={() => alert(JSON.stringify(bkp, null, 2))} className="px-2 py-1 bg-slate-500/10 hover:bg-slate-500/20 text-slate-300 rounded border border-slate-500/20 text-xs transition-colors">👁 View</button>
+                                <button onClick={() => handleRestoreBackup(bkp.id, bkp.backupId)} className="px-2 py-1 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded border border-orange-500/20 text-xs transition-colors">📤 Restore</button>
+                                <button onClick={() => handleDeleteBackup(bkp.id)} className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded border border-red-500/20 text-xs transition-colors">🗑 Delete</button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                  <h3 className="text-lg font-bold text-white mb-6">Automatic Backup Settings</h3>
+                  
+                  <div className="space-y-6 max-w-2xl">
+                    <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800">
+                      <div>
+                        <h4 className="font-medium text-white mb-1">Enable Auto Backup</h4>
+                        <p className="text-sm text-slate-400">Automatically create backups on a schedule.</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" className="sr-only peer" checked={backupSettings.autoBackupEnabled} onChange={(e) => setBackupSettings({...backupSettings, autoBackupEnabled: e.target.checked})} />
+                        <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                      </label>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-2">Backup Frequency</label>
+                        <select 
+                          value={backupSettings.backupFrequency} 
+                          onChange={(e) => setBackupSettings({...backupSettings, backupFrequency: e.target.value})}
+                          disabled={!backupSettings.autoBackupEnabled}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                        >
+                          <option value="Daily">📅 Daily</option>
+                          <option value="Weekly">📅 Weekly</option>
+                          <option value="Monthly">📅 Monthly</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-2">Backup Retention Days</label>
+                        <input 
+                          type="number" 
+                          min="1" max="365"
+                          value={backupSettings.retentionDays} 
+                          onChange={(e) => setBackupSettings({...backupSettings, retentionDays: parseInt(e.target.value) || 30})}
+                          disabled={!backupSettings.autoBackupEnabled}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                        />
+                        <p className="text-xs text-slate-500 mt-2">Backups older than this number of days will be automatically deleted.</p>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 flex justify-end">
+                      <button onClick={() => handleUpdateBackupSettings(backupSettings)} className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/20">💾 Save Settings</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {activeTab === '⚙️ System Settings' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  ⚙️ RoyShare System Settings
+                </h2>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => saveSystemSettings(systemSettings)} disabled={systemSettingsLoading} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20">💾 Save Settings</button>
+                  <button onClick={() => {
+                    if (confirm("Reset to default?")) {
+                      const defaults = {
+                        botSettings: {}, earningSettings: {}, withdrawalSettings: {}, referralSettings: {}, bonusSettings: {}, notificationSettings: {}, websiteSettings: {}, maintenanceMode: "🟢 OFF"
+                      };
+                      saveSystemSettings(defaults);
+                    }
+                  }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700">🔄 Restore Defaults</button>
+                </div>
+              </div>
+
+              {systemSettingsLoading ? (
+                <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+              ) : (
+                <div className="flex flex-col md:flex-row gap-6">
+                  <div className="w-full md:w-64 space-y-1">
+                    {['🤖 Bot Settings', '💰 Earnings Settings', '💸 Withdrawal Settings', '👥 Referral Settings', '🎁 Bonus Settings', '📢 Notification Settings', '🌐 Website Settings', '🔄 Maintenance Mode'].map(tab => (
+                      <button key={tab} onClick={() => setSettingsTab(tab)} className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-colors ${settingsTab === tab ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>{tab}</button>
+                    ))}
+                  </div>
+                  <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                    <h3 className="text-xl font-bold text-white mb-6 border-b border-slate-800 pb-4">{settingsTab}</h3>
+                    
+                    {settingsTab === '🤖 Bot Settings' && (
+                      <div className="space-y-4 max-w-lg">
+                        {['Bot Name', 'Bot Username', 'Support Username', 'Channel Link', 'Group Link'].map(field => (
+                          <div key={field}>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">{field}</label>
+                            <input type="text" value={systemSettings?.botSettings?.[field] || ''} onChange={(e) => setSystemSettings({...systemSettings, botSettings: {...systemSettings.botSettings, [field]: e.target.value}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {settingsTab === '💰 Earnings Settings' && (
+                      <div className="space-y-4 max-w-lg">
+                        {['Minimum Reward Amount', 'Maximum Reward Amount', 'Reward Credit Delay'].map(field => (
+                          <div key={field}>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">{field}</label>
+                            <input type="number" value={systemSettings?.earningSettings?.[field] || ''} onChange={(e) => setSystemSettings({...systemSettings, earningSettings: {...systemSettings.earningSettings, [field]: e.target.value}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                          </div>
+                        ))}
+                        <div className="flex items-center gap-4 mt-6">
+                          <label className="flex items-center gap-2 text-slate-300">
+                            <input type="radio" name="earningsEnabled" checked={systemSettings?.earningSettings?.enabled === true} onChange={() => setSystemSettings({...systemSettings, earningSettings: {...systemSettings.earningSettings, enabled: true}})} className="w-4 h-4 text-indigo-600" />
+                            Enable Earnings
+                          </label>
+                          <label className="flex items-center gap-2 text-slate-300">
+                            <input type="radio" name="earningsEnabled" checked={systemSettings?.earningSettings?.enabled === false} onChange={() => setSystemSettings({...systemSettings, earningSettings: {...systemSettings.earningSettings, enabled: false}})} className="w-4 h-4 text-indigo-600" />
+                            Disable Earnings
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsTab === '💸 Withdrawal Settings' && (
+                      <div className="space-y-4 max-w-lg">
+                        {['Minimum Withdrawal', 'Maximum Withdrawal', 'Processing Time'].map(field => (
+                          <div key={field}>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">{field}</label>
+                            <input type="text" value={systemSettings?.withdrawalSettings?.[field] || ''} onChange={(e) => setSystemSettings({...systemSettings, withdrawalSettings: {...systemSettings.withdrawalSettings, [field]: e.target.value}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                          </div>
+                        ))}
+                        <div className="pt-4 border-t border-slate-800">
+                          <h4 className="font-bold text-white mb-4">USDT (TRC20) Settings</h4>
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-sm font-medium text-slate-400 mb-1">Network Fee (USDT)</label>
+                              <input type="number" step="0.01" value={systemSettings?.withdrawalSettings?.usdtNetworkFee ?? 1} onChange={(e) => setSystemSettings({...systemSettings, withdrawalSettings: {...systemSettings.withdrawalSettings, usdtNetworkFee: parseFloat(e.target.value)}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-slate-400 mb-1">Market Adjustment Fee (%)</label>
+                              <input type="number" step="0.1" value={systemSettings?.withdrawalSettings?.usdtMarketAdjustmentPct ?? 5} onChange={(e) => setSystemSettings({...systemSettings, withdrawalSettings: {...systemSettings.withdrawalSettings, usdtMarketAdjustmentPct: parseFloat(e.target.value)}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 mt-6">
+                          <label className="flex items-center gap-2 text-slate-300">
+                            <input type="radio" name="withdrawalsEnabled" checked={systemSettings?.withdrawalSettings?.enabled === true} onChange={() => setSystemSettings({...systemSettings, withdrawalSettings: {...systemSettings.withdrawalSettings, enabled: true}})} className="w-4 h-4 text-indigo-600" />
+                            Enable Withdrawals
+                          </label>
+                          <label className="flex items-center gap-2 text-slate-300">
+                            <input type="radio" name="withdrawalsEnabled" checked={systemSettings?.withdrawalSettings?.enabled === false} onChange={() => setSystemSettings({...systemSettings, withdrawalSettings: {...systemSettings.withdrawalSettings, enabled: false}})} className="w-4 h-4 text-indigo-600" />
+                            Disable Withdrawals
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsTab === '👥 Referral Settings' && (
+                      <div className="space-y-4 max-w-lg">
+                        {['Referral Reward', 'Referral Commission %', 'Maximum Referral Reward'].map(field => (
+                          <div key={field}>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">{field}</label>
+                            <input type="text" value={systemSettings?.referralSettings?.[field] || ''} onChange={(e) => setSystemSettings({...systemSettings, referralSettings: {...systemSettings.referralSettings, [field]: e.target.value}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                          </div>
+                        ))}
+                        <div className="flex items-center gap-4 mt-6">
+                          <label className="flex items-center gap-2 text-slate-300">
+                            <input type="radio" name="referralsEnabled" checked={systemSettings?.referralSettings?.enabled === true} onChange={() => setSystemSettings({...systemSettings, referralSettings: {...systemSettings.referralSettings, enabled: true}})} className="w-4 h-4 text-indigo-600" />
+                            Enable Referral System
+                          </label>
+                          <label className="flex items-center gap-2 text-slate-300">
+                            <input type="radio" name="referralsEnabled" checked={systemSettings?.referralSettings?.enabled === false} onChange={() => setSystemSettings({...systemSettings, referralSettings: {...systemSettings.referralSettings, enabled: false}})} className="w-4 h-4 text-indigo-600" />
+                            Disable Referral System
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsTab === '🎁 Bonus Settings' && (
+                      <div className="space-y-4 max-w-lg">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Bonus Reset Time (Hours)</label>
+                          <input type="number" value={systemSettings?.bonusSettings?.['Bonus Reset Time'] || ''} onChange={(e) => setSystemSettings({...systemSettings, bonusSettings: {...systemSettings.bonusSettings, ['Bonus Reset Time']: e.target.value}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                        </div>
+                        <div className="flex items-center gap-4 mt-6">
+                          <label className="flex items-center gap-2 text-slate-300">
+                            <input type="radio" name="bonusEnabled" checked={systemSettings?.bonusSettings?.enabled === true} onChange={() => setSystemSettings({...systemSettings, bonusSettings: {...systemSettings.bonusSettings, enabled: true}})} className="w-4 h-4 text-indigo-600" />
+                            Daily Bonus Enabled
+                          </label>
+                          <label className="flex items-center gap-2 text-slate-300">
+                            <input type="radio" name="bonusEnabled" checked={systemSettings?.bonusSettings?.enabled === false} onChange={() => setSystemSettings({...systemSettings, bonusSettings: {...systemSettings.bonusSettings, enabled: false}})} className="w-4 h-4 text-indigo-600" />
+                            Daily Bonus Disabled
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsTab === '📢 Notification Settings' && (
+                      <div className="space-y-4 max-w-lg">
+                        {['Enable Bot Notifications', 'Enable Announcement Alerts', 'Enable Support Notifications', 'Enable Withdrawal Notifications'].map(field => (
+                          <label key={field} className="flex items-center gap-3 text-white bg-slate-950 p-4 rounded-xl border border-slate-800">
+                            <input type="checkbox" checked={systemSettings?.notificationSettings?.[field] === true} onChange={(e) => setSystemSettings({...systemSettings, notificationSettings: {...systemSettings.notificationSettings, [field]: e.target.checked}})} className="w-5 h-5 rounded text-indigo-600 bg-slate-900 border-slate-700" />
+                            {field}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+
+                    {settingsTab === '🌐 Website Settings' && (
+                      <div className="space-y-4 max-w-lg">
+                        {['Website Name', 'Website Logo', 'Website Footer Text'].map(field => (
+                          <div key={field}>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">{field}</label>
+                            <input type="text" value={systemSettings?.websiteSettings?.[field] || ''} onChange={(e) => setSystemSettings({...systemSettings, websiteSettings: {...systemSettings.websiteSettings, [field]: e.target.value}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                          </div>
+                        ))}
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Website Description</label>
+                          <textarea value={systemSettings?.websiteSettings?.['Website Description'] || ''} onChange={(e) => setSystemSettings({...systemSettings, websiteSettings: {...systemSettings.websiteSettings, ['Website Description']: e.target.value}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white h-24 resize-none focus:outline-none focus:border-indigo-500"></textarea>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsTab === '🔄 Maintenance Mode' && (
+                      <div className="space-y-6 max-w-lg">
+                        <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl">
+                          <p className="text-yellow-400 text-sm font-medium">When enabled, regular users will see a maintenance page. You can still access the Admin Dashboard.</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-2">Status</label>
+                          <select value={systemSettings?.maintenanceMode || '🟢 OFF'} onChange={(e) => setSystemSettings({...systemSettings, maintenanceMode: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-indigo-500">
+                            <option value="🟢 OFF">🟢 OFF</option>
+                            <option value="🔴 ON">🔴 ON</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {modalAction !== 'none' && (selectedWithdrawal || selectedTicket || selectedUser || modalAction.includes('announcement') || modalAction.includes('task') || modalAction.includes('ad')) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                {modalAction === 'view_withdrawal' && '👁 Withdrawal Details'}
+                {modalAction === 'approve' && '🟢 Approve Withdrawal'}
+                {modalAction === 'paid' && '💸 Mark Paid'}
+                {modalAction === 'reject' && '🔴 Reject Withdrawal'}
+                {modalAction === 'view_ticket' && '🎫 Ticket Details'}
+                {modalAction === 'reply_ticket' && '💬 Reply to Ticket'}
+                {modalAction === 'resolve_ticket' && '🟢 Resolve Ticket'}
+                {modalAction === 'close_ticket' && '🔴 Close Ticket'}
+                {modalAction === 'create_announcement' && '➕ Create Announcement'}
+                {modalAction === 'edit_announcement' && '✏️ Edit Announcement'}
+                {modalAction === 'view_announcement' && '📢 Announcement Details'}
+                {modalAction === 'create_task' && '➕ Create Task'}
+                {modalAction === 'edit_task' && '✏️ Edit Task'}
+                {modalAction === 'view_task' && '👁 Task Details'}
+                {modalAction === 'create_ad' && '➕ Create Ad'}
+                {modalAction === 'edit_ad' && '✏️ Edit Ad'}
+                {modalAction === 'view_user' && '👤 User Details'}
+                {modalAction === 'add_balance' && '💰 Add Balance'}
+                {modalAction === 'deduct_balance' && '➖ Deduct Balance'}
+                {modalAction === 'ban_user' && '🚫 Ban User'}
+                {modalAction === 'message_user' && '📨 Send Message'}
+              </h3>
+              <button 
+                onClick={() => setModalAction('none')}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-5 overflow-y-auto max-h-[70vh]">
+              {modalAction === 'view_withdrawal' && selectedWithdrawal ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Withdrawal ID</p>
+                      <p className="font-mono text-sm break-all">{selectedWithdrawal.id}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Status</p>
+                      <p className={`font-bold ${
+                        selectedWithdrawal.status === 'Pending' ? 'text-yellow-400' :
+                        selectedWithdrawal.status === 'Approved' ? 'text-emerald-400' :
+                        selectedWithdrawal.status === 'Paid' ? 'text-blue-400' :
+                        'text-red-400'
+                      }`}>{selectedWithdrawal.status}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-slate-800/50 rounded-xl p-3 space-y-2">
+                    <p className="text-xs text-slate-400">👤 Name: <span className="text-white ml-1">{selectedWithdrawal.firstName} {selectedWithdrawal.lastName}</span></p>
+                    <p className="text-xs text-slate-400">📛 Username: <span className="text-white ml-1">@{selectedWithdrawal.username || 'N/A'}</span></p>
+                    <p className="text-xs text-slate-400">🆔 User ID: <span className="font-mono text-white ml-1">{selectedWithdrawal.userId}</span></p>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-slate-800/50 rounded-xl p-3">
+                      <p className="text-xs text-slate-400 mb-1">Requested Amount</p>
+                      <p className="font-bold text-xl text-emerald-400">${selectedWithdrawal.amount}</p>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-xl p-3">
+                      <p className="text-xs text-slate-400 mb-1">Method</p>
+                      <p className="font-bold text-white">{selectedWithdrawal.method}</p>
+                    </div>
+                  </div>
+                  
+                  {(selectedWithdrawal.method === 'USDT' || selectedWithdrawal.method === 'USDT (TRC20)') && selectedWithdrawal.networkFee !== undefined && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-slate-800/30 rounded-lg p-2 text-center">
+                        <p className="text-[10px] text-slate-400 mb-1">Network Fee</p>
+                        <p className="font-mono text-xs text-red-400">-{selectedWithdrawal.networkFee} USDT</p>
+                      </div>
+                      <div className="bg-slate-800/30 rounded-lg p-2 text-center">
+                        <p className="text-[10px] text-slate-400 mb-1">Market Adj.</p>
+                        <p className="font-mono text-xs text-red-400">-{selectedWithdrawal.marketAdjustmentFee} USDT</p>
+                      </div>
+                      <div className="bg-slate-800/50 rounded-lg p-2 text-center border border-emerald-500/20">
+                        <p className="text-[10px] text-slate-400 mb-1">Final Receive</p>
+                        <p className="font-bold text-xs text-emerald-400">{selectedWithdrawal.finalReceive} USDT</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedWithdrawal.verificationStatus && (
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                      <h4 className="text-sm font-bold text-white mb-3 border-b border-slate-800 pb-2">Human Verification</h4>
+                      <div className="space-y-2 text-sm">
+                        <p><span className="text-slate-400">Status:</span> <span className="text-emerald-400 font-medium">{selectedWithdrawal.verificationStatus}</span></p>
+                        <p><span className="text-slate-400">Method:</span> <span className="text-white">{selectedWithdrawal.verificationMethod}</span></p>
+                        <p><span className="text-slate-400">Time:</span> <span className="text-white">{new Date(selectedWithdrawal.verificationTime).toLocaleString()}</span></p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                    <h4 className="text-sm font-bold text-white mb-3 border-b border-slate-800 pb-2">Payment Details</h4>
+                    {(selectedWithdrawal.method === 'UPI ID' || selectedWithdrawal.method === 'UPI') && (
+                      <div className="space-y-3">
+                        <p className="text-sm flex flex-col gap-1">
+                          <span className="text-slate-400">📱 UPI ID:</span> 
+                          <span className="font-mono bg-slate-900 p-2 rounded border border-slate-800">{selectedWithdrawal.upiId}</span>
+                        </p>
+                        <button onClick={() => { navigator.clipboard.writeText(selectedWithdrawal.upiId); alert('Copied UPI ID!'); }} className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded transition-colors flex items-center gap-1 w-fit">📋 Copy UPI ID</button>
+                      </div>
+                    )}
+                    {(selectedWithdrawal.method === 'Bank Account' || selectedWithdrawal.method === 'Bank Transfer') && (
+                      <div className="space-y-4">
+                        <div className="space-y-1">
+                          <p className="text-slate-400 text-xs">🏦 Account Number:</p>
+                          <div className="flex items-center justify-between bg-slate-900 p-2 rounded border border-slate-800">
+                            <span className="font-mono text-sm">{selectedWithdrawal.accountNumber}</span>
+                            <button onClick={() => { navigator.clipboard.writeText(selectedWithdrawal.accountNumber); alert('Copied Account Number!'); }} className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition-colors">📋 Copy</button>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-slate-400 text-xs">🏦 IFSC Code:</p>
+                          <div className="flex items-center justify-between bg-slate-900 p-2 rounded border border-slate-800">
+                            <span className="font-mono text-sm">{selectedWithdrawal.ifscCode}</span>
+                            <button onClick={() => { navigator.clipboard.writeText(selectedWithdrawal.ifscCode); alert('Copied IFSC Code!'); }} className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition-colors">📋 Copy</button>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-slate-400 text-xs">🏦 Account Holder Name:</p>
+                          <div className="flex items-center justify-between bg-slate-900 p-2 rounded border border-slate-800">
+                            <span className="font-mono text-sm">{selectedWithdrawal.accountHolderName || selectedWithdrawal.accountHolder}</span>
+                            <button onClick={() => { navigator.clipboard.writeText(selectedWithdrawal.accountHolderName || selectedWithdrawal.accountHolder); alert('Copied Account Holder Name!'); }} className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition-colors">📋 Copy</button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {(selectedWithdrawal.method === 'USDT (TRC20)' || selectedWithdrawal.method === 'USDT') && (
+                      <div className="space-y-3">
+                        <p className="text-sm flex flex-col gap-1">
+                          <span className="text-slate-400">💲 Wallet Address:</span> 
+                          <span className="font-mono bg-slate-900 p-2 rounded border border-slate-800 break-all">{selectedWithdrawal.walletAddress}</span>
+                        </p>
+                        <button onClick={() => { navigator.clipboard.writeText(selectedWithdrawal.walletAddress); alert('Copied Wallet Address!'); }} className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded transition-colors flex items-center gap-1 w-fit">📋 Copy Wallet Address</button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">📅 Date Requested</p>
+                    <p className="text-sm">{new Date(selectedWithdrawal.createdAt).toLocaleString()}</p>
+                  </div>
+                  
+                  {selectedWithdrawal.transactionReference && (
+                    <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl">
+                      <p className="text-xs text-blue-400/80 mb-1">Transaction Reference</p>
+                      <p className="font-mono text-sm text-blue-300">{selectedWithdrawal.transactionReference}</p>
+                    </div>
+                  )}
+                  
+                  {selectedWithdrawal.adminRemark && (
+                    <div className="bg-red-500/10 border border-red-500/20 p-3 rounded-xl">
+                      <p className="text-xs text-red-400/80 mb-1">Admin Remark</p>
+                      <p className="text-sm text-red-300">{selectedWithdrawal.adminRemark}</p>
+                    </div>
+                  )}
+                  
+                  <div className="grid grid-cols-3 gap-2 pt-4">
+                    {selectedWithdrawal.status === 'Pending' && (
+                      <button 
+                        onClick={() => { setModalAction('approve'); setModalInput(""); }}
+                        className="col-span-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 rounded-lg text-sm"
+                      >
+                        🟢 Approve
+                      </button>
+                    )}
+                    {selectedWithdrawal.status === 'Approved' && (
+                      <button 
+                        onClick={() => { setModalAction('paid'); setModalInput(""); }}
+                        className="col-span-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg text-sm"
+                      >
+                        💸 Mark Paid
+                      </button>
+                    )}
+                    {(selectedWithdrawal.status === 'Pending' || selectedWithdrawal.status === 'Approved') && (
+                      <button 
+                        onClick={() => { setModalAction('reject'); setModalInput(""); }}
+                        className="col-span-1 bg-red-600 hover:bg-red-500 text-white font-medium py-2 rounded-lg text-sm"
+                      >
+                        🔴 Reject
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : modalAction === 'approve' ? (
+                <div className="space-y-4">
+                  <p className="text-slate-300">Are you sure you want to approve this withdrawal request for <strong className="text-white">${selectedWithdrawal?.amount}</strong>?</p>
+                  <p className="text-sm text-slate-400">This will notify the user that their request has been approved and is being processed.</p>
+                </div>
+              ) : modalAction === 'paid' ? (
+                <div className="space-y-4">
+                  <p className="text-slate-300">Mark this withdrawal of <strong className="text-white">${selectedWithdrawal?.amount}</strong> as paid.</p>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Enter Transaction Reference ID</label>
+                    <input 
+                      type="text" 
+                      value={modalInput}
+                      onChange={(e) => setModalInput(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      placeholder="e.g. TXN-123456789"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+              ) : modalAction === 'reject' ? (
+                <div className="space-y-4">
+                  <p className="text-slate-300">Reject this withdrawal request.</p>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Enter Rejection Reason</label>
+                    <textarea 
+                      value={modalInput}
+                      onChange={(e) => setModalInput(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 h-24 resize-none"
+                      placeholder="e.g. Invalid payment details provided..."
+                      autoFocus
+                    />
+                  </div>
+                </div>
+              ) : modalAction === 'view_ticket' && selectedTicket ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Ticket ID</p>
+                      <p className="font-mono text-sm break-all">{selectedTicket.id}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Status</p>
+                      <p className={`font-bold ${
+                        selectedTicket.status === 'open' ? 'text-yellow-400' :
+                        selectedTicket.status === 'replied' ? 'text-blue-400' :
+                        selectedTicket.status === 'resolved' ? 'text-emerald-400' :
+                        'text-red-400'
+                      }`}>{selectedTicket.status === 'open' ? '🟡 Open' : 
+                         selectedTicket.status === 'replied' ? '💬 Replied' : 
+                         selectedTicket.status === 'resolved' ? '🟢 Resolved' : '🔴 Closed'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-slate-800/50 rounded-xl p-3 space-y-2">
+                    <p className="text-xs text-slate-400">👤 User Name: <span className="text-white ml-1">{selectedTicket.name}</span></p>
+                    <p className="text-xs text-slate-400">📛 Username: <span className="text-white ml-1">@{selectedTicket.username || 'N/A'}</span></p>
+                    <p className="text-xs text-slate-400">🆔 User ID: <span className="font-mono text-white ml-1">{selectedTicket.userId}</span></p>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-slate-800/50 rounded-xl p-3">
+                      <p className="text-xs text-slate-400 mb-1">📂 Issue Type</p>
+                      <p className="font-bold text-white">{selectedTicket.issueType}</p>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-xl p-3">
+                      <p className="text-xs text-slate-400 mb-1">📅 Created</p>
+                      <p className="font-medium text-white text-sm">{new Date(selectedTicket.createdAt).toLocaleDateString()}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                    <h4 className="text-sm font-bold text-white mb-2">📝 User Message</h4>
+                    <p className="text-sm text-slate-300 whitespace-pre-wrap">{selectedTicket.message}</p>
+                  </div>
+
+                  {selectedTicket.adminReply && (
+                    <div className="bg-blue-900/20 border border-blue-500/20 rounded-xl p-4">
+                      <h4 className="text-sm font-bold text-blue-400 mb-2">💬 Admin Reply</h4>
+                      <p className="text-sm text-slate-300 whitespace-pre-wrap">{selectedTicket.adminReply}</p>
+                      {selectedTicket.lastReply && (
+                        <p className="text-xs text-slate-500 mt-2">{new Date(selectedTicket.lastReply).toLocaleString()}</p>
+                      )}
+                    </div>
+                  )}
+                  
+                  <div className="grid grid-cols-3 gap-2 pt-4">
+                    {['open', 'replied'].includes(selectedTicket.status) && (
+                      <button 
+                        onClick={() => { setModalAction('reply_ticket'); setModalInput(""); }}
+                        className="col-span-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg text-sm"
+                      >
+                        💬 Reply
+                      </button>
+                    )}
+                    {['open', 'replied'].includes(selectedTicket.status) && (
+                      <button 
+                        onClick={() => { setModalAction('resolve_ticket'); setModalInput(""); }}
+                        className="col-span-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 rounded-lg text-sm"
+                      >
+                        🟢 Resolve
+                      </button>
+                    )}
+                    {selectedTicket.status !== 'closed' && (
+                      <button 
+                        onClick={() => { setModalAction('close_ticket'); setModalInput(""); }}
+                        className="col-span-1 bg-red-600 hover:bg-red-500 text-white font-medium py-2 rounded-lg text-sm"
+                      >
+                        🔴 Close
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : modalAction === 'reply_ticket' ? (
+                <div className="space-y-4">
+                  <p className="text-slate-300">Reply to ticket <strong className="font-mono text-white">{selectedTicket?.id.substring(0,8)}</strong></p>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Enter Reply Message</label>
+                    <textarea 
+                      value={modalInput}
+                      onChange={(e) => setModalInput(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 h-32 resize-none"
+                      placeholder="Type your response here..."
+                      autoFocus
+                    />
+                  </div>
+                </div>
+              ) : modalAction === 'resolve_ticket' ? (
+                <div className="space-y-4">
+                  <p className="text-slate-300">Resolve ticket <strong className="font-mono text-white">{selectedTicket?.id.substring(0,8)}</strong>?</p>
+                  <p className="text-sm text-slate-400">This will mark the issue as resolved and notify the user.</p>
+                </div>
+              ) : modalAction === 'close_ticket' ? (
+                <div className="space-y-4">
+                  <p className="text-slate-300">Close ticket <strong className="font-mono text-white">{selectedTicket?.id.substring(0,8)}</strong>?</p>
+                  <p className="text-sm text-slate-400">This will permanently close the ticket.</p>
+                </div>
+              ) : (modalAction === 'create_announcement' || modalAction === 'edit_announcement') ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">📝 Title</label>
+                    <input 
+                      type="text" 
+                      value={announcementForm.title}
+                      onChange={(e) => setAnnouncementForm({...announcementForm, title: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      placeholder="Enter announcement title"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">📄 Message</label>
+                    <textarea 
+                      value={announcementForm.message}
+                      onChange={(e) => setAnnouncementForm({...announcementForm, message: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 h-24 resize-none"
+                      placeholder="Type the message..."
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Type</label>
+                      <select 
+                        value={announcementForm.type}
+                        onChange={(e) => setAnnouncementForm({...announcementForm, type: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      >
+                        {["📢 Update", "🎉 Event", "🎁 Reward", "💰 Earnings", "⚙️ Maintenance", "🚨 Important Notice"].map(opt => <option key={opt}>{opt}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Priority</label>
+                      <select 
+                        value={announcementForm.priority}
+                        onChange={(e) => setAnnouncementForm({...announcementForm, priority: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      >
+                        {["🔴 High Priority", "🟡 Medium Priority", "🟢 Normal"].map(opt => <option key={opt}>{opt}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">🖼 Image URL (Optional)</label>
+                      <input 
+                        type="text" 
+                        value={announcementForm.imageUrl}
+                        onChange={(e) => setAnnouncementForm({...announcementForm, imageUrl: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">🎥 Video URL (Optional)</label>
+                      <input 
+                        type="text" 
+                        value={announcementForm.videoUrl}
+                        onChange={(e) => setAnnouncementForm({...announcementForm, videoUrl: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">🔘 Button Text (Optional)</label>
+                      <input 
+                        type="text" 
+                        value={announcementForm.buttonText}
+                        onChange={(e) => setAnnouncementForm({...announcementForm, buttonText: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">🔗 Button Link (Optional)</label>
+                      <input 
+                        type="text" 
+                        value={announcementForm.buttonLink}
+                        onChange={(e) => setAnnouncementForm({...announcementForm, buttonLink: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Status</label>
+                    <select 
+                      value={announcementForm.status}
+                      onChange={(e) => setAnnouncementForm({...announcementForm, status: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="Published">🟢 Publish Now</option>
+                      <option value="Scheduled">🟡 Schedule</option>
+                      <option value="Draft">🔴 Save Draft</option>
+                    </select>
+                  </div>
+                  
+                  {announcementForm.status === 'Scheduled' && (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">📅 Scheduled For (Date & Time)</label>
+                      <input 
+                        type="datetime-local" 
+                        value={announcementForm.scheduledAt}
+                        onChange={(e) => setAnnouncementForm({...announcementForm, scheduledAt: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  )}
+
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 mt-2">
+                    <h4 className="text-sm font-bold text-white mb-2 flex items-center justify-between">
+                      <span>👁 Preview (User View)</span>
+                    </h4>
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                      <div className="p-3 border-b border-slate-800 bg-slate-800/30">
+                        <p className="text-xs font-bold text-white">{announcementForm.type}</p>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        <h4 className="font-bold text-lg text-white leading-tight">{announcementForm.title || "Announcement Title"}</h4>
+                        <p className="text-sm text-slate-300 whitespace-pre-wrap">{announcementForm.message || "Message content goes here..."}</p>
+                        
+                        {(announcementForm.imageUrl || announcementForm.videoUrl) && (
+                          <div className="w-full h-32 bg-slate-800 rounded-xl flex items-center justify-center text-slate-500 text-xs">
+                            {announcementForm.imageUrl ? '🖼 Image Preview' : '🎥 Video Preview'}
+                          </div>
+                        )}
+                        
+                        {announcementForm.buttonText && (
+                          <button className="w-full py-2 bg-blue-600 rounded-xl text-sm font-bold text-white mt-2">
+                            {announcementForm.buttonText}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : modalAction === 'view_announcement' && announcementForm ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Status</p>
+                      <p className={`font-bold ${
+                        announcementForm.status === 'Published' ? 'text-emerald-400' :
+                        announcementForm.status === 'Scheduled' ? 'text-yellow-400' :
+                        'text-slate-400'
+                      }`}>{announcementForm.status}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Priority</p>
+                      <p className="font-medium text-white">{announcementForm.priority}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-slate-800/50 rounded-xl p-3">
+                      <p className="text-xs text-slate-400 mb-1">👀 Views</p>
+                      <p className="font-bold text-xl text-blue-400">{(announcementForm as any).viewCount || 0}</p>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-xl p-3">
+                      <p className="text-xs text-slate-400 mb-1">🔗 Button Clicks</p>
+                      <p className="font-bold text-xl text-purple-400">{(announcementForm as any).clickCount || 0}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                    <div className="p-3 border-b border-slate-800 bg-slate-800/30">
+                      <p className="text-xs font-bold text-white">{announcementForm.type}</p>
+                    </div>
+                    <div className="p-4 space-y-3">
+                      <h4 className="font-bold text-lg text-white leading-tight">{announcementForm.title}</h4>
+                      <p className="text-sm text-slate-300 whitespace-pre-wrap">{announcementForm.message}</p>
+                      
+                      {(announcementForm.imageUrl || announcementForm.videoUrl) && (
+                        <div className="w-full h-32 bg-slate-800 rounded-xl flex items-center justify-center text-slate-500 text-xs">
+                          {announcementForm.imageUrl ? '🖼 Image Preview' : '🎥 Video Preview'}
+                        </div>
+                      )}
+                      
+                      {announcementForm.buttonText && (
+                        <button className="w-full py-2 bg-blue-600 rounded-xl text-sm font-bold text-white mt-2">
+                          {announcementForm.buttonText}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <button 
+                    onClick={() => setModalAction('edit_announcement')}
+                    className="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm font-medium text-white transition-colors"
+                  >
+                    ✏️ Edit Announcement
+                  </button>
+                </div>
+              ) : (modalAction === 'create_task' || modalAction === 'edit_task') ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">📝 Task Title</label>
+                    <input 
+                      type="text" 
+                      value={taskForm.title}
+                      onChange={(e) => setTaskForm({...taskForm, title: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      placeholder="e.g. Follow on Twitter"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">📄 Task Description</label>
+                    <textarea 
+                      value={taskForm.description}
+                      onChange={(e) => setTaskForm({...taskForm, description: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 h-24 resize-none"
+                      placeholder="Task instructions..."
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">💰 Reward Amount</label>
+                      <input 
+                        type="number" 
+                        value={taskForm.rewardAmount}
+                        onChange={(e) => setTaskForm({...taskForm, rewardAmount: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                        placeholder="e.g. 50"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">🕒 Timer Duration (s)</label>
+                      <input 
+                        type="number" 
+                        value={taskForm.timerDuration}
+                        onChange={(e) => setTaskForm({...taskForm, timerDuration: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                        placeholder="e.g. 15"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">📄 Total Pages</label>
+                      <input 
+                        type="number" 
+                        value={taskForm.totalPages}
+                        onChange={(e) => setTaskForm({...taskForm, totalPages: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                        placeholder="e.g. 3"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Status</label>
+                      <select 
+                        value={taskForm.status}
+                        onChange={(e) => setTaskForm({...taskForm, status: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="🟢 Active">🟢 Active</option>
+                        <option value="🔴 Disabled">🔴 Disabled</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">📷 Task Image (Optional URL)</label>
+                    <input 
+                      type="text" 
+                      value={taskForm.imageUrl}
+                      onChange={(e) => setTaskForm({...taskForm, imageUrl: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      placeholder="https://..."
+                    />
+                  </div>
+                </div>
+              ) : (modalAction === 'create_ad' || modalAction === 'edit_ad') ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">📝 Ad Name</label>
+                    <input 
+                      type="text" 
+                      value={adForm.adName}
+                      onChange={(e) => setAdForm({...adForm, adName: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      placeholder="e.g. Header Banner Ad"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Ad Network</label>
+                      <select 
+                        value={adForm.adSource || "Adsterra"}
+                        onChange={(e) => setAdForm({...adForm, adSource: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="Adsterra">Adsterra</option>
+                        <option value="Monetag">Monetag</option>
+                        <option value="AdCash">AdCash</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Ad Type</label>
+                      <select 
+                        value={adForm.adType || "Banner Ad"}
+                        onChange={(e) => setAdForm({...adForm, adType: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="Banner Ad">Banner Ad</option>
+                        <option value="Native Ad">Native Ad</option>
+                        <option value="Direct Link Ad">Direct Link Ad</option>
+                        <option value="VAST Video Ad">VAST Video Ad</option>
+                        <option value="Interstitial Ad">Interstitial Ad</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Page</label>
+                      <select 
+                        value={adForm.targetPage || "All Pages"}
+                        onChange={(e) => setAdForm({...adForm, targetPage: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="All Pages">All Pages</option>
+                        <option value="Earn Rewards">Earn Rewards</option>
+                        <option value="Reward Tasks">Reward Tasks</option>
+                        <option value="Download Page">Download Page</option>
+                        <option value="Withdraw Page">Withdraw Page</option>
+                        <option value="URL Shortener">URL Shortener</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Placement</label>
+                      <select 
+                        value={adForm.placement || "Header Banner"}
+                        onChange={(e) => setAdForm({...adForm, placement: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="Header Banner">Header Banner</option>
+                        <option value="Secondary Banner">Secondary Banner</option>
+                        <option value="Native Slot 1">Native Slot 1</option>
+                        <option value="Native Slot 2">Native Slot 2</option>
+                        <option value="Footer Banner">Footer Banner</option>
+                        <option value="Direct Link Button">Direct Link Button</option>
+                        <option value="Video Slot">Video Slot</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Status</label>
+                      <select 
+                        value={adForm.status || "🟢 Active"}
+                        onChange={(e) => setAdForm({...adForm, status: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="🟢 Active">🟢 Active</option>
+                        <option value="🔴 Disabled">🔴 Disabled</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="flex justify-between items-end mb-1">
+                      <label className="block text-sm font-medium text-slate-400">
+                        {adForm.adType === "Direct Link Ad" ? "🔗 Direct Link URL" : "📜 Ad Script Input (HTML/JS)"}
+                      </label>
+                      {adForm.adType !== "Direct Link Ad" && (
+                        <button onClick={() => setShowAdPreview(!showAdPreview)} className="text-xs text-blue-400 hover:text-blue-300 font-bold">🧪 Test Render</button>
+                      )}
+                    </div>
+                    <textarea 
+                      value={(adForm as any).scriptCode || ''}
+                      onChange={(e) => setAdForm({...adForm, scriptCode: e.target.value})}
+                      className={`w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-mono text-sm resize-none focus:outline-none focus:border-blue-500 ${adForm.adType === "Direct Link Ad" ? "h-16" : "h-48"}`}
+                      placeholder={adForm.adType === "Direct Link Ad" ? "https://..." : `Paste your ${adForm.adSource} ad script code here...`}
+                    />
+                    {showAdPreview && adForm.adType !== "Direct Link Ad" && (
+                      <div className="mt-4">
+                        <label className="text-sm font-medium text-slate-400 block mb-2 font-bold text-blue-400">🧪 Render Test Results</label>
+                        <div className="w-full bg-slate-900 border border-slate-700 rounded-xl overflow-hidden min-h-[150px] flex items-center justify-center text-slate-500 relative">
+                          <button 
+                            onClick={() => setShowAdPreview(false)} 
+                            className="absolute top-2 right-2 bg-slate-800 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs hover:bg-slate-700 z-10"
+                          >
+                            ×
+                          </button>
+                          {(adForm as any).scriptCode ? (
+                            <AdScriptRenderer 
+                              scriptCode={(adForm as any).scriptCode} 
+                              adType={adForm.adType}
+                              onStatusChange={(status, msg) => {
+                                console.log("Ad Preview Status:", status, msg);
+                                const el = document.getElementById('ad-preview-status');
+                                if (el) {
+                                  if (adForm.adType === "VAST Video Ad" || adForm.adType === "VAST Video") {
+                                    el.innerHTML = `
+                                      <div class="space-y-1 font-mono text-xs">
+                                        <div class="flex items-center gap-2">
+                                          <span class="${msg.includes('Video Loaded') || msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
+                                            ${msg.includes('Video Loaded') || msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Video Loaded
+                                          </span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                          <span class="${msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
+                                            ${msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Video Playing
+                                          </span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                          <span class="${msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
+                                            ${msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Ad Started
+                                          </span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                          <span class="${msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
+                                            ${msg.includes('Ad Completed') ? '🟢' : '⚫'} Ad Completed
+                                          </span>
+                                        </div>
+                                      </div>
+                                    `;
+                                  } else {
+                                    el.innerHTML = status === 'Loaded' 
+                                      ? '<span class="text-emerald-500 font-bold">🟢 Loaded successfully in preview</span>' 
+                                      : `<span class="text-red-500 font-bold">🔴 Render failed: ${msg || 'Unknown error'}</span>`;
+                                  }
+                                }
+                              }} 
+                            />
+                          ) : (
+                            "Empty Script"
+                          )}
+                        </div>
+                        <div id="ad-preview-status" className="mt-2 text-xs p-2 bg-slate-950 border border-slate-800 rounded font-mono">Pending render...</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : modalAction === 'view_task' && taskForm ? (
+                <div className="space-y-4">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-bold text-lg text-white">{taskForm.title}</h4>
+                        <p className="text-sm text-slate-400 mt-1">{taskForm.description}</p>
+                      </div>
+                      <span className={`px-2 py-1 rounded text-xs font-bold shrink-0 ${taskForm.status === '🟢 Active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                        {taskForm.status}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-800">
+                      <div>
+                        <p className="text-xs text-slate-500 mb-1">💰 Reward</p>
+                        <p className="font-bold text-yellow-400">₹{taskForm.rewardAmount}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500 mb-1">🕒 Timer</p>
+                        <p className="font-medium text-white">{taskForm.timerDuration}s</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500 mb-1">📄 Pages</p>
+                        <p className="font-medium text-white">{taskForm.totalPages}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500 mb-1">👥 Participants</p>
+                        <p className="font-medium text-white">{(taskForm as any).participants || 0}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setModalAction('edit_task')}
+                    className="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm font-medium text-white transition-colors"
+                  >
+                    ✏️ Edit Task
+                  </button>
+                </div>
+              ) : modalAction === 'view_user' && selectedUser ? (
+                <div className="space-y-4">
+                  <div className="bg-slate-800/50 rounded-xl p-4 space-y-3">
+                    <p className="text-xs text-slate-400">👤 Name: <span className="text-white ml-1">{selectedUser.name}</span></p>
+                    <p className="text-xs text-slate-400">📛 Username: <span className="text-white ml-1">@{selectedUser.username || 'N/A'}</span></p>
+                    <p className="text-xs text-slate-400">🆔 User ID: <span className="font-mono text-white ml-1">{selectedUser.id}</span></p>
+                    <p className="text-xs text-slate-400">📱 Phone: <span className="text-white ml-1">{selectedUser.phone || 'N/A'}</span></p>
+                    <p className="text-xs text-slate-400">📅 Join Date: <span className="text-white ml-1">{selectedUser.joinDate ? new Date(selectedUser.joinDate).toLocaleString() : 'N/A'}</span></p>
+                    <p className="text-xs text-slate-400">🕒 Last Active: <span className="text-white ml-1">{selectedUser.lastActive ? new Date(selectedUser.lastActive).toLocaleString() : 'N/A'}</span></p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">💰 Balance</p><p className="font-bold text-emerald-400">₹{Number(selectedUser.availableBalance || 0).toFixed(2)}</p></div>
+                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">🎁 Bonus</p><p className="font-bold text-yellow-400">₹{Number(selectedUser.bonusBalance || 0).toFixed(2)}</p></div>
+                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">📤 Uploads</p><p className="font-bold text-white">{selectedUser.uploads || 0}</p></div>
+                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">🔗 Links</p><p className="font-bold text-white">{selectedUser.links || 0}</p></div>
+                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">👥 Referrals</p><p className="font-bold text-white">{selectedUser.referrals || 0}</p></div>
+                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">💸 Withdrawals</p><p className="font-bold text-white">{selectedUser.withdrawals || 0}</p></div>
+                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">🎫 Tickets</p><p className="font-bold text-white">{selectedUser.tickets || 0}</p></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-4">
+                    <button onClick={() => setModalAction('add_balance')} className="py-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 rounded-xl text-xs font-bold transition-colors">💰 Add Balance</button>
+                    <button onClick={() => setModalAction('deduct_balance')} className="py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl text-xs font-bold transition-colors">➖ Deduct Balance</button>
+                    {selectedUser.status === 'Banned' ? (
+                      <button onClick={() => setModalAction('unban_user')} className="py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-xl text-xs font-bold transition-colors">✅ Unban User</button>
+                    ) : (
+                      <button onClick={() => setModalAction('ban_user')} className="py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors">🚫 Ban User</button>
+                    )}
+                    <button onClick={() => setModalAction('message_user')} className="py-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 rounded-xl text-xs font-bold transition-colors">📨 Send Message</button>
+                  </div>
+                </div>
+              ) : (modalAction === 'add_balance' || modalAction === 'deduct_balance') ? (
+                <div className="space-y-4">
+                  <div className="bg-slate-800/50 p-4 rounded-xl mb-4">
+                    <p className="text-xs text-slate-400">Current Balance</p>
+                    <p className="text-2xl font-bold text-white">₹{Number(selectedUser?.availableBalance || 0).toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Amount (₹)</label>
+                    <input type="number" onChange={(e) => setModalInput(JSON.stringify({ ...JSON.parse(modalInput || '{}'), amount: e.target.value }))} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white" placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Reason</label>
+                    <input type="text" onChange={(e) => setModalInput(JSON.stringify({ ...JSON.parse(modalInput || '{}'), reason: e.target.value }))} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white" placeholder="e.g. Bonus reward" />
+                  </div>
+                </div>
+              ) : modalAction === 'ban_user' ? (
+                <div className="space-y-4">
+                  <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl mb-4">
+                    <p className="text-red-400 text-sm">Are you sure you want to ban this user? They will not be able to access the bot.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Ban Reason (Sent to user)</label>
+                    <textarea onChange={(e) => setModalInput(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white h-24 resize-none" placeholder="Reason for ban..." />
+                  </div>
+                </div>
+              ) : modalAction === 'message_user' ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Message Type</label>
+                    <select onChange={(e) => setModalInput(JSON.stringify({ ...JSON.parse(modalInput || '{}'), type: e.target.value }))} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white">
+                      <option value="text">Text</option>
+                      <option value="image">Image (URL)</option>
+                      <option value="video">Video (URL)</option>
+                      <option value="document">Document (URL)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Content / URL</label>
+                    <textarea onChange={(e) => setModalInput(JSON.stringify({ ...JSON.parse(modalInput || '{}'), content: e.target.value }))} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white h-24 resize-none" placeholder="Message content or media URL..." />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            
+            <div className="p-4 border-t border-slate-800 bg-slate-900 flex justify-end gap-3 mt-auto shrink-0">
+              <button 
+                onClick={() => {
+                  setShowAdPreview(false);
+                  if (modalAction.endsWith('_ticket') && modalAction !== 'view_ticket') setModalAction('view_ticket');
+                  else if (modalAction === 'edit_announcement') setModalAction('view_announcement');
+                  else if (modalAction === 'edit_task') setModalAction('view_task');
+                  else if (['add_balance', 'deduct_balance', 'ban_user', 'message_user'].includes(modalAction)) setModalAction('view_user');
+                  else if (modalAction !== 'view_withdrawal' && modalAction.endsWith('_withdrawal') && modalAction !== 'view_withdrawal') setModalAction('view_withdrawal'); // approximation
+                  else setModalAction('none');
+                }}
+                className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white transition-colors"
+                disabled={modalLoading}
+              >
+                {(modalAction === 'view_withdrawal' || modalAction === 'view_ticket' || modalAction === 'view_announcement' || modalAction === 'view_task' || modalAction === 'view_user') ? 'Close' : (modalAction === 'create_ad' || modalAction === 'edit_ad') ? '❌ Cancel' : 'Back'}
+              </button>
+              
+              {modalAction === 'approve' && (
+                <button 
+                  onClick={handleActionSubmit}
+                  disabled={modalLoading}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
+                >
+                  {modalLoading ? 'Processing...' : '✅ Confirm'}
+                </button>
+              )}
+              {modalAction === 'paid' && (
+                <button 
+                  onClick={handleActionSubmit}
+                  disabled={modalLoading || !modalInput.trim()}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
+                >
+                  {modalLoading ? 'Processing...' : 'Submit Payment Info'}
+                </button>
+              )}
+              {modalAction === 'reject' && (
+                <button 
+                  onClick={handleActionSubmit}
+                  disabled={modalLoading || !modalInput.trim()}
+                  className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
+                >
+                  {modalLoading ? 'Processing...' : 'Confirm Rejection'}
+                </button>
+              )}
+              {modalAction === 'reply_ticket' && (
+                <button 
+                  onClick={handleActionSubmit}
+                  disabled={modalLoading || !modalInput.trim()}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
+                >
+                  {modalLoading ? 'Sending...' : 'Send Reply'}
+                </button>
+              )}
+              {modalAction === 'resolve_ticket' && (
+                <button 
+                  onClick={handleActionSubmit}
+                  disabled={modalLoading}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
+                >
+                  {modalLoading ? 'Resolving...' : '✅ Confirm'}
+                </button>
+              )}
+              {modalAction === 'close_ticket' && (
+                <button 
+                  onClick={handleActionSubmit}
+                  disabled={modalLoading}
+                  className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
+                >
+                  {modalLoading ? 'Closing...' : '✅ Confirm'}
+                </button>
+              )}
+              {(modalAction === 'create_announcement' || modalAction === 'edit_announcement') && (
+                <button 
+                  onClick={handleActionSubmit}
+                  disabled={modalLoading || !announcementForm.title.trim() || !announcementForm.message.trim() || (announcementForm.status === 'Scheduled' && !announcementForm.scheduledAt)}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
+                >
+                  {modalLoading ? 'Saving...' : '💾 Save Announcement'}
+                </button>
+              )}
+              {(modalAction === 'create_task' || modalAction === 'edit_task') && (
+                <button 
+                  onClick={handleActionSubmit}
+                  disabled={modalLoading || !taskForm.title.trim() || !taskForm.rewardAmount}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
+                >
+                  {modalLoading ? 'Saving...' : '💾 Save Task'}
+                </button>
+              )}
+              {(modalAction === 'create_ad' || modalAction === 'edit_ad') && (
+                <>
+                  <button 
+                    onClick={() => setFullAdPreview(true)} 
+                    className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold rounded-xl transition-all"
+                  >
+                    👁 Preview Ad
+                  </button>
+                  <button 
+                    onClick={handleActionSubmit}
+                    disabled={modalLoading || !adForm.adName.trim()}
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
+                  >
+                    {modalLoading ? 'Saving...' : '💾 Save Ad'}
+                  </button>
+                </>
+              )}
+              {modalAction === 'add_balance' && (
+                <button onClick={handleActionSubmit} disabled={modalLoading || !(JSON.parse(modalInput || '{}').amount)} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50">
+                  {modalLoading ? 'Processing...' : '✅ Confirm Add'}
+                </button>
+              )}
+              {modalAction === 'deduct_balance' && (
+                <button onClick={handleActionSubmit} disabled={modalLoading || !(JSON.parse(modalInput || '{}').amount)} className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50">
+                  {modalLoading ? 'Processing...' : '✅ Confirm Deduct'}
+                </button>
+              )}
+              {modalAction === 'ban_user' && (
+                <button onClick={handleActionSubmit} disabled={modalLoading || !modalInput.trim()} className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50">
+                  {modalLoading ? 'Processing...' : '🚫 Confirm Ban'}
+                </button>
+              )}
+              {modalAction === 'unban_user' && (
+                <button onClick={handleActionSubmit} disabled={modalLoading} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50">
+                  {modalLoading ? 'Processing...' : '✅ Confirm Unban'}
+                </button>
+              )}
+              {modalAction === 'message_user' && (
+                <button onClick={handleActionSubmit} disabled={modalLoading || !(JSON.parse(modalInput || '{}').content)} className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50">
+                  {modalLoading ? 'Sending...' : '📨 Send Message'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Ad Preview Modal */}
+      {fullAdPreview && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-[#020617] border border-slate-700 rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col my-8">
+            <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-2xl">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">👁 Preview Ad</h2>
+              <button onClick={() => setFullAdPreview(false)} className="text-slate-400 hover:text-white transition-colors">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+            
+            <div className="p-6 flex-1 flex flex-col md:flex-row gap-6">
+              {/* Left Side: Diagnostics */}
+              <div className="w-full md:w-1/3 bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">🧪 Admin Diagnostics</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-500">Ad Name</span><span className="font-bold text-white text-right">{adForm.adName || 'Untitled'}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Ad Network</span><span className="font-bold text-blue-400 text-right">{adForm.adSource}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Ad Type</span><span className="font-bold text-emerald-400 text-right">{adForm.adType}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Target Page</span><span className="font-bold text-purple-400 text-right">{adForm.targetPage || 'All Pages'}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Placement</span><span className="font-bold text-orange-400 text-right">{adForm.placement}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Status</span><span className="font-bold text-white text-right">{adForm.status}</span></div>
+                </div>
+                
+                <div className="pt-4 border-t border-slate-800">
+                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Render Status</h3>
+                  <div id="ad-preview-status-full" className="p-3 bg-slate-950 border border-slate-700 rounded-xl font-mono text-xs text-slate-500">
+                    Awaiting execution...
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Side: Render View */}
+              <div className="w-full md:w-2/3 flex flex-col gap-4">
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">👁 Live Render View</h3>
+                <div className="w-full flex-1 min-h-[300px] bg-slate-900 border border-slate-700 rounded-xl overflow-hidden flex flex-col items-center justify-center p-4 relative">
+                  {adForm.adType === "Direct Link Ad" ? (
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="w-16 h-16 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-400 mb-2">🔗</div>
+                      <p className="text-slate-300 text-center max-w-sm">Direct links don't render inline. Click below to verify the destination opens correctly in a new tab.</p>
+                      <a href={adForm.scriptCode} target="_blank" rel="noopener noreferrer" onClick={() => {
+                        const el = document.getElementById('ad-preview-status-full');
+                        if (el) el.innerHTML = '<div class="text-emerald-500 font-bold mb-1">🟢 Direct Link Verified</div><div class="text-slate-400">Click registered.</div>';
+                      }} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-blue-900/20">
+                        🔗 Test Direct Link
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="w-full h-full relative flex items-center justify-center bg-slate-950/50 rounded-xl border border-slate-800/50 min-h-[250px]">
+                      <span className="absolute top-2 right-2 bg-slate-800/80 text-[10px] text-slate-400 px-2 py-1 rounded font-bold uppercase tracking-wider z-10 pointer-events-none">Ad Sandbox</span>
+                      {adForm.scriptCode ? (
+                        <div className="w-full overflow-hidden flex justify-center items-center">
+                          <AdScriptRenderer 
+                            scriptCode={adForm.scriptCode} 
+                            adType={adForm.adType}
+                            onStatusChange={(status, msg, diag) => {
+                              const el = document.getElementById('ad-preview-status-full');
+                              if (el) {
+                                if (adForm.adType === "VAST Video Ad" || adForm.adType === "VAST Video") {
+                                  el.innerHTML = `
+                                    <div class="text-emerald-500 font-bold mb-2">📹 VAST Video Player Validation</div>
+                                    <div class="space-y-1.5 font-mono text-sm p-3 bg-slate-950/80 rounded-xl border border-slate-800">
+                                      <div class="flex items-center justify-between">
+                                        <span class="text-slate-400">Video Loaded</span>
+                                        <span class="${msg.includes('Video Loaded') || msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
+                                          ${msg.includes('Video Loaded') || msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Video Loaded
+                                        </span>
+                                      </div>
+                                      <div class="flex items-center justify-between">
+                                        <span class="text-slate-400">Video Playing</span>
+                                        <span class="${msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
+                                          ${msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Video Playing
+                                        </span>
+                                      </div>
+                                      <div class="flex items-center justify-between">
+                                        <span class="text-slate-400">Ad Started</span>
+                                        <span class="${msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
+                                          ${msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Ad Started
+                                        </span>
+                                      </div>
+                                      <div class="flex items-center justify-between">
+                                        <span class="text-slate-400">Ad Completed</span>
+                                        <span class="${msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
+                                          ${msg.includes('Ad Completed') ? '🟢' : '⚫'} Ad Completed
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div class="mt-2 text-xs text-slate-500 italic">Rendered via Video Player Validation instead of Standard Iframe.</div>
+                                  `;
+                                } else if (adForm.adType === "Interstitial Ad" || adForm.adType === "Interstitial") {
+                                  el.innerHTML = `
+                                    <div class="text-blue-400 font-bold mb-2">⚡ AdCash Interstitial Validation</div>
+                                    <div class="space-y-1.5 font-mono text-sm p-3 bg-slate-950/80 rounded-xl border border-slate-800">
+                                      <div class="flex items-center justify-between">
+                                        <span class="text-slate-400">Library Loaded</span>
+                                        <span class="text-emerald-400 font-bold">🟢 Yes</span>
+                                      </div>
+                                      <div class="flex items-center justify-between">
+                                        <span class="text-slate-400">window.aclib Available</span>
+                                        <span class="text-emerald-400 font-bold">🟢 Yes</span>
+                                      </div>
+                                      <div class="flex items-center justify-between">
+                                        <span class="text-slate-400">runInterstitial Executed</span>
+                                        <span class="text-emerald-400 font-bold">🟢 Yes</span>
+                                      </div>
+                                    </div>
+                                    <div class="mt-2 text-xs text-slate-500 italic">AdCash Interstitial library loaded once and executed successfully.</div>
+                                  `;
+                                } else if (status === 'Loaded') {
+                                  el.innerHTML = `
+                                    <div class="text-emerald-500 font-bold mb-1">🟢 Ad Loaded Successfully</div>
+                                    <div class="text-slate-400">Script Injected = <span class="text-white">${diag?.scriptInjected || 'Yes'}</span></div>
+                                    <div class="text-slate-400">Iframe Created = <span class="text-white">${diag?.iframeCreated || 'Yes'}</span></div>
+                                    <div class="text-slate-400">Content Rendered = <span class="text-white">${diag?.contentRendered || 'Yes'}</span></div>
+                                    <div class="text-slate-400">Container Size = <span class="text-white">${diag?.containerWidth || 0}x${diag?.containerHeight || 0}</span></div>
+                                    <div class="text-slate-400">DOM Elements = <span class="text-white">${diag?.domElementsCreated || 0}</span></div>
+                                  `;
+                                } else if (status === 'Pending') {
+                                  el.innerHTML = `
+                                    <div class="text-yellow-500 font-bold mb-1">⏳ Executing Script...</div>
+                                    <div class="text-slate-400">Script Injected = <span class="text-white">${diag?.scriptInjected || 'Yes'}</span></div>
+                                    <div class="text-slate-400">Iframe Created = <span class="text-white">${diag?.iframeCreated || 'No'}</span></div>
+                                    <div class="text-slate-400">Content Rendered = <span class="text-white">${diag?.contentRendered || 'No'}</span></div>
+                                    <div class="text-slate-400">Elements = <span class="text-white">${diag?.domElementsCreated || 0}</span></div>
+                                  `;
+                                } else {
+                                  el.innerHTML = `
+                                    <div class="text-red-500 font-bold mb-1">🔴 Render Failed</div>
+                                    <div class="text-red-400 font-bold mb-1">Reason: ${msg || 'No Ad Content Returned'}</div>
+                                    <div class="text-slate-400">Script Injected = <span class="text-white">${diag?.scriptInjected || 'Yes'}</span></div>
+                                    <div class="text-slate-400">Iframe Created = <span class="text-white">${diag?.iframeCreated || 'No'}</span></div>
+                                    <div class="text-slate-400">Content Rendered = <span class="text-white">${diag?.contentRendered || 'No'}</span></div>
+                                  `;
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 text-sm">No script provided</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-slate-800 flex justify-end gap-3 bg-slate-900 rounded-b-2xl">
+              <button onClick={() => setFullAdPreview(false)} className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold rounded-xl transition-all">Close Preview</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ title, value, highlight = false, bg = "bg-slate-900", border = "border-slate-800" }: { title: string, value: any, highlight?: boolean, bg?: string, border?: string }) {
+  return (
+    <div className={`${bg} border ${highlight ? 'border-red-500/50 bg-red-500/5' : border} rounded-2xl p-4 flex flex-col justify-between hover:border-slate-600 transition-colors`}>
+      <h3 className="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{title}</h3>
+      <p className={`text-xl sm:text-2xl font-bold ${highlight ? 'text-red-400' : 'text-white'}`}>{value}</p>
+    </div>
+  );
+}
+
+function HealthItem({ name }: { name: string, status: string }) {
+  return (
+    <div className="flex items-center justify-between p-3 bg-slate-950/50 rounded-xl border border-slate-800/50">
+      <span className="text-sm font-medium text-slate-300">{name}</span>
+    </div>
+  );
+}

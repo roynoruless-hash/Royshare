@@ -1,0 +1,4543 @@
+import { getDb } from "./lib/firebase";
+import { REWARD_TASKS } from "./lib/tasks";
+import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, deleteDoc, limit } from "firebase/firestore";
+
+function formatCurrency(amount: number, currency: string = "INR", includeSymbol: boolean = true): string {
+    if (currency === "USD") {
+        const converted = amount * 0.0118;
+        return includeSymbol ? `$${converted.toFixed(2)}` : converted.toFixed(2);
+    } else {
+        return includeSymbol ? `₹${amount.toFixed(2)}` : amount.toFixed(2);
+    }
+}
+
+export async function handleUpdate(botToken: string, update: any) {
+    if (!update.message && !update.callback_query) return;
+    
+    console.log("handleUpdate received update:", JSON.stringify(update));
+
+    const db = getDb();
+    const userObj = update.message ? update.message.from : (update.callback_query ? update.callback_query.from : null);
+    if (userObj && userObj.id) {
+        try {
+            const userDocRef = doc(db, "users", String(userObj.id));
+            const userSnap = await getDoc(userDocRef);
+            const nowIso = new Date().toISOString();
+            if (userSnap.exists()) {
+                const existingData = userSnap.data();
+                const uData: any = { lastActive: nowIso };
+                if (!existingData.joinDate) {
+                    uData.joinDate = nowIso;
+                }
+                if (userObj.first_name && !existingData.firstName) {
+                    uData.firstName = userObj.first_name;
+                }
+                if (userObj.username && !existingData.username) {
+                    uData.username = userObj.username;
+                }
+                await setDoc(userDocRef, uData, { merge: true });
+            } else {
+                await setDoc(userDocRef, {
+                    telegramId: userObj.id,
+                    username: userObj.username || "",
+                    firstName: userObj.first_name || "",
+                    joinDate: nowIso,
+                    lastActive: nowIso
+                }, { merge: true });
+            }
+        } catch (dbErr) {
+            console.error("Failed to automatically update user session timestamps:", dbErr);
+        }
+    }
+
+    if (update.message) {
+        const msg = update.message;
+        const chatId = msg.chat.id;
+        const user = msg.from;
+        
+        console.log("Message received:", msg.text, "from user:", user.id);
+        
+        if (msg.text && msg.text.startsWith("/start")) {
+             console.log("Matched /start command");
+             await processStart(botToken, chatId, user, msg.text);
+        } else if (msg.text === "/uploadtest") {
+            const db = getDb();
+            await setDoc(doc(db, "users", String(user.id)), { uploadTestMode: true }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "Test mode activated. Please send the file you want to test.");
+        } else if (msg.text === "💰 Balance") {
+            console.log("User selected Balance");
+            await processBalance(botToken, chatId, user);
+        } else if (msg.text === "💰 Earn Rewards") {
+            console.log("User selected Earn Rewards");
+            await processEarnRewards(botToken, chatId, user);
+        } else if (msg.text === "📢 Announcements") {
+            console.log("User selected Announcements");
+            await processAnnouncements(botToken, chatId, user);
+        } else if (msg.text === "🎁 Daily Bonus") {
+            console.log("User selected Daily Bonus");
+            await processDailyBonus(botToken, chatId, user);
+        } else if (msg.text === "🏆 Leaderboard") {
+            console.log("User selected Leaderboard");
+            await processLeaderboard(botToken, chatId, user);
+        } else if (msg.text === "⚙️ Settings") {
+            console.log("User selected Settings");
+            await processSettingsMenu(botToken, chatId, user);
+        } else if (msg.text === "👤 Account") {
+            console.log("User selected Account");
+            await processAccount(botToken, chatId, user);
+        } else if (msg.text === "📤 Upload File") {
+            console.log("User selected Upload File");
+            const db = getDb();
+            await setDoc(doc(db, "users", String(user.id)), { uploadTestMode: true }, { merge: true });
+            
+            const message = `📤 Send the file you want to upload.
+
+Supported Files:
+
+📄 PDF
+📦 APK
+🎬 Video
+🎵 Audio
+🖼 Image
+📁 ZIP/RAR
+📃 Documents
+
+Maximum File Size:
+2 GB`;
+            await sendTelegramMessage(botToken, chatId, message);
+        } else if (msg.text === "📁 My Content") {
+            console.log("User selected My Content");
+            await processMyContent(botToken, chatId, user);
+        } else if (msg.text === "🔗 URL Shortener") {
+            console.log("User selected URL Shortener");
+            const db = getDb();
+            await setDoc(doc(db, "users", String(user.id)), { 
+                pendingShortenUrl: true,
+                pendingWithdrawal: null,
+                pendingSearchFile: false
+            }, { merge: true });
+            const message = `🔗 Enter the URL you want to shorten.
+
+Example:
+
+https://google.com
+https://youtube.com`;
+            await sendTelegramMessage(botToken, chatId, message);
+        } else if (msg.text === "🔗 My Links") {
+            console.log("User selected My Links");
+            await processMyLinks(botToken, chatId, user);
+        } else if (msg.text === "📊 Dashboard") {
+            console.log("User selected Dashboard");
+            await processDashboard(botToken, chatId, user);
+        } else if (msg.text === "🎫 Support") {
+            console.log("User selected Support");
+            await processSupport(botToken, chatId, user);
+        } else if (msg.text === "📜 Withdrawal History") {
+            console.log("User selected Withdrawal History");
+            await processWithdrawalHistory(botToken, chatId, user);
+        } else if (msg.text === "💸 Withdraw") {
+            console.log("User selected Withdraw");
+            await processWithdraw(botToken, chatId, user);
+        } else if (msg.text === "👥 Refer & Earn") {
+            console.log("User selected Refer & Earn");
+            await processReferAndEarn(botToken, chatId, user);
+        } else if (msg.contact) {
+            console.log("Matched contact share");
+            await processContact(botToken, chatId, user, msg.contact);
+        } else if (msg.document || msg.photo || msg.video || msg.audio) {
+            const db = getDb();
+            const userDoc = await getDoc(doc(db, "users", String(user.id)));
+            if (userDoc.exists() && userDoc.data()?.uploadTestMode) {
+               await processRealUpload(botToken, chatId, user, msg);
+            }
+        } else {
+            const db = getDb();
+            const userDoc = await getDoc(doc(db, "users", String(user.id)));
+            const userData = userDoc.data();
+            const pendingAnnouncement = userData?.pendingAnnouncement;
+            const pendingTicket = userData?.pendingSupportTicket;
+
+            if (pendingAnnouncement) {
+                if (pendingAnnouncement.step === 'title') {
+                     await setDoc(doc(db, "users", String(user.id)), { pendingAnnouncement: { step: 'message', title: msg.text } }, { merge: true });
+                     await sendTelegramMessage(botToken, chatId, "Please enter the announcement Message:");
+                } else if (pendingAnnouncement.step === 'message') {
+                     await setDoc(doc(db, "users", String(user.id)), { pendingAnnouncement: { step: 'type', title: pendingAnnouncement.title, message: msg.text } }, { merge: true });
+                     const inlineKeyboard = {
+                         inline_keyboard: [
+                             [{ text: "🟢 Update", callback_data: "announce_type_Update" }],
+                             [{ text: "🟡 Maintenance", callback_data: "announce_type_Maintenance" }],
+                             [{ text: "🔴 Important Notice", callback_data: "announce_type_Important_Notice" }],
+                             [{ text: "🎉 New Feature", callback_data: "announce_type_New_Feature" }],
+                             [{ text: "💰 Bonus Event", callback_data: "announce_type_Bonus_Event" }]
+                         ]
+                     };
+                     await sendTelegramMessage(botToken, chatId, "Select Announcement Type:", { reply_markup: inlineKeyboard });
+                }
+            } else if (pendingTicket && pendingTicket.status === 'typing_description') {
+                // Create Ticket
+                const ticketId = "TKT" + (Math.floor(Math.random() * 900000) + 100000);
+                const docRef = await addDoc(collection(db, "tickets"), {
+                    ticketId,
+                    userId: String(user.id),
+                    name: user.first_name + (user.last_name ? " " + user.last_name : ""),
+                    username: user.username || "None",
+                    issueType: getIssueTypeLabel(pendingTicket.type),
+                    message: msg.text,
+                    status: "🟡 Open",
+                    createdAt: new Date().toISOString(),
+                    lastReply: "",
+                    adminReply: ""
+                });
+                await setDoc(doc(db, "users", String(user.id)), { pendingSupportTicket: null }, { merge: true });
+                const dateString = formatDate(new Date().toISOString());
+                const issueLabel = getIssueTypeLabel(pendingTicket.type);
+                
+                const successMsg = `✅ Ticket Created Successfully
+
+🎫 Ticket ID:
+${ticketId}
+
+📂 Issue Type:
+${issueLabel}
+
+📌 Status:
+🟡 Open
+
+📅 Created:
+${dateString}
+
+⏱ Estimated Response Time:
+2-24 Hours`;
+
+                await sendTelegramMessage(botToken, chatId, successMsg);
+
+                // Admin Notification
+                try {
+                    const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+                    if (settingsDoc.exists()) {
+                        const sData = settingsDoc.data();
+                        const adminChatId = sData?.chatId;
+                        if (adminChatId) {
+                            const adminMsg = `🎫 New Support Ticket
+
+Ticket ID:
+${ticketId}
+
+👤 User:
+${user.first_name + (user.last_name ? " " + user.last_name : "")}
+
+📛 Username:
+@${user.username || "None"}
+
+🆔 User ID:
+${user.id}
+
+📂 Issue:
+${issueLabel}
+
+📝 Message:
+${msg.text}`;
+
+                            const adminReplyMarkup = {
+                                inline_keyboard: [
+                                    [
+                                        { text: "💬 Reply", callback_data: `admin_reply_${docRef.id}` },
+                                        { text: "🟢 Resolve", callback_data: `admin_resolve_${docRef.id}` },
+                                        { text: "🔴 Close", callback_data: `admin_close_${docRef.id}` }
+                                    ]
+                                ]
+                            };
+
+                            await sendTelegramMessage(botToken, adminChatId, adminMsg, { reply_markup: adminReplyMarkup });
+                        }
+                    }
+                } catch (adminErr) {
+                    console.error("Error sending notification to admin:", adminErr);
+                }
+            } else if (userData?.pendingSearchFile) {
+                await setDoc(doc(db, "users", String(user.id)), { pendingSearchFile: false }, { merge: true });
+                await handleSearchQuery(botToken, chatId, user, msg.text);
+            } else if (userData?.pendingShortenUrl) {
+                await setDoc(doc(db, "users", String(user.id)), { pendingShortenUrl: false }, { merge: true });
+                await processShortenUrl(botToken, chatId, user, msg.text);
+            } else if (userData?.pendingWithdrawal) {
+                await handleWithdrawalTextInput(botToken, chatId, user, msg.text, userData.pendingWithdrawal);
+            } else {
+                console.log("Message did not match command or contact");
+            }
+        }
+    } else if (update.callback_query) {
+        console.log("Callback query received");
+        await processCallback(botToken, update.callback_query);
+    }
+}
+
+async function logDbError(context: { collection: string, docId: string, operation: string, userId?: number }) {
+    // Silent logging
+    // console.error(`DB Error:`, { context });
+}
+
+async function ensureSettings() {
+    const db = getDb();
+    const docRef = doc(db, "settings", "telegram");
+    const docSnap = await getDoc(docRef);
+    if (!docSnap.exists()) {
+        console.log("Seeding default settings/telegram");
+        await setDoc(docRef, {
+            botToken: "",
+            chatId: "",
+            forceJoinChannel: "",
+            forceJoinGroup: "",
+            storageChannelId: "",
+            channelLink: "", // Added these to match previous code expectations
+            groupLink: "",
+            pollingEnabled: true,
+            webhookEnabled: false
+        });
+        console.log("Settings/telegram seeded successfully");
+    }
+}
+
+async function processStart(botToken: string, chatId: number, user: any, startText?: string) {
+    console.log("processStart: Checking user status");
+    const db = getDb();
+    
+    // Check deep link parameter
+    if (startText && startText.includes(" ref_")) {
+        const referrerId = startText.split(" ref_")[1]?.trim();
+        const referredUserId = String(user.id);
+        
+        try {
+            const userDocRef = doc(db, "users", referredUserId);
+            const userDoc = await getDoc(userDocRef);
+            const isExistingVerified = userDoc.exists() && userDoc.data()?.membershipVerified;
+            
+            if (referredUserId === referrerId) {
+                console.log(`Referral Rejected: Self Referral (${referredUserId})`);
+            } else if (isExistingVerified) {
+                console.log(`Referral Rejected: Existing Registered User (${referredUserId})`);
+            } else {
+                // Check if user is already linked/has referral claim (Duplicate Referral Claim / already linked to another referrer)
+                const refDocRef = doc(db, "referrals", referredUserId);
+                const refDoc = await getDoc(refDocRef);
+                
+                if (refDoc.exists()) {
+                    console.log(`Referral Rejected: User already linked to referrer or has duplicate claim`);
+                } else {
+                    // Create pending referral relationship
+                    await setDoc(refDocRef, {
+                        referrerId: String(referrerId),
+                        referredUserId: referredUserId,
+                        referredUsername: user.username || "",
+                        referredFirstName: user.first_name || "",
+                        referredLastName: user.last_name || "",
+                        joinDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+                        status: "pending",
+                        pendingCommission: 0,
+                        approvedCommission: 0,
+                        totalCommission: 0
+                    });
+                    
+                    // Link on user document
+                    await setDoc(userDocRef, {
+                        referredBy: String(referrerId)
+                    }, { merge: true });
+                    
+                    console.log(`Referral Linked: ${referredUserId} referred by ${referrerId}`);
+                }
+            }
+        } catch (err) {
+            console.error("Error setting up referral relationship during processStart:", err);
+        }
+    }
+
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    if (userDoc.exists() && userDoc.data()?.membershipVerified) {
+        await sendTelegramMessage(botToken, chatId, "Welcome back to RoyShare!", { reply_markup: getMainMenuKeyboard() });
+    } else {
+        await sendTelegramMessage(botToken, chatId, "📱 Please share your contact to continue.", {
+            reply_markup: {
+                keyboard: [[{ text: "📱 Share Contact", request_contact: true }]],
+                one_time_keyboard: true,
+                resize_keyboard: true
+            }
+        });
+    }
+}
+
+async function processUploadTest(botToken: string, chatId: number, user: any, msg: any) {
+   const db = getDb();
+   await setDoc(doc(db, "users", String(user.id)), { uploadTestMode: false }, { merge: true });
+   
+   const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+   const storageChannelId = settingsDoc.data()?.storageChannelId || "NOT_SET";
+   
+   const fileId = msg.document?.file_id || (msg.photo ? msg.photo[msg.photo.length - 1].file_id : "UNKNOWN");
+   const fileName = msg.document?.file_name || "photo.jpg";
+   const fileSize = msg.document?.file_size || 0;
+
+   const messageId = "TEST_" + Date.now();
+   const firestoreDocId = "TEST_DB_" + Date.now();
+   const downloadLink = `https://t.me/c/${storageChannelId.toString().replace('-100', '')}/${messageId}`;
+
+   await setDoc(doc(db, "test_uploads", firestoreDocId), {
+       fileId, fileName, fileSize, messageId, storageChannelId, timestamp: new Date().toISOString()
+   });
+
+   const reply = `Upload Status: Success
+File Name: ${fileName}
+File Size: ${fileSize}
+Telegram Message ID: ${messageId}
+Storage Channel ID: ${storageChannelId}
+Firestore Document ID: ${firestoreDocId}
+Generated Download Link: ${downloadLink}`;
+
+   await sendTelegramMessage(botToken, chatId, reply);
+}
+
+async function forwardFileToStorageChannel(botToken: string, storageChannelId: string, msg: any): Promise<number | null> {
+    try {
+        let method = "";
+        let body: any = { chat_id: storageChannelId };
+        
+        if (msg.document) {
+            method = "sendDocument";
+            body.document = msg.document.file_id;
+        } else if (msg.photo) {
+            method = "sendPhoto";
+            body.photo = msg.photo[msg.photo.length - 1].file_id;
+        } else if (msg.video) {
+            method = "sendVideo";
+            body.video = msg.video.file_id;
+        } else if (msg.audio) {
+            method = "sendAudio";
+            body.audio = msg.audio.file_id;
+        } else {
+            return null;
+        }
+
+        const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        });
+        const resData = await res.json();
+        if (resData.ok && resData.result) {
+            return resData.result.message_id;
+        } else {
+            console.error("Telegram upload response error:", resData);
+        }
+    } catch (e) {
+        console.error("Error uploading file to storage channel:", e);
+    }
+    return null;
+}
+
+async function processRealUpload(botToken: string, chatId: number, user: any, msg: any) {
+    const db = getDb();
+    
+    // Turn off upload mode
+    await setDoc(doc(db, "users", String(user.id)), { uploadTestMode: false }, { merge: true });
+    
+    // 1. Get storageChannelId from settings/telegram
+    const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+    const storageChannelId = settingsDoc.data()?.storageChannelId || "NOT_SET";
+    
+    // 2. Extract file properties
+    let fileId = "UNKNOWN";
+    let fileName = "file";
+    let fileSize = 0;
+    
+    if (msg.document) {
+        fileId = msg.document.file_id;
+        fileName = msg.document.file_name || "document";
+        fileSize = msg.document.file_size || 0;
+    } else if (msg.photo) {
+        const largestPhoto = msg.photo[msg.photo.length - 1];
+        fileId = largestPhoto.file_id;
+        fileName = `Photo_${Date.now()}.jpg`;
+        fileSize = largestPhoto.file_size || 0;
+    } else if (msg.video) {
+        fileId = msg.video.file_id;
+        fileName = msg.video.file_name || `Video_${Date.now()}.mp4`;
+        fileSize = msg.video.file_size || 0;
+    } else if (msg.audio) {
+        fileId = msg.audio.file_id;
+        fileName = msg.audio.file_name || `Audio_${Date.now()}.mp3`;
+        fileSize = msg.audio.file_size || 0;
+    }
+    
+    // 3. Upload/forward to the storage channel
+    let telegramMessageId: number | string = "NOT_SET";
+    if (storageChannelId && storageChannelId !== "NOT_SET") {
+        const forwardedId = await forwardFileToStorageChannel(botToken, storageChannelId, msg);
+        if (forwardedId !== null) {
+            telegramMessageId = forwardedId;
+        }
+    }
+    
+    // 4. Generate a unique File ID
+    const uniqueFileId = "FL" + Math.random().toString(36).substring(2, 10).toUpperCase();
+    
+    // 5. Generate public link
+    const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const baseDomain = appUrl.replace(/\/$/, "");
+    const generatedLink = `${baseDomain}/download/${uniqueFileId}`;
+    
+    // 6. Format upload date
+    const formattedDate = new Date().toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+    }); // "23 Jun 2026"
+    
+    // 7. Save to Firestore
+    await setDoc(doc(db, "uploads", uniqueFileId), {
+        fileId: uniqueFileId,
+        userId: String(user.id),
+        fileName,
+        fileSize,
+        telegramMessageId,
+        storageChannelId,
+        uploadDate: formattedDate,
+        generatedLink,
+        status: "active",
+        downloads: 0,
+        earnings: 0
+    });
+    
+    // Update user stats
+    try {
+        const uRef = doc(db, "users", String(user.id));
+        const uSnap = await getDoc(uRef);
+        if (uSnap.exists()) {
+            const currentTotalFiles = uSnap.data().totalFiles || 0;
+            await setDoc(uRef, {
+                totalFiles: currentTotalFiles + 1
+            }, { merge: true });
+        }
+    } catch (e) {}
+
+    // Synchronize referral status to make active if applicable
+    await syncReferralsForUser(db, botToken, String(user.id));
+    
+    // 8. Send reply
+    const displaySize = formatBytes(fileSize);
+    
+    const message = `✅ File Uploaded Successfully
+
+📁 File Name: ${fileName}
+
+📦 File Size: ${displaySize}
+
+🆔 File ID: ${uniqueFileId}
+
+📅 Upload Date: ${formattedDate}
+
+🔗 File Link:
+
+${generatedLink}`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "📋 Copy Link", callback_data: `mycontent_copy_${uniqueFileId}` }],
+            [{ text: "📁 My Content", callback_data: "mycontent_back" }],
+            [{ text: "📤 Upload Another File", callback_data: "mycontent_upload" }]
+        ]
+    };
+    
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processShortenUrl(botToken: string, chatId: number, user: any, urlText: string) {
+    const db = getDb();
+    
+    let isValid = false;
+    try {
+        const url = new URL(urlText.trim());
+        isValid = url.protocol === "http:" || url.protocol === "https:";
+    } catch (_) {
+        isValid = false;
+    }
+    
+    if (!isValid) {
+        await sendTelegramMessage(botToken, chatId, "❌ Invalid URL format. Please enter a valid URL starting with http:// or https://.");
+        return;
+    }
+    
+    const linkId = "LN" + Math.random().toString(36).substring(2, 10).toUpperCase();
+    const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const baseDomain = appUrl.replace(/\/$/, "");
+    const shortLink = `${baseDomain}/lnk/${linkId}`;
+    
+    const formattedDate = new Date().toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+    });
+    
+    await setDoc(doc(db, "links", linkId), {
+        linkId,
+        userId: String(user.id),
+        originalUrl: urlText.trim(),
+        shortUrl: shortLink,
+        createdAt: formattedDate,
+        status: "active"
+    });
+    
+    // Update user stats
+    try {
+        const uRef = doc(db, "users", String(user.id));
+        const uSnap = await getDoc(uRef);
+        if (uSnap.exists()) {
+            const currentTotalLinks = uSnap.data().totalLinks || 0;
+            await setDoc(uRef, {
+                totalLinks: currentTotalLinks + 1
+            }, { merge: true });
+        }
+    } catch (e) {}
+
+    // Synchronize referral status to make active if applicable
+    await syncReferralsForUser(db, botToken, String(user.id));
+    
+    const message = `✅ URL Shortened Successfully
+
+🔗 Original URL:
+${urlText.trim()}
+
+🆔 Link ID:
+${linkId}
+
+🔗 Short Link:
+${shortLink}`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "📋 Copy Link", callback_data: `shortlink_copy_${linkId}` }],
+            [{ text: "🔗 My Links", callback_data: "shortlink_mylinks" }],
+            [{ text: "➕ Create Another Link", callback_data: "shortlink_another" }]
+        ]
+    };
+    
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processMyLinks(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    
+    // Fetch uploads (files)
+    const qUploads = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
+    const snapshotUploads = await getDocs(qUploads);
+    
+    // Fetch shortened links
+    const qLinks = query(collection(db, "links"), where("userId", "==", String(user.id)));
+    const snapshotLinks = await getDocs(qLinks);
+    
+    const activeUploads = snapshotUploads.docs.filter(d => d.data().status !== "deleted");
+    const activeLinks = snapshotLinks.docs.filter(d => d.data().status !== "deleted");
+    
+    if (activeUploads.length === 0 && activeLinks.length === 0) {
+        await sendTelegramMessage(botToken, chatId, "📭 No active files uploaded or links shortened yet.\nUse 📤 Upload File or 🔗 URL Shortener to create your first link.");
+        return;
+    }
+    
+    for (const docRef of activeUploads) {
+        const file = docRef.data();
+        const displaySize = typeof file.fileSize === 'number' ? formatBytes(file.fileSize) : (file.fileSize || "N/A");
+        const formattedDate = file.uploadDate || file.uploadedAt || "N/A";
+        const earningsVal = typeof file.earnings === 'number' ? file.earnings : 0;
+        const message = `📄 File Name: ${file.fileName || "N/A"}
+📦 File Size: ${displaySize}
+📅 Upload Date: ${formattedDate}
+📥 Total Downloads: ${file.downloads || 0}
+💰 Total Earnings: ${formatCurrency(earningsVal, currency)}
+🔗 Download Link: ${file.generatedLink || file.publicLink || file.downloadLink || "N/A"}`;
+
+        const inlineKeyboard = {
+            inline_keyboard: [
+                [{ text: "📊 Stats", callback_data: `stats_${docRef.id}` }, { text: "🗑 Delete Link", callback_data: `delete_${docRef.id}` }]
+            ]
+        };
+        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+    }
+    
+    for (const docRef of activeLinks) {
+        const link = docRef.data();
+        const message = `🔗 Short Link Details
+        
+🆔 Link ID: ${link.linkId || docRef.id}
+🔗 Original URL: ${link.originalUrl || "N/A"}
+🔗 Short Link: ${link.shortUrl || "N/A"}
+📅 Created Date: ${link.createdAt || "N/A"}`;
+
+        const inlineKeyboard = {
+            inline_keyboard: [
+                [{ text: "📋 Copy Link", callback_data: `shortlink_copy_${link.linkId}` }, { text: "🗑 Delete Link", callback_data: `shortlink_delete_${link.linkId}` }]
+            ]
+        };
+        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+    }
+}
+
+async function syncReferralsForUser(db: any, botToken: string, referredUserId: string) {
+    try {
+        const refDocRef = doc(db, "referrals", referredUserId);
+        const refSnap = await getDoc(refDocRef);
+        if (!refSnap.exists()) return;
+
+        const refData = refSnap.data();
+        const referrerId = refData.referrerId;
+
+        // Get referred user's current earnings
+        const referredUserRef = doc(db, "users", referredUserId);
+        const referredUserSnap = await getDoc(referredUserRef);
+        if (!referredUserSnap.exists()) return;
+
+        const uData = referredUserSnap.data();
+        
+        // Sum file earnings
+        const uploadsQuery = query(collection(db, "uploads"), where("userId", "==", referredUserId));
+        const uploadsSnapshot = await getDocs(uploadsQuery);
+        let computedFileEarnings = 0;
+        uploadsSnapshot.forEach(docSnap => {
+            computedFileEarnings += docSnap.data().earnings || 0;
+        });
+
+        const fileEarnings = uData?.fileEarnings !== undefined ? uData.fileEarnings : computedFileEarnings;
+        const linkEarnings = uData.linkEarnings || 0;
+        const bonusBalance = uData.bonusBalance !== undefined ? uData.bonusBalance : (uData.bonus || 0);
+        const rewardBalance = uData.rewardBalance || 0;
+
+        // Active requirements check
+        const totalFilesQuery = query(collection(db, "uploads"), where("userId", "==", referredUserId));
+        const totalFilesSnap = await getDocs(totalFilesQuery);
+        const hasUploaded = !totalFilesSnap.empty;
+
+        const totalLinksQuery = query(collection(db, "links"), where("userId", "==", referredUserId));
+        const totalLinksSnap = await getDocs(totalLinksQuery);
+        const hasCreatedLink = !totalLinksSnap.empty;
+
+        const hasBonus = bonusBalance > 0 || rewardBalance > 0;
+
+        const isActive = hasUploaded || hasCreatedLink || hasBonus;
+
+        const totalEarnings = fileEarnings + linkEarnings + bonusBalance + rewardBalance;
+        const newCommission = totalEarnings * 0.20;
+
+        const currentStatus = refData.status || "pending";
+        const newStatus = isActive ? "approved" : "pending";
+
+        const prevApproved = refData.approvedCommission || 0;
+        let pendingComm = 0;
+        let approvedComm = 0;
+
+        if (isActive) {
+            approvedComm = newCommission;
+            pendingComm = 0;
+        } else {
+            approvedComm = 0;
+            pendingComm = newCommission;
+        }
+
+        // Save updated referral details
+        await setDoc(refDocRef, {
+            status: newStatus,
+            pendingCommission: pendingComm,
+            approvedCommission: approvedComm,
+            totalCommission: approvedComm + pendingComm
+        }, { merge: true });
+
+        // Update referrer's user document if there is any increment in approved commission!
+        const diff = approvedComm - prevApproved;
+        if (diff > 0) {
+            const referrerRef = doc(db, "users", String(referrerId));
+            const referrerSnap = await getDoc(referrerRef);
+            if (referrerSnap.exists()) {
+                const rData = referrerSnap.data();
+                const referrerEarnings = rData?.referralEarnings || 0;
+                const referrerBalance = rData?.availableBalance || 0;
+
+                await setDoc(referrerRef, {
+                    referralEarnings: referrerEarnings + diff,
+                    availableBalance: referrerBalance + diff
+                }, { merge: true });
+
+                // Write transaction record for referrer
+                const { dateStr, timeStr } = formatTransactionDateTime(new Date());
+                const txData = {
+                    amount: diff,
+                    type: "Referral Commission",
+                    date: dateStr,
+                    time: timeStr,
+                    userId: String(referrerId),
+                    createdAt: new Date().toISOString()
+                };
+                await Promise.all([
+                    addDoc(collection(db, "transactionHistory"), txData),
+                    addDoc(collection(db, "transactions"), txData)
+                ]);
+
+                // Notify referrer!
+                try {
+                    const refDoc = await getDoc(doc(db, "users", String(referrerId)));
+                    const refCurrency = refDoc.exists() ? (refDoc.data()?.currency || "INR") : "INR";
+                    const referredName = uData.firstName || uData.username || "Referred Friend";
+                    await sendTelegramMessage(botToken, Number(referrerId), `✅ Referral Commission Approved!\n\nYou earned ${formatCurrency(diff, refCurrency)} from your referred friend ${referredName}.`);
+                } catch (e) {}
+            }
+        } else if (currentStatus === "pending" && newStatus === "approved") {
+            // Even if commission diff is 0, notify if they just transitioned to active!
+            try {
+                await sendTelegramMessage(botToken, Number(referrerId), `🔥 Your referred friend became active! All commission is now approved and future earnings will be credited instantly.`);
+            } catch (e) {}
+        }
+    } catch (err) {
+        console.error("Error syncing referral for user:", referredUserId, err);
+    }
+}
+
+async function triggerActiveReferral(db: any, botToken: string, userId: string) {
+    await syncReferralsForUser(db, botToken, userId);
+}
+
+async function processReferAndEarn(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userId = String(user.id);
+    const userDoc = await getDoc(doc(db, "users", userId));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    
+    // 1. Sync all referrals under this user to ensure we have the absolute latest state
+    try {
+        const refQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
+        const refSnap = await getDocs(refQuery);
+        for (const docSnap of refSnap.docs) {
+            await syncReferralsForUser(db, botToken, docSnap.id);
+        }
+    } catch (e) {
+        console.error("Error updating referrals on processReferAndEarn:", e);
+    }
+
+    // 2. Query referrals for this user
+    const refQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
+    const refSnap = await getDocs(refQuery);
+
+    const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const baseDomain = appUrl.replace(/\/$/, "");
+    const referralLink = `${baseDomain}/ref/${userId}`;
+
+    let message = "";
+    if (refSnap.empty) {
+        message = `👥 Refer & Earn
+
+You have not referred anyone yet.
+
+Share your referral link and start earning commissions.`;
+    } else {
+        let totalReferrals = 0;
+        let totalCommission = 0;
+        let pendingCommission = 0;
+        let approvedCommission = 0;
+
+        refSnap.forEach(docSnap => {
+            const data = docSnap.data();
+            totalReferrals++;
+            pendingCommission += (data.pendingCommission || 0);
+            approvedCommission += (data.approvedCommission || 0);
+            totalCommission += (data.totalCommission || 0);
+        });
+
+        message = `👥 Refer & Earn
+
+👥 Total Referrals: ${totalReferrals}
+
+💰 Total Commission: ${formatCurrency(totalCommission, currency)}
+
+⏳ Pending Commission: ${formatCurrency(pendingCommission, currency)}
+
+✅ Approved Commission: ${formatCurrency(approvedCommission, currency)}
+
+━━━━━━━━━━━━━━━
+
+🔗 Your Referral Link:
+
+${referralLink}`;
+    }
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [
+                { text: "📋 Copy Referral Link", callback_data: `referral_copy_${userId}` },
+                { text: "📤 Share Referral Link", url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}` }
+            ],
+            [
+                { text: "📜 Referral History", callback_data: "referral_history" },
+                { text: "🔄 Refresh", callback_data: "referral_refresh" }
+            ]
+        ]
+    };
+
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processReferralHistory(botToken: string, chatId: number, user: any, callbackQueryId?: string) {
+    const db = getDb();
+    const userId = String(user.id);
+
+    const refQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
+    const refSnap = await getDocs(refQuery);
+
+    if (refSnap.empty) {
+        let message = `👥 Refer & Earn
+
+You have not referred anyone yet.
+
+Share your referral link and start earning commissions.`;
+        
+        await sendTelegramMessage(botToken, chatId, message, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "🔙 Back", callback_data: "referral_back" }]
+                ]
+            }
+        });
+        return;
+    }
+
+    let message = `📜 Referral History\n\n`;
+    
+    refSnap.forEach(docSnap => {
+        const data = docSnap.data();
+        const firstName = data.referredFirstName || "User";
+        const lastName = data.referredLastName || "";
+        const fullName = lastName ? `${firstName} ${lastName}` : firstName;
+        const usernameStr = data.referredUsername ? `@${data.referredUsername}` : "N/A";
+        const rUserId = data.referredUserId || docSnap.id;
+        const joinDate = data.joinDate || "N/A";
+        const statusVal = data.status === "approved" ? "✅ Approved" : "⏳ Pending";
+
+        message += `👤 Name: ${fullName}
+📛 Username: ${usernameStr}
+🆔 User ID: ${rUserId}
+📅 Join Date: ${joinDate}
+Status:
+${statusVal}
+
+━━━━━━━━━━━━━━━\n\n`;
+    });
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔙 Back to Refer & Earn", callback_data: "referral_back" }]
+        ]
+    };
+
+    if (callbackQueryId) {
+        try {
+            await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ callback_query_id: callbackQueryId })
+            });
+        } catch (e) {}
+    }
+
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processAccount(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDocRef = doc(db, "users", String(user.id));
+    const userDoc = await getDoc(userDocRef);
+    const userData = userDoc.data();
+
+    const uploadsQuery = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
+    const uploadsSnapshot = await getDocs(uploadsQuery);
+    
+    // Live validation for group and channel joins using current settings or defaults
+    const channelId = -1003385031126;
+    const groupId = -1003929156200;
+
+    const checkMemberById = async (cId: number, uId: number) => {
+        try {
+            const res = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${cId}&user_id=${uId}`);
+            const data = await res.json();
+            if (data.ok && data.result) {
+                const status = data.result.status;
+                return status === 'member' || status === 'administrator' || status === 'creator';
+            }
+            return false;
+        } catch {
+            return false;
+        }
+    };
+
+    let isChannelJoined = false;
+    let isGroupJoined = false;
+    try {
+        isChannelJoined = await checkMemberById(channelId, user.id);
+        isGroupJoined = await checkMemberById(groupId, user.id);
+    } catch (e) {
+        console.error("Error in real-time checkMemberById:", e);
+    }
+
+    // Default to true if DB says verified so users aren't locked out on api flakiness
+    if (userData?.membershipVerified) {
+        if (!isChannelJoined) isChannelJoined = true;
+        if (!isGroupJoined) isGroupJoined = true;
+    }
+
+    const contactVerified = userData?.contactVerified || !!userData?.phone;
+    
+    const telegramIdDisplay = user.id ? String(user.id) : "Not Available";
+    const firstNameDisplay = user.first_name || userData?.firstName || "Not Available";
+    const usernameDisplay = (user.username || userData?.username) ? `@${user.username || userData?.username}` : "Not Available";
+    const phoneNumberDisplay = userData?.phone || "Not Available";
+
+    const totalFilesDisplay = (uploadsSnapshot && uploadsSnapshot.size !== undefined) ? uploadsSnapshot.size : "Not Available";
+    const totalLinksDisplay = userData?.totalLinks !== undefined ? userData?.totalLinks : "Not Available";
+    const totalReferralsDisplay = userData?.referrals !== undefined ? userData?.referrals : "Not Available";
+
+    const joinDateDisplay = userData?.joinDate ? new Date(userData.joinDate).toLocaleString() : "Not Available";
+    const lastActiveDisplay = userData?.lastActive ? new Date(userData.lastActive).toLocaleString() : "Not Available";
+
+    const contactVerifyText = contactVerified ? "✅ Verified" : "❌ Not Verified";
+    const channelJoinText = isChannelJoined ? "✅ Joined" : "❌ Not Joined";
+    const groupJoinText = isGroupJoined ? "✅ Joined" : "❌ Not Joined";
+
+    const message = `👤 Account Information
+
+🆔 User ID: ${telegramIdDisplay}
+👤 Name: ${firstNameDisplay}
+📛 Username: ${usernameDisplay}
+📱 Mobile Number: ${phoneNumberDisplay}
+
+📁 Total Files: ${totalFilesDisplay}
+🔗 Total Links: ${totalLinksDisplay}
+👥 Total Referrals: ${totalReferralsDisplay}
+
+📅 Join Date: ${joinDateDisplay}
+🕒 Last Active: ${lastActiveDisplay}
+
+Verification Status:
+
+📞 Contact Verification:
+${contactVerifyText}
+
+📢 Channel Join:
+${channelJoinText}
+
+👥 Group Join:
+${groupJoinText}
+
+🔐 Account Status:
+✅ Active`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [[
+            { text: "🔄 Refresh Account", callback_data: "refresh_account" },
+            { text: "📋 Copy User ID", callback_data: "copy_user_id" }
+        ]]
+    };
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+function formatTransactionDateTime(d: Date) {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const dateStr = `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+    
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const timeStr = `${hours}:${minutes} ${ampm}`;
+    
+    return { dateStr, timeStr };
+}
+
+async function ensureTransactionsBackfill(db: any, userId: string, userData: any) {
+    try {
+        const qHistory = query(collection(db, "transactionHistory"), where("userId", "==", userId));
+        const snapHistory = await getDocs(qHistory);
+        const qLegacy = query(collection(db, "transactions"), where("userId", "==", userId));
+        const snapLegacy = await getDocs(qLegacy);
+        
+        if (!snapHistory.empty || !snapLegacy.empty) return;
+
+        const now = new Date();
+        const bonusAmount = userData?.bonusBalance !== undefined ? userData.bonusBalance : (userData?.bonus || 0);
+        if (bonusAmount > 0) {
+            const d = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            const { dateStr, timeStr } = formatTransactionDateTime(d);
+            const txData = {
+                amount: bonusAmount,
+                type: "Daily Bonus",
+                date: dateStr,
+                time: timeStr,
+                userId,
+                createdAt: d.toISOString()
+            };
+            await Promise.all([
+                addDoc(collection(db, "transactionHistory"), txData),
+                addDoc(collection(db, "transactions"), txData)
+            ]);
+        }
+
+        const refAmount = userData?.referralEarnings || 0;
+        if (refAmount > 0) {
+            const d = new Date(now.getTime() - 12 * 60 * 60 * 1000);
+            const { dateStr, timeStr } = formatTransactionDateTime(d);
+            const txData = {
+                amount: refAmount,
+                type: "Referral Commission",
+                date: dateStr,
+                time: timeStr,
+                userId,
+                createdAt: d.toISOString()
+            };
+            await Promise.all([
+                addDoc(collection(db, "transactionHistory"), txData),
+                addDoc(collection(db, "transactions"), txData)
+            ]);
+        }
+
+        const linkAmt = userData?.linkEarnings || 0;
+        if (linkAmt > 0) {
+            const d = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+            const { dateStr, timeStr } = formatTransactionDateTime(d);
+            const txData = {
+                amount: linkAmt,
+                type: "URL Shortener Income",
+                date: dateStr,
+                time: timeStr,
+                userId,
+                createdAt: d.toISOString()
+            };
+            await Promise.all([
+                addDoc(collection(db, "transactionHistory"), txData),
+                addDoc(collection(db, "transactions"), txData)
+            ]);
+        }
+
+        const fileAmt = userData?.fileEarnings || 0;
+        if (fileAmt > 0) {
+            const d = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+            const { dateStr, timeStr } = formatTransactionDateTime(d);
+            const txData = {
+                amount: fileAmt,
+                type: "File Download Income",
+                date: dateStr,
+                time: timeStr,
+                userId,
+                createdAt: d.toISOString()
+            };
+            await Promise.all([
+                addDoc(collection(db, "transactionHistory"), txData),
+                addDoc(collection(db, "transactions"), txData)
+            ]);
+        }
+    } catch (e) {
+        console.error("Failed to backfill initial transactions:", e);
+    }
+}
+
+async function processBalance(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDocRef = doc(db, "users", String(user.id));
+    const userDoc = await getDoc(userDocRef);
+    const userData = userDoc.data();
+
+    const uploadsQuery = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
+    const uploadsSnapshot = await getDocs(uploadsQuery);
+    
+    let computedFileEarnings = 0;
+    uploadsSnapshot.forEach(docSnap => {
+        computedFileEarnings += docSnap.data().earnings || 0;
+    });
+
+    const fileEarnings = userData?.fileEarnings !== undefined ? userData.fileEarnings : computedFileEarnings;
+    const linkEarnings = userData?.linkEarnings || 0;
+    const referralEarnings = userData?.referralEarnings || 0;
+    const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : (userData?.bonus || 0);
+    const rewardBalance = userData?.rewardBalance || 0;
+    const withdrawnAmount = userData?.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData?.totalWithdrawn || 0);
+    const pendingWithdrawals = userData?.pendingWithdrawals || 0;
+    const todayEarnings = userData?.todayEarnings || 0;
+    const monthEarnings = userData?.monthEarnings || 0;
+    const adminBalance = userData?.balance || 0;
+
+    const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + adminBalance - withdrawnAmount - pendingWithdrawals;
+
+    // Save to Firestore as requested
+    await setDoc(userDocRef, {
+        availableBalance,
+        fileEarnings,
+        linkEarnings,
+        referralEarnings,
+        bonusBalance,
+        rewardBalance,
+        withdrawnAmount,
+        pendingWithdrawals,
+        todayEarnings,
+        monthEarnings
+    }, { merge: true });
+
+    const totalIncome = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance;
+    const currency = userData?.currency || "INR";
+
+    let message = "";
+    if (totalIncome === 0 && withdrawnAmount === 0 && pendingWithdrawals === 0) {
+        message = `💰 No earnings available yet.
+
+Upload files, shorten links, complete referrals, earn rewards, and claim daily bonus to start earning.`;
+    } else {
+        message = `💰 Wallet & Earnings
+
+💵 Available Balance: ${formatCurrency(availableBalance, currency)}
+
+━━━━━━━━━━━━━━━
+
+📤 File Earnings: ${formatCurrency(fileEarnings, currency)}
+
+🔗 Link Earnings: ${formatCurrency(linkEarnings, currency)}
+
+👥 Referral Earnings: ${formatCurrency(referralEarnings, currency)}
+
+🎁 Bonus Balance: ${formatCurrency(bonusBalance, currency)}
+
+💰 Reward Balance: ${formatCurrency(rewardBalance, currency)}
+
+━━━━━━━━━━━━━━━
+
+💸 Total Withdrawn: ${formatCurrency(withdrawnAmount, currency)}
+
+⏳ Pending Withdrawals: ${formatCurrency(pendingWithdrawals, currency)}
+
+━━━━━━━━━━━━━━━
+
+📈 Today's Earnings: ${formatCurrency(todayEarnings, currency)}
+
+📅 This Month Earnings: ${formatCurrency(monthEarnings, currency)}
+
+━━━━━━━━━━━━━━━`;
+    }
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "💸 Withdraw Now", callback_data: "withdraw" }],
+            [{ text: "📜 Earnings History", callback_data: "earnings_history" }],
+            [{ text: "🔄 Refresh Balance", callback_data: "refresh_balance" }]
+        ]
+    };
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processEarningsHistory(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    
+    // Ensure we backfill some transactions first if they have stats but no transaction list
+    const userDocRef = doc(db, "users", String(user.id));
+    const userDoc = await getDoc(userDocRef);
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    if (userDoc.exists()) {
+        await ensureTransactionsBackfill(db, String(user.id), userDoc.data());
+    }
+
+    let allDocs: any[] = [];
+    try {
+        const q1 = query(collection(db, "transactionHistory"), where("userId", "==", String(user.id)));
+        const snap1 = await getDocs(q1);
+        snap1.forEach(d => {
+            allDocs.push({ id: d.id, ...d.data() });
+        });
+    } catch (e) {
+        console.error("Error fetching from transactionHistory:", e);
+    }
+
+    try {
+        const q2 = query(collection(db, "transactions"), where("userId", "==", String(user.id)));
+        const snap2 = await getDocs(q2);
+        snap2.forEach(d => {
+            const dataObj = d.data();
+            const exists = allDocs.some(existing => 
+                existing.createdAt === dataObj.createdAt && 
+                existing.amount === dataObj.amount && 
+                existing.type === dataObj.type
+            );
+            if (!exists) {
+                allDocs.push({ id: d.id, ...dataObj });
+            }
+        });
+    } catch (e) {
+        console.error("Error fetching from transactions:", e);
+    }
+
+    if (allDocs.length === 0) {
+        await sendTelegramMessage(botToken, chatId, `📜 Earnings History\n\nNo earnings history found yet.`);
+        return;
+    }
+
+    // Sort in-memory to avoid any Firestore composite index requirements
+    const sortedDocs = allDocs.sort((a, b) => {
+        const timeA = new Date(a.createdAt || 0).getTime();
+        const timeB = new Date(b.createdAt || 0).getTime();
+        return timeB - timeA;
+    });
+
+    let message = `📜 Earnings History\n\n`;
+    const docs = sortedDocs.slice(0, 20);
+    
+    docs.forEach(t => {
+        let sign = "➕";
+        if (t.type === "Withdrawal Deduction" || t.type.includes("Withdrawal") || t.amount < 0) {
+            sign = "➖";
+        }
+
+        let label = t.type;
+        if (t.type === "File Download Income" || t.type === "File Download") {
+            label = "File Download";
+        } else if (t.type === "URL Shortener Income" || t.type === "URL Visit") {
+            label = "URL Visit";
+        } else if (t.type === "Referral Commission") {
+            label = "Referral Commission";
+        } else if (t.type === "Daily Bonus") {
+            label = "Daily Bonus";
+        } else if (t.type === "Withdrawal Deduction") {
+            label = "Withdrawal Deduction";
+        }
+
+        const displayAmountStr = formatCurrency(Math.abs(t.amount), currency);
+        message += `${sign} ${displayAmountStr} | ${label}\n📅 ${t.date} | ${t.time}\n\n`;
+    });
+
+    message += `━━━━━━━━━━━━━━━`;
+
+    await sendTelegramMessage(botToken, chatId, message);
+}
+
+function parseFileSizeToBytes(size: string | number | undefined): number {
+    if (!size) return 0;
+    if (typeof size === 'number') return size;
+    const str = size.trim().toLowerCase();
+    const num = parseFloat(str);
+    if (isNaN(num)) return 0;
+    if (str.endsWith('gb')) return num * 1024 * 1024 * 1024;
+    if (str.endsWith('mb')) return num * 1024 * 1024;
+    if (str.endsWith('kb')) return num * 1024;
+    return num;
+}
+
+function formatBytes(bytes: number): string {
+    if (bytes <= 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
+async function processMyContent(botToken: string, chatId: number, user: any, pageIndex: number = 0) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    
+    // Fetch user's active files
+    const q = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
+    const snapshot = await getDocs(q);
+    
+    const allFiles: any[] = [];
+    snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.status !== "deleted") {
+            allFiles.push({ id: docSnap.id, ...data });
+        }
+    });
+    
+    if (allFiles.length === 0) {
+        const message = `📁 My Content\n\nYou have not uploaded any files yet.\n\nStart by uploading your first file.`;
+        const inlineKeyboard = {
+            inline_keyboard: [
+                [{ text: "📤 Upload File", callback_data: "mycontent_upload" }]
+            ]
+        };
+        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+        return;
+    }
+    
+    // Sort files by uploadDate desc (or createdAt if not exists)
+    allFiles.sort((a, b) => {
+        const timeA = new Date(a.uploadDate || a.uploadedAt || a.timestamp || 0).getTime();
+        const timeB = new Date(b.uploadDate || b.uploadedAt || b.timestamp || 0).getTime();
+        return timeB - timeA;
+    });
+    
+    const totalFiles = allFiles.length;
+    const totalDownloads = allFiles.reduce((sum, f) => sum + (f.downloads || 0), 0);
+    const totalEarnings = allFiles.reduce((sum, f) => sum + (f.earnings || 0), 0);
+    const totalSizeBytes = allFiles.reduce((sum, f) => sum + parseFileSizeToBytes(f.fileSize), 0);
+    const storageUsed = formatBytes(totalSizeBytes);
+    
+    const pageSize = 5;
+    const pageFiles = allFiles.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize);
+    const nextPageIndex = (pageIndex + 1) * pageSize < totalFiles ? pageIndex + 1 : 0;
+    
+    let message = `📁 My Content\n\n`;
+    message += `📊 Total Files: ${totalFiles}\n\n`;
+    message += `💾 Total Storage Used: ${storageUsed}\n\n`;
+    message += `👁 Total Downloads: ${totalDownloads}\n\n`;
+    message += `💰 Total Earnings: ${formatCurrency(totalEarnings, currency)}\n\n`;
+    message += `━━━━━━━━━━━━━━━\n\n`;
+    
+    const numEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
+    
+    pageFiles.forEach((file, idx) => {
+        const seqNumber = numEmojis[idx];
+        const displaySize = typeof file.fileSize === 'number' ? formatBytes(file.fileSize) : (file.fileSize || "N/A");
+        const displayDate = file.uploadDate || (file.uploadedAt ? file.uploadedAt.split(' ')[0] : "N/A");
+        
+        message += `${seqNumber} ${file.fileName || "Unnamed File"}\n\n`;
+        message += `📦 Size: ${displaySize}\n\n`;
+        message += `📅 Uploaded: ${displayDate}\n\n`;
+        message += `👁 Downloads: ${file.downloads || 0}\n\n`;
+        message += `💰 Earnings: ${formatCurrency(file.earnings || 0, currency)}\n\n`;
+        message += `━━━━━━━━━━━━━━━\n\n`;
+    });
+    
+    const fileButtons = pageFiles.map((file, idx) => ({
+        text: numEmojis[idx],
+        callback_data: `mycontent_view_${file.id}`
+    }));
+    
+    const inlineKeyboard = {
+        inline_keyboard: [] as any[][]
+    };
+    
+    if (fileButtons.length > 0) {
+        inlineKeyboard.inline_keyboard.push(fileButtons);
+    }
+    
+    inlineKeyboard.inline_keyboard.push([
+        { text: "📤 Upload New File", callback_data: "mycontent_upload" },
+        { text: "🔍 Search File", callback_data: "mycontent_search" }
+    ]);
+    inlineKeyboard.inline_keyboard.push([
+        { text: "📊 Content Stats", callback_data: "mycontent_stats" },
+        { text: "📄 Next Page", callback_data: `mycontent_next_${nextPageIndex}` }
+    ]);
+    
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processMyFileDetails(botToken: string, chatId: number, fileId: string) {
+    const db = getDb();
+    const docSnap = await getDoc(doc(db, "uploads", fileId));
+    
+    if (!docSnap.exists() || docSnap.data()?.status === "deleted") {
+        await sendTelegramMessage(botToken, chatId, "❌ File not found or has been deleted.");
+        return;
+    }
+    
+    const file = docSnap.data();
+    const userDoc = await getDoc(doc(db, "users", String(file.userId)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+
+    const displaySize = typeof file.fileSize === 'number' ? formatBytes(file.fileSize) : (file.fileSize || "N/A");
+    const displayDate = file.uploadDate || (file.uploadedAt ? file.uploadedAt.split(' ')[0] : "N/A");
+    
+    let message = `📄 File Details\n\n`;
+    message += `📁 File Name: ${file.fileName || "N/A"}\n\n`;
+    message += `📦 File Size: ${displaySize}\n\n`;
+    message += `📅 Upload Date: ${displayDate}\n\n`;
+    message += `👁 Downloads: ${file.downloads || 0}\n\n`;
+    message += `💰 Earnings: ${formatCurrency(file.earnings || 0, currency)}\n\n`;
+    message += `🔗 Public Link:\n${file.publicLink || file.downloadLink || "N/A"}\n\n`;
+    message += `━━━━━━━━━━━━━━━`;
+    
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "📋 Copy Link", callback_data: `mycontent_copy_${fileId}` }, { text: "📈 Analytics", callback_data: `mycontent_analytics_${fileId}` }],
+            [{ text: "🗑 Delete File", callback_data: `mycontent_delete_${fileId}` }, { text: "🔙 Back", callback_data: "mycontent_back" }]
+        ]
+    };
+    
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processMyFileAnalytics(botToken: string, chatId: number, fileId: string) {
+    const db = getDb();
+    const docSnap = await getDoc(doc(db, "uploads", fileId));
+    
+    if (!docSnap.exists() || docSnap.data()?.status === "deleted") {
+        await sendTelegramMessage(botToken, chatId, "❌ File not found or has been deleted.");
+        return;
+    }
+    
+    const file = docSnap.data();
+    const userDoc = await getDoc(doc(db, "users", String(file.userId)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+
+    const totalDownloads = file.downloads || 0;
+    const earnings = file.earnings || 0;
+    
+    const todayDownloads = file.todayDownloads !== undefined ? file.todayDownloads : Math.floor(totalDownloads * 0.1);
+    const weekDownloads = file.weekDownloads !== undefined ? file.weekDownloads : Math.floor(totalDownloads * 0.4);
+    const monthDownloads = file.monthDownloads !== undefined ? file.monthDownloads : totalDownloads;
+    
+    let message = `📈 File Analytics\n\n`;
+    message += `👁 Total Downloads: ${totalDownloads}\n\n`;
+    message += `📅 Today Downloads: ${todayDownloads}\n\n`;
+    message += `📅 This Week Downloads: ${weekDownloads}\n\n`;
+    message += `📅 This Month Downloads: ${monthDownloads}\n\n`;
+    message += `💰 Total Earnings: ${formatCurrency(earnings, currency)}\n\n`;
+    message += `━━━━━━━━━━━━━━━`;
+    
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔙 Back to File", callback_data: `mycontent_view_${fileId}` }]
+        ]
+    };
+    
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processMyContentStats(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+
+    const q = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
+    const snapshot = await getDocs(q);
+    
+    const allFiles: any[] = [];
+    snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.status !== "deleted") {
+            allFiles.push({ id: docSnap.id, ...data });
+        }
+    });
+    
+    const totalFiles = allFiles.length;
+    const totalDownloads = allFiles.reduce((sum, f) => sum + (f.downloads || 0), 0);
+    const totalEarnings = allFiles.reduce((sum, f) => sum + (f.earnings || 0), 0);
+    const totalSizeBytes = allFiles.reduce((sum, f) => sum + parseFileSizeToBytes(f.fileSize), 0);
+    const storageUsed = formatBytes(totalSizeBytes);
+    
+    let topFile = null as any;
+    for (const f of allFiles) {
+        if (!topFile || (f.downloads || 0) > (topFile.downloads || 0)) {
+            topFile = f;
+        }
+    }
+    
+    const topFileName = topFile ? (topFile.fileName || "N/A") : "N/A";
+    const topFileDownloads = topFile ? (topFile.downloads || 0) : 0;
+    const topFileEarnings = topFile ? (topFile.earnings || 0) : 0;
+    
+    let message = `📊 Content Statistics\n\n`;
+    message += `📁 Total Files: ${totalFiles}\n\n`;
+    message += `💾 Total Storage Used: ${storageUsed}\n\n`;
+    message += `👁 Total Downloads: ${totalDownloads}\n\n`;
+    message += `💰 Total Earnings: ${formatCurrency(totalEarnings, currency)}\n\n`;
+    message += `🏆 Top Performing File:\n`;
+    message += `${topFileName}\n\n`;
+    message += `👁 Downloads: ${topFileDownloads}\n\n`;
+    message += `💰 Earnings: ${formatCurrency(topFileEarnings, currency)}\n\n`;
+    message += `━━━━━━━━━━━━━━━`;
+    
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔙 Back", callback_data: "mycontent_back" }]
+        ]
+    };
+    
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function askDeleteMyFile(botToken: string, chatId: number, fileId: string) {
+    const message = `⚠️ Delete File?\n\nThis action cannot be undone.`;
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "✅ Confirm Delete", callback_data: `mycontent_confdel_${fileId}` }],
+            [{ text: "❌ Cancel", callback_data: `mycontent_view_${fileId}` }]
+        ]
+    };
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function confirmDeleteMyFile(botToken: string, chatId: number, user: any, fileId: string) {
+    const db = getDb();
+    
+    try {
+        await deleteDoc(doc(db, "uploads", fileId));
+        
+        try {
+            await deleteDoc(doc(db, "file_mappings", fileId));
+        } catch(e) {}
+        try {
+            await deleteDoc(doc(db, "fileMappings", fileId));
+        } catch(e) {}
+        
+    } catch(err) {
+        console.error("Error deleting file:", err);
+    }
+    
+    await sendTelegramMessage(botToken, chatId, "✅ File deleted successfully.");
+    await processMyContent(botToken, chatId, user, 0);
+}
+
+async function handleSearchQuery(botToken: string, chatId: number, user: any, searchQuery: string) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    
+    const q = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
+    const snapshot = await getDocs(q);
+    
+    const matchingFiles: any[] = [];
+    snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.status !== "deleted" && (data.fileName || "").toLowerCase().includes(searchQuery.toLowerCase())) {
+            matchingFiles.push({ id: docSnap.id, ...data });
+        }
+    });
+    
+    if (matchingFiles.length === 0) {
+        const message = `🔍 No files found matching "${searchQuery}".`;
+        const inlineKeyboard = {
+            inline_keyboard: [
+                [{ text: "🔙 Back to My Content", callback_data: "mycontent_back" }]
+            ]
+        };
+        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+        return;
+    }
+    
+    let message = `🔍 Search Results for "${searchQuery}":\n\n`;
+    const numEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
+    
+    const sliceCount = Math.min(matchingFiles.length, 5);
+    const filesToShow = matchingFiles.slice(0, sliceCount);
+    
+    filesToShow.forEach((file, idx) => {
+        const seqNumber = numEmojis[idx];
+        const displaySize = typeof file.fileSize === 'number' ? formatBytes(file.fileSize) : (file.fileSize || "N/A");
+        const displayDate = file.uploadDate || (file.uploadedAt ? file.uploadedAt.split(' ')[0] : "N/A");
+        
+        message += `${seqNumber} ${file.fileName || "Unnamed File"}\n\n`;
+        message += `📦 Size: ${displaySize}\n\n`;
+        message += `📅 Uploaded: ${displayDate}\n\n`;
+        message += `👁 Downloads: ${file.downloads || 0}\n\n`;
+        message += `💰 Earnings: ${formatCurrency(file.earnings || 0, currency)}\n\n`;
+        message += `━━━━━━━━━━━━━━━\n\n`;
+    });
+    
+    const fileButtons = filesToShow.map((file, idx) => ({
+        text: numEmojis[idx],
+        callback_data: `mycontent_view_${file.id}`
+    }));
+    
+    const inlineKeyboard = {
+        inline_keyboard: [] as any[][]
+    };
+    
+    if (fileButtons.length > 0) {
+        inlineKeyboard.inline_keyboard.push(fileButtons);
+    }
+    
+    inlineKeyboard.inline_keyboard.push([
+        { text: "🔙 Back to My Content", callback_data: "mycontent_back" }
+    ]);
+    
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+function getMainMenuKeyboard() {
+    return {
+        keyboard: [
+            [{ text: "💰 Earn Rewards" }],
+            [{ text: "👤 Account" }, { text: "💰 Balance" }],
+            [{ text: "📤 Upload File" }, { text: "📁 My Content" }],
+            [{ text: "🔗 My Links" }, { text: "📊 Dashboard" }],
+            [{ text: "👥 Refer & Earn" }, { text: "💸 Withdraw" }],
+            [{ text: "📜 Withdrawal History" }, { text: "🎫 Support" }],
+            [{ text: "📢 Announcements" }, { text: "🏆 Leaderboard" }],
+            [{ text: "🎁 Daily Bonus" }, { text: "⚙️ Settings" }]
+        ],
+        resize_keyboard: true
+    };
+}
+
+async function processAnnouncements(botToken: string, chatId: number, user: any, page: number = 1, messageIdToEdit?: number) {
+    const db = getDb();
+    const q = query(collection(db, "announcements"), orderBy("createdAt", "desc"));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+        const emptyMsg = `📢 Announcements
+
+No announcements found yet.`;
+        if (messageIdToEdit) {
+            await editTelegramMessage(botToken, chatId, messageIdToEdit, emptyMsg);
+        } else {
+            await sendTelegramMessage(botToken, chatId, emptyMsg);
+        }
+        return;
+    }
+
+    const allAnn: any[] = [];
+    snapshot.forEach(docSnap => {
+        allAnn.push({ id: docSnap.id, ...docSnap.data() });
+    });
+
+    // Sort by createdAt desc in memory to be absolutely sure
+    allAnn.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+    });
+
+    const limit = 5;
+    const startIndex = (page - 1) * limit;
+    const pageAnn = allAnn.slice(startIndex, startIndex + limit);
+    const hasNextPage = allAnn.length > startIndex + limit;
+
+    let message = `📢 Announcements (Page ${page}/${Math.ceil(allAnn.length / limit)})\n\n`;
+
+    for (let i = 0; i < pageAnn.length; i++) {
+        const ann = pageAnn[i];
+        const itemNum = startIndex + i + 1;
+        const dateStr = ann.createdAt ? formatDate(ann.createdAt) : "N/A";
+        message += `${itemNum}. 🔔 *${ann.title}*\n📂 Category: ${ann.type || "General"} | 📅 ${dateStr}\n\n`;
+    }
+    message += `━━━━━━━━━━━━━━━`;
+
+    const inlineKeyboard: any = { inline_keyboard: [] };
+
+    // Details buttons for each announcement
+    const detailsButtons = [];
+    for (let i = 0; i < pageAnn.length; i++) {
+        const itemNum = startIndex + i + 1;
+        detailsButtons.push({ text: `👁 View Announcement #${itemNum}`, callback_data: `ann_details_${pageAnn[i].id}_${page}` });
+    }
+    for (let i = 0; i < detailsButtons.length; i += 2) {
+        inlineKeyboard.inline_keyboard.push(detailsButtons.slice(i, i + 2));
+    }
+
+    // Navigation buttons
+    const navRow = [];
+    if (page > 1) {
+        navRow.push({ text: "⬅️ Prev Page", callback_data: `ann_page_${page - 1}` });
+    }
+    if (hasNextPage) {
+        navRow.push({ text: "📄 Next Page", callback_data: `ann_page_${page + 1}` });
+    }
+    navRow.push({ text: "🔄 Refresh", callback_data: `ann_refresh_${page}` });
+
+    inlineKeyboard.inline_keyboard.push(navRow);
+
+    if (messageIdToEdit) {
+        await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+    } else {
+        await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+    }
+}
+
+async function processAnnouncementDetails(botToken: string, chatId: number, docId: string, page: number = 1, messageIdToEdit?: number) {
+    const db = getDb();
+    const docSnap = await getDoc(doc(db, "announcements", docId));
+    if (!docSnap.exists()) {
+        const errorMsg = "⚠️ Announcement not found.";
+        if (messageIdToEdit) {
+            await editTelegramMessage(botToken, chatId, messageIdToEdit, errorMsg);
+        } else {
+            await sendTelegramMessage(botToken, chatId, errorMsg);
+        }
+        return;
+    }
+    const ann = docSnap.data();
+
+    const title = ann.title;
+    const type = ann.type || "General";
+    const dateStr = ann.createdAt ? formatDate(ann.createdAt) + " " + formatTime(ann.createdAt) : "N/A";
+    const messageBody = ann.message || "";
+
+    const message = `📢 Announcement Details
+
+🔔 *${title}*
+
+📂 *Category:* ${type}
+📅 *Date:* ${dateStr}
+
+📝 *Message:*
+${messageBody}`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "⬅️ Back to Announcements", callback_data: `ann_list_page_${page}` }]
+        ]
+    };
+
+    if (messageIdToEdit) {
+        await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+    } else {
+        await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+    }
+}
+
+async function calculateAndSyncLeaderboard() {
+    const db = getDb();
+    const usersSnapshot = await getDocs(collection(db, "users"));
+    if (usersSnapshot.empty) return [];
+
+    const uploadsSnapshot = await getDocs(collection(db, "uploads"));
+    const referralsSnapshot = await getDocs(collection(db, "referrals"));
+    const txSnapshot = await getDocs(collection(db, "transactionHistory"));
+
+    const uploadsList: any[] = [];
+    uploadsSnapshot.forEach(docSnap => {
+        uploadsList.push(docSnap.data());
+    });
+
+    const referralsList: any[] = [];
+    referralsSnapshot.forEach(docSnap => {
+        referralsList.push(docSnap.data());
+    });
+
+    const txList: any[] = [];
+    txSnapshot.forEach(docSnap => {
+        txList.push(docSnap.data());
+    });
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    // Helpers to parse dates safely
+    function safeParseDate(dVal: any): Date {
+        if (!dVal) return new Date(0);
+        if (dVal instanceof Date) return dVal;
+        const d = new Date(dVal);
+        if (!isNaN(d.getTime())) return d;
+        return new Date(0);
+    }
+
+    const usersData: any[] = [];
+
+    usersSnapshot.forEach(uDoc => {
+        const userId = uDoc.id;
+        const uData = uDoc.data();
+
+        const rawUsername = uData.username || "";
+        const rawFirstName = uData.firstName || "";
+        const usernameVal = rawUsername ? `@${rawUsername}` : (rawFirstName || "User");
+
+        // 1. Total Active Uploads (Anti-Cheat: Status !== "deleted")
+        const activeUploads = uploadsList.filter(u => u.userId === userId && u.status !== "deleted");
+        const activeUploadsCount = activeUploads.length;
+
+        // 2. Approved Referrals (Anti-Cheat: Status === "approved")
+        const approvedReferrals = referralsList.filter(r => r.referrerId === userId && r.status === "approved");
+        const approvedReferralsCount = approvedReferrals.length;
+
+        // 3. Earnings
+        const earningsVal = uData.earnings !== undefined ? Number(uData.earnings) : 0;
+
+        // 4. Rising Stars Growth (Last 7 Days)
+        const newUploads = activeUploads.filter(u => safeParseDate(u.uploadDate) >= sevenDaysAgo).length;
+        const newReferrals = approvedReferrals.filter(r => safeParseDate(r.joinDate) >= sevenDaysAgo).length;
+        
+        // New Earnings: Sum of transactions >= sevenDaysAgo where amount > 0
+        const newEarnings = txList
+            .filter(tx => tx.userId === userId && tx.amount > 0 && safeParseDate(tx.createdAt) >= sevenDaysAgo)
+            .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+        // Score formulation
+        const risingStarScore = (newEarnings * 1) + (newReferrals * 5) + (newUploads * 1);
+
+        // Badge system
+        let badge = "🥉 Bronze Creator";
+        if (earningsVal >= 10000) {
+            badge = "👑 RoyShare Legend";
+        } else if (earningsVal >= 2500) {
+            badge = "💎 Diamond Creator";
+        } else if (earningsVal >= 500) {
+            badge = "🥇 Gold Creator";
+        } else if (earningsVal >= 100) {
+            badge = "🥈 Silver Creator";
+        }
+
+        usersData.push({
+            userId,
+            username: usernameVal,
+            earnings: earningsVal,
+            activeUploadsCount,
+            approvedReferralsCount,
+            newUploads,
+            newReferrals,
+            newEarnings,
+            risingStarScore,
+            badge
+        });
+    });
+
+    // Compute Ranks
+    // Earnings Rank
+    const sortedByEarnings = [...usersData].sort((a, b) => b.earnings - a.earnings);
+    sortedByEarnings.forEach((user, idx) => {
+        user.earningsRank = idx + 1;
+    });
+
+    // Upload Rank
+    const sortedByUploads = [...usersData].sort((a, b) => b.activeUploadsCount - a.activeUploadsCount);
+    sortedByUploads.forEach((user, idx) => {
+        user.uploadRank = idx + 1;
+    });
+
+    // Referral Rank
+    const sortedByReferrals = [...usersData].sort((a, b) => b.approvedReferralsCount - a.approvedReferralsCount);
+    sortedByReferrals.forEach((user, idx) => {
+        user.referralRank = idx + 1;
+    });
+
+    // Rising Star Rank
+    const sortedByRisingStar = [...usersData].sort((a, b) => b.risingStarScore - a.risingStarScore);
+    sortedByRisingStar.forEach((user, idx) => {
+        user.risingStarRank = idx + 1;
+    });
+
+    // Update each user in Firestore in parallel
+    await Promise.all(usersData.map(async (u) => {
+        await setDoc(doc(db, "users", u.userId), {
+            earningsRank: u.earningsRank,
+            uploadRank: u.uploadRank,
+            referralRank: u.referralRank,
+            risingStarRank: u.risingStarRank,
+            badge: u.badge
+        }, { merge: true });
+    }));
+
+    return usersData;
+}
+
+function getBadgeEmoji(badgeName: string): string {
+    if (!badgeName) return "🥉";
+    if (badgeName.includes("Legend")) return "👑";
+    if (badgeName.includes("Diamond")) return "💎";
+    if (badgeName.includes("Gold")) return "🥇";
+    if (badgeName.includes("Silver")) return "🥈";
+    return "🥉";
+}
+
+async function processLeaderboard(botToken: string, chatId: number, user: any, messageIdToEdit?: number) {
+    const db = getDb();
+    
+    // Perform dynamic sync
+    await calculateAndSyncLeaderboard().catch(err => {
+        console.error("Error updating leaderboard ranks:", err);
+    });
+
+    const message = `🏆 RoyShare Leaderboard
+
+Choose Category`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "💰 Top Earners", callback_data: "leaderboard_cat_earners" }],
+            [{ text: "📤 Top Uploaders", callback_data: "leaderboard_cat_uploaders" }],
+            [{ text: "👥 Top Referrers", callback_data: "leaderboard_cat_referrers" }],
+            [{ text: "🔥 Rising Stars", callback_data: "leaderboard_cat_rising" }],
+            [{ text: "🏅 My Ranking", callback_data: "leaderboard_cat_my" }]
+        ]
+    };
+
+    if (messageIdToEdit) {
+        await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { reply_markup: inlineKeyboard });
+    } else {
+        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+    }
+}
+
+async function showLeaderboardCategory(botToken: string, chatId: number, userId: string, category: string, messageIdToEdit: number) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", userId));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    
+    const usersData = await calculateAndSyncLeaderboard().catch(() => []);
+
+    if (usersData.length === 0) {
+        const noDataMsg = `🏆 Leaderboard
+
+No ranking data available yet.
+
+Start uploading files, creating links and inviting friends to climb the leaderboard.`;
+        await editTelegramMessage(botToken, chatId, messageIdToEdit, noDataMsg, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "🔙 Back", callback_data: "leaderboard_back_main" }]
+                ]
+            }
+        });
+        return;
+    }
+
+    const medalEmojis = ["🥇", "🥈", "🥉"];
+
+    let message = "";
+    if (category === "earners") {
+        const sorted = [...usersData].sort((a, b) => b.earnings - a.earnings).slice(0, 10);
+        message = `💰 *Top Earners*\n\n`;
+        sorted.forEach((u, i) => {
+            const medal = medalEmojis[i] || `#${i + 1}`;
+            const emoji = getBadgeEmoji(u.badge);
+            message += `${medal} *${u.username}* ${emoji}\n💰 Earnings: ${formatCurrency(u.earnings, currency)}\n\n`;
+        });
+    } else if (category === "uploaders") {
+        const sorted = [...usersData].sort((a, b) => b.activeUploadsCount - a.activeUploadsCount).slice(0, 10);
+        message = `📤 *Top Uploaders*\n\n`;
+        sorted.forEach((u, i) => {
+            const medal = medalEmojis[i] || `#${i + 1}`;
+            const emoji = getBadgeEmoji(u.badge);
+            message += `${medal} *${u.username}* ${emoji}\n📤 Total Uploads: ${u.activeUploadsCount}\n\n`;
+        });
+    } else if (category === "referrers") {
+        const sorted = [...usersData].sort((a, b) => b.approvedReferralsCount - a.approvedReferralsCount).slice(0, 10);
+        message = `👥 *Top Referrers*\n\n`;
+        sorted.forEach((u, i) => {
+            const medal = medalEmojis[i] || `#${i + 1}`;
+            const emoji = getBadgeEmoji(u.badge);
+            message += `${medal} *${u.username}* ${emoji}\n👥 Total Referrals: ${u.approvedReferralsCount}\n\n`;
+        });
+    } else if (category === "rising") {
+        const sorted = [...usersData].sort((a, b) => b.risingStarScore - a.risingStarScore).slice(0, 10);
+        message = `🔥 *Rising Stars (Last 7 Days)*\n\n`;
+        sorted.forEach((u, i) => {
+            const medal = medalEmojis[i] || `#${i + 1}`;
+            const emoji = getBadgeEmoji(u.badge);
+            message += `${medal} *${u.username}* ${emoji}\n📈 +${u.newUploads} Uploads\n👥 +${u.newReferrals} Referrals\n💰 +${formatCurrency(u.newEarnings, currency)} Earnings\n\n`;
+        });
+    } else if (category === "my") {
+        const myData = usersData.find(u => u.userId === userId);
+        if (!myData) {
+            message = `🏆 Leaderboard
+
+No ranking data available yet.
+
+Start uploading files, creating links and inviting friends to climb the leaderboard.`;
+        } else {
+            message = `🏅 *Your Ranking*\n\n💰 Earnings Rank:\n#${myData.earningsRank}\n\n📤 Upload Rank:\n#${myData.uploadRank}\n\n👥 Referral Rank:\n#${myData.referralRank}\n\n🔥 Rising Star Rank:\n#${myData.risingStarRank}\n\n🛡️ Badge:\n${myData.badge}`;
+        }
+    }
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔙 Back to Categories", callback_data: "leaderboard_back_main" }]
+        ]
+    };
+
+    await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+}
+
+async function processDailyBonus(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+
+    const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const webAppUrl = `${appUrl}/daily-bonus?userId=${user.id}`;
+
+    const maxRewardStr = formatCurrency(5, currency);
+    const message = `🎁 *RoyShare Daily Bonus*
+
+Spin the lucky wheel daily to earn free rewards up to ${maxRewardStr}!
+
+🎡 *3 Free Spins every day!*
+
+Click the button below to open the Daily Bonus wheel and start spinning!`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🎁 Play Daily Bonus", web_app: { url: webAppUrl } }],
+            [{ text: "🌐 Open in Browser", url: webAppUrl }]
+        ]
+    };
+    await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+}
+
+async function processEarnRewards(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+
+    // Fetch completed tasks for this user
+    const q = query(
+        collection(db, "task_completions"),
+        where("userId", "==", String(user.id)),
+        where("status", "==", "completed")
+    );
+    const qSnap = await getDocs(q);
+    const completedTaskIds = new Set<string>();
+    qSnap.forEach(d => {
+        const c = d.data();
+        if (c.taskId) completedTaskIds.add(c.taskId);
+    });
+
+    const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+
+    let message = `💰 *Reward Tasks*\n\n`;
+    const buttons: any[] = [];
+
+    for (const t of REWARD_TASKS) {
+        const isCompleted = completedTaskIds.has(t.id);
+        const formattedAmount = formatCurrency(t.amount, currency);
+        
+        message += `${t.name} - ${formattedAmount}${isCompleted ? " (Completed ✅)" : ""}\n`;
+
+        const btnText = isCompleted 
+            ? `✅ ${t.name} Completed` 
+            : `🌐 Open ${t.name} In Chrome`;
+        const webAppUrl = `${appUrl}/earn-rewards?userId=${user.id}&taskId=${t.id}`;
+        buttons.push([{ text: btnText, url: webAppUrl }]);
+    }
+
+    message += `\n━━━━━━━━━━━━━━━\nSelect a task below to start earning rewards!`;
+
+    const inlineKeyboard = {
+        inline_keyboard: buttons
+    };
+
+    await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+}
+
+async function claimBonus(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDocRef = doc(db, "users", String(user.id));
+    const userDocRefBonus = doc(db, "users", String(user.id), "bonusInfo", "data");
+    
+    const [userDoc, bonusDoc] = await Promise.all([getDoc(userDocRef), getDoc(userDocRefBonus)]);
+    const bonusData = bonusDoc.exists() ? bonusDoc.data() : { lastClaimTime: null, currentStreak: 0, highestStreak: 0 };
+
+    const now = Date.now();
+    const lastClaim = bonusData.lastClaimTime ? new Date(bonusData.lastClaimTime).getTime() : 0;
+    
+    if (lastClaim && (now - lastClaim < 24 * 60 * 60 * 1000)) {
+        const remainingHours = Math.ceil((24 * 60 * 60 * 1000 - (now - lastClaim)) / (60 * 60 * 1000));
+        await sendTelegramMessage(botToken, chatId, `⏳ You have already claimed today's bonus.\n\nCome back after: ${remainingHours} hours`);
+        return;
+    }
+
+    // Calculate Reward
+    const isNextDay = (now - lastClaim < 48 * 60 * 60 * 1000);
+    const newStreak = isNextDay ? bonusData.currentStreak + 1 : 1;
+    const newHighestStreak = Math.max(bonusData.highestStreak, newStreak);
+    if (newStreak > 7) { 
+        // Logic constraint says restart after 7, but let's just make it cycle 1-7
+    }
+    const dayIndex = ((newStreak - 1) % 7);
+    const rewardAmounts = [0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 1.00];
+    const amount = rewardAmounts[dayIndex];
+
+    // Update
+    const { dateStr, timeStr } = formatTransactionDateTime(new Date(now));
+    await Promise.all([
+        setDoc(userDocRefBonus, { 
+            lastClaimTime: new Date(now).toISOString(),
+            currentStreak: newStreak > 7 ? 1 : newStreak,
+            highestStreak: newHighestStreak
+        }, { merge: true }),
+        addDoc(collection(db, "users", String(user.id), "bonusClaims"), {
+            amount,
+            streakDay: newStreak > 7 ? 1 : newStreak,
+            createdAt: new Date(now).toISOString()
+        }),
+        addDoc(collection(db, "transactions"), {
+            amount,
+            type: "Daily Bonus",
+            date: dateStr,
+            time: timeStr,
+            userId: String(user.id),
+            createdAt: new Date(now).toISOString()
+        }),
+        addDoc(collection(db, "transactionHistory"), {
+            amount,
+            type: "Daily Bonus",
+            date: dateStr,
+            time: timeStr,
+            userId: String(user.id),
+            createdAt: new Date(now).toISOString()
+        }),
+        setDoc(userDocRef, { 
+            bonus: (userDoc.data()?.bonus || 0) + amount,
+            bonusBalance: (userDoc.data()?.bonusBalance || 0) + amount
+        }, { merge: true })
+    ]);
+
+    // Synchronize referral status to make active if applicable
+    await syncReferralsForUser(db, botToken, String(user.id));
+
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    await sendTelegramMessage(botToken, chatId, `✅ Bonus Claimed Successfully\n\n🎁 Bonus Added: ${formatCurrency(amount, currency)}\n🔥 Current Streak: ${newStreak} Days`);
+}
+
+async function processBonusHistory(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+
+    const q = query(collection(db, "users", String(user.id), "bonusClaims"), orderBy("createdAt", "desc"));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+        await sendTelegramMessage(botToken, chatId, "📭 No bonus history found.");
+        return;
+    }
+
+    let message = "📊 Bonus History (Last 30):\n\n";
+    snapshot.docs.slice(0, 30).forEach(doc => {
+        const h = doc.data();
+        message += `📅 ${new Date(h.createdAt).toLocaleDateString()} | 🎁 ${formatCurrency(h.amount || 0, currency)} | 🔥 Day ${h.streakDay}\n`;
+    });
+
+    await sendTelegramMessage(botToken, chatId, message);
+}
+function getIssueTypeLabel(type: string): string {
+    const t = type.toLowerCase();
+    if (t.includes("withdrawal")) return "💸 Withdrawal Issue";
+    if (t.includes("upload")) return "📤 Upload Issue";
+    if (t.includes("link")) return "🔗 Link Issue";
+    if (t.includes("referral")) return "👥 Referral Issue";
+    if (t.includes("earnings")) return "💰 Earnings Issue";
+    return "⚙️ Other Issue";
+}
+
+function getTicketStatusLabel(status: string): string {
+    const s = String(status).toLowerCase();
+    if (s.includes("open")) return "🟡 Open";
+    if (s.includes("reply") || s.includes("replied")) return "💬 Replied";
+    if (s.includes("resolved") || s.includes("resolve")) return "🟢 Resolved";
+    if (s.includes("closed") || s.includes("close")) return "🔴 Closed";
+    return status;
+}
+
+async function processSupport(botToken: string, chatId: number, user: any) {
+    const message = `🎫 Support Center
+
+How can we help you?`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "➕ Create Ticket", callback_data: "support_create" }],
+            [{ text: "📋 My Tickets", callback_data: "support_list" }],
+            [{ text: "📞 Contact Admin", callback_data: "support_admin" }]
+        ]
+    };
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processMyTickets(botToken: string, chatId: number, user: any, page: number = 1, messageIdToEdit?: number) {
+    const db = getDb();
+    const q = query(collection(db, "tickets"), where("userId", "==", String(user.id)));
+    const querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty) {
+        const emptyMsg = `📋 My Tickets
+
+No support tickets found.
+
+Create a ticket if you need assistance.`;
+        if (messageIdToEdit) {
+            await editTelegramMessage(botToken, chatId, messageIdToEdit, emptyMsg);
+        } else {
+            await sendTelegramMessage(botToken, chatId, emptyMsg);
+        }
+        return;
+    }
+
+    const allTickets: any[] = [];
+    querySnapshot.forEach(docSnap => {
+        allTickets.push({ id: docSnap.id, ...docSnap.data() });
+    });
+
+    // Sort by createdAt desc in memory
+    allTickets.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+    });
+
+    const limit = 5;
+    const startIndex = (page - 1) * limit;
+    const pageTickets = allTickets.slice(startIndex, startIndex + limit);
+    const hasNextPage = allTickets.length > startIndex + limit;
+
+    let message = `📋 My Tickets`;
+
+    for (const t of pageTickets) {
+        const statLabel = getTicketStatusLabel(t.status || "🟡 Open");
+        message += `
+
+Ticket ID:
+${t.ticketId}
+
+Issue:
+${t.issueType}
+
+Status:
+${statLabel}
+
+━━━━━━━━━━━━━━━`;
+    }
+
+    const inlineKeyboard: any = { inline_keyboard: [] };
+
+    // Details buttons for each ticket
+    const detailsButtons = [];
+    for (const t of pageTickets) {
+        detailsButtons.push({ text: `📋 ${t.ticketId}`, callback_data: `ticket_details_${t.id}` });
+    }
+    for (let i = 0; i < detailsButtons.length; i += 2) {
+        inlineKeyboard.inline_keyboard.push(detailsButtons.slice(i, i + 2));
+    }
+
+    // Navigation buttons
+    const navRow = [];
+    if (page > 1) {
+        navRow.push({ text: "⬅️ Prev Page", callback_data: `support_page_${page - 1}` });
+    }
+    if (hasNextPage) {
+        navRow.push({ text: "📄 Next Page", callback_data: `support_page_${page + 1}` });
+    }
+    navRow.push({ text: "🔄 Refresh", callback_data: "support_refresh" });
+
+    inlineKeyboard.inline_keyboard.push(navRow);
+
+    if (messageIdToEdit) {
+        await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { reply_markup: inlineKeyboard });
+    } else {
+        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+    }
+}
+
+async function processTicketDetails(botToken: string, chatId: number, docId: string) {
+    const db = getDb();
+    const docSnap = await getDoc(doc(db, "tickets", docId));
+    if (!docSnap.exists()) {
+        await sendTelegramMessage(botToken, chatId, "⚠️ Ticket details not found.");
+        return;
+    }
+    const t = docSnap.data();
+
+    const ticketId = t.ticketId;
+    const issueType = t.issueType;
+    const status = getTicketStatusLabel(t.status || "🟡 Open");
+    const createdDate = formatDate(t.createdAt) + " " + formatTime(t.createdAt);
+    const userMessage = t.message;
+    const lastReply = t.lastReply || "None";
+
+    const message = `🎫 Ticket Details
+
+Ticket ID:
+${ticketId}
+
+📂 Issue:
+${issueType}
+
+📌 Status:
+${status}
+
+📅 Created:
+${createdDate}
+
+📝 User Message:
+${userMessage}
+
+💬 Last Reply:
+${lastReply}`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "⬅️ Back to Tickets", callback_data: "support_list" }]
+        ]
+    };
+
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function getUserAvailableBalance(db: any, userId: string): Promise<number> {
+    try {
+        const userDoc = await getDoc(doc(db, "users", userId));
+        if (!userDoc.exists()) return 0;
+        const userData = userDoc.data();
+        
+        // Sum file earnings
+        const uploadsQuery = query(collection(db, "uploads"), where("userId", "==", userId));
+        const uploadsSnapshot = await getDocs(uploadsQuery);
+        let computedFileEarnings = 0;
+        uploadsSnapshot.forEach(docSnap => {
+            computedFileEarnings += docSnap.data().earnings || 0;
+        });
+
+        const fileEarnings = userData?.fileEarnings !== undefined ? userData.fileEarnings : computedFileEarnings;
+        const linkEarnings = userData?.linkEarnings || 0;
+        const referralEarnings = userData?.referralEarnings || 0;
+        const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : (userData?.bonus || 0);
+        const rewardBalance = userData?.rewardBalance || 0;
+        const withdrawnAmount = userData?.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData?.totalWithdrawn || 0);
+        const pendingWithdrawals = userData?.pendingWithdrawals || 0;
+        const adminBalance = userData?.balance || 0;
+
+        return fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + adminBalance - withdrawnAmount - pendingWithdrawals;
+    } catch (e) {
+        console.error("Error calculating getUserAvailableBalance:", e);
+        return 0;
+    }
+}
+
+const USDT_RATE = 90;
+
+function getWithdrawalStatusLabel(status: string): string {
+    const s = String(status || "Pending").toLowerCase();
+    if (s.includes("pending")) return "🟡 Pending";
+    if (s.includes("approved")) return "🟢 Approved";
+    if (s.includes("paid")) return "💸 Paid";
+    if (s.includes("rejected")) return "🔴 Rejected";
+    if (s.includes("cancelled") || s.includes("canceled")) return "❌ Cancelled";
+    return status;
+}
+
+async function editTelegramMessage(botToken: string, chatId: number, messageId: number, text: string, extra?: any) {
+    try {
+        await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, ...extra })
+        });
+    } catch (e) {
+        console.error("Error editing telegram message:", e);
+    }
+}
+
+export async function submitWithdrawalRequest(botToken: string, chatId: number, userId: string, pending: any) {
+    const db = getDb();
+    const randomId = Math.floor(Math.random() * 900000) + 100000;
+    const withdrawalId = `WD${randomId}`;
+
+    // Get amount and method details
+    const amount = pending.amount;
+    let methodLabel = "";
+    const wData: any = {
+        withdrawalId,
+        userId,
+        amount,
+        status: "Pending",
+        createdAt: new Date().toISOString()
+    };
+
+    if (pending.method === "upi") {
+        methodLabel = "UPI ID";
+        wData.upiId = pending.upiId;
+    } else if (pending.method === "bank") {
+        methodLabel = "Bank Account";
+        wData.accountNumber = pending.accountNumber;
+        wData.ifscCode = pending.ifscCode;
+        wData.accountHolderName = pending.accountHolderName;
+    } else if (pending.method === "usdt") {
+        methodLabel = "USDT (TRC20)";
+        wData.walletAddress = pending.walletAddress;
+        if (pending.networkFee !== undefined) {
+            wData.networkFee = pending.networkFee;
+            wData.marketAdjustmentFee = pending.marketAdjustmentFee;
+            wData.finalReceive = pending.finalReceive;
+        }
+    }
+    wData.method = methodLabel;
+
+    if (pending.verificationStatus) {
+        wData.verificationStatus = pending.verificationStatus;
+        wData.verificationTime = pending.verificationTime;
+        wData.verificationMethod = pending.verificationMethod;
+    }
+
+    // Create the withdrawal document
+    await setDoc(doc(db, "withdrawals", withdrawalId), wData);
+
+    // Update pendingWithdrawals on the user doc
+    const userDocRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userDocRef);
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    if (userDoc.exists()) {
+        const currentPendingAmount = userDoc.data().pendingWithdrawals || 0;
+        // In INR: if USDT, convert using USDT_RATE
+        const inrAmount = pending.method === "usdt" ? (amount * USDT_RATE) : amount;
+        await setDoc(userDocRef, {
+            pendingWithdrawals: currentPendingAmount + inrAmount
+        }, { merge: true });
+    }
+
+    let amtStr = pending.method === "usdt" ? `${amount} USDT` : formatCurrency(amount, currency);
+    let feeStr = "";
+    
+    if (pending.method === "usdt" && pending.networkFee !== undefined) {
+        feeStr = `\nNetwork Fee:\n${pending.networkFee} USDT\n\nMarket Adjustment:\n${pending.marketAdjustmentFee} USDT\n\nFinal Receive:\n${pending.finalReceive} USDT\n`;
+    }
+
+    const textMsg = `✅ Withdrawal Request Submitted
+
+Withdrawal ID:
+${withdrawalId}
+
+Requested Amount:
+${amtStr}
+${feeStr}
+Method:
+${methodLabel}
+
+Status:
+🟡 Pending
+
+Processing Time:
+24-48 Hours`;
+
+    const keyboard = {
+        inline_keyboard: [
+            [{ text: "❌ Cancel Withdrawal", callback_data: `withdraw_cancel_${withdrawalId}` }]
+        ]
+    };
+
+    await sendTelegramMessage(botToken, chatId, textMsg, { reply_markup: keyboard });
+}
+
+async function initiateHumanVerification(botToken: string, chatId: number, userId: string, state: any) {
+    const db = getDb();
+    const appUrl = process.env.VITE_APP_URL || process.env.APP_URL || "https://ais-dev-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const verifyUrl = `${appUrl}/verify-withdrawal/${userId}`;
+    
+    // Generate captcha
+    const num1 = Math.floor(Math.random() * 900) + 100;
+    const num2 = Math.floor(Math.random() * 900) + 100;
+    const answer = String(num1 + num2);
+
+    const updatedState = { ...state, captchaAnswer: answer, step: "human_verification_pending", captchaNum1: num1, captchaNum2: num2, chatId };
+    await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+
+    const message = `🔐 Human Verification Required\n\nTo protect our platform from spam, bots and fraud withdrawals, please complete the human verification below.`;
+    
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔐 Verify Human", url: verifyUrl }]
+        ]
+    };
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+function maskAccountNumber(acc: string) {
+    if (!acc) return "";
+    if (acc.length <= 4) return acc;
+    return "*".repeat(acc.length - 4) + acc.slice(-4);
+}
+
+async function showVerifyBankDetails(botToken: string, chatId: number, state: any) {
+    const masked = maskAccountNumber(state.accountNumber || "");
+    const message = `🏦 Verify Bank Details
+
+Account Number:
+${masked}
+
+IFSC Code:
+${state.ifscCode}
+
+Account Holder:
+${state.accountHolderName}`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [
+                { text: "✅ Confirm", callback_data: "withdraw_confirm_bank" },
+                { text: "✏️ Edit", callback_data: "withdraw_edit_bank" }
+            ]
+        ]
+    };
+
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function handleWithdrawalTextInput(botToken: string, chatId: number, user: any, text: string, state: any) {
+    const db = getDb();
+    const userId = String(user.id);
+    const userDoc = await getDoc(doc(db, "users", userId));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    const step = state.step;
+
+    if (step === "enter_amount") {
+        const amount = parseFloat(text.trim());
+        if (isNaN(amount) || amount <= 0) {
+            await sendTelegramMessage(botToken, chatId, "❌ Invalid amount. Please enter a valid positive number.");
+            return;
+        }
+
+        const availableBalance = await getUserAvailableBalance(db, userId);
+
+        if (state.method === "upi" || state.method === "bank") {
+            if (amount < 10) {
+                await sendTelegramMessage(botToken, chatId, `❌ Minimum withdrawal amount is ${formatCurrency(10, currency)}.\n\nPlease enter an amount between ${formatCurrency(10, currency)} and ${formatCurrency(300, currency)}.`);
+                return;
+            }
+            if (amount > 300) {
+                await sendTelegramMessage(botToken, chatId, `❌ Maximum withdrawal amount is ${formatCurrency(300, currency)}.\n\nPlease enter an amount between ${formatCurrency(10, currency)} and ${formatCurrency(300, currency)}.`);
+                return;
+            }
+            if (availableBalance < amount) {
+                await sendTelegramMessage(botToken, chatId, `❌ Insufficient available balance. Your balance is ${formatCurrency(availableBalance, currency)}.`);
+                return;
+            }
+        } else if (state.method === "usdt") {
+            if (amount < 10) {
+                await sendTelegramMessage(botToken, chatId, "❌ Minimum withdrawal amount is 10 USDT.\n\nPlease enter an amount between 10 and 100 USDT.");
+                return;
+            }
+            if (amount > 100) {
+                await sendTelegramMessage(botToken, chatId, "❌ Maximum withdrawal amount is 100 USDT.\n\nPlease enter an amount between 10 and 100 USDT.");
+                return;
+            }
+            const costInInr = amount * USDT_RATE;
+            if (availableBalance < costInInr) {
+                await sendTelegramMessage(botToken, chatId, `❌ Insufficient available balance. Required: ${formatCurrency(costInInr, currency)} (${amount} USDT at ₹${USDT_RATE}/USDT). Your balance is ${formatCurrency(availableBalance, currency)}.`);
+                return;
+            }
+        }
+
+        // Save amount and transition
+        const updatedState = { ...state, amount, step: "" };
+        if (state.method === "upi") {
+            updatedState.step = "enter_upi";
+            await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "Enter Your UPI ID");
+        } else if (state.method === "bank") {
+            updatedState.step = "enter_bank_account";
+            await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "Enter Account Number");
+        } else if (state.method === "usdt") {
+            updatedState.step = "enter_usdt_wallet";
+            await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "Enter TRC20 Wallet Address");
+        }
+
+    } else if (step === "enter_upi" || step === "edit_upi") {
+        const upiId = text.trim();
+        const updatedState = { ...state, upiId, step: "verify_upi" };
+        await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+
+        const message = `📱 Verify Your UPI ID
+
+UPI ID:
+${upiId}`;
+
+        const inlineKeyboard = {
+            inline_keyboard: [
+                [
+                    { text: "✅ Confirm", callback_data: "withdraw_confirm_upi" },
+                    { text: "✏️ Edit", callback_data: "withdraw_edit_upi" }
+                ]
+            ]
+        };
+
+        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+
+    } else if (step === "enter_bank_account") {
+        const tempAccountNumber = text.trim();
+        const updatedState = { ...state, tempAccountNumber, step: "confirm_bank_account" };
+        await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+        await sendTelegramMessage(botToken, chatId, "Re-enter Account Number");
+
+    } else if (step === "confirm_bank_account") {
+        const reentry = text.trim();
+        if (reentry !== state.tempAccountNumber) {
+            const updatedState = { ...state, step: "enter_bank_account", tempAccountNumber: "" };
+            await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "❌ Account Numbers Do Not Match\n\nEnter Account Number");
+        } else {
+            const updatedState = { ...state, accountNumber: reentry, step: "enter_bank_ifsc" };
+            await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "Enter IFSC Code");
+        }
+
+    } else if (step === "enter_bank_ifsc" || step === "edit_bank_ifsc_step") {
+        const ifscCode = text.trim().toUpperCase();
+        if (step === "edit_bank_ifsc_step") {
+            const updatedState = { ...state, ifscCode, step: "verify_bank" };
+            await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+            await showVerifyBankDetails(botToken, chatId, updatedState);
+        } else {
+            const updatedState = { ...state, ifscCode, step: "enter_bank_holder" };
+            await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "Enter Account Holder Name");
+        }
+
+    } else if (step === "enter_bank_holder" || step === "edit_bank_holder_step") {
+        const accountHolderName = text.trim();
+        if (step === "edit_bank_holder_step") {
+            const updatedState = { ...state, accountHolderName, step: "verify_bank" };
+            await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+            await showVerifyBankDetails(botToken, chatId, updatedState);
+        } else {
+            const updatedState = { ...state, accountHolderName, step: "verify_bank" };
+            await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+            await showVerifyBankDetails(botToken, chatId, updatedState);
+        }
+
+    } else if (step === "edit_bank_account_step") {
+        const accountNumber = text.trim();
+        const updatedState = { ...state, accountNumber, step: "verify_bank" };
+        await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+        await showVerifyBankDetails(botToken, chatId, updatedState);
+
+    } else if (step === "enter_usdt_wallet" || step === "edit_usdt") {
+        const walletAddress = text.trim();
+        
+        const sysSettingsDoc = await getDoc(doc(db, "settings", "system"));
+        const sysSettingsData = sysSettingsDoc.exists() ? sysSettingsDoc.data() : {};
+        const withdrawalSettings = sysSettingsData?.withdrawalSettings || {};
+        
+        const usdtNetworkFee = withdrawalSettings.usdtNetworkFee ?? 1;
+        const usdtMarketAdjustmentPct = withdrawalSettings.usdtMarketAdjustmentPct ?? 5;
+        
+        const amount = state.amount; // The USDT amount
+        const networkFee = usdtNetworkFee;
+        const marketAdjustmentFee = Number(((amount * usdtMarketAdjustmentPct) / 100).toFixed(2));
+        const finalReceive = Number((amount - networkFee - marketAdjustmentFee).toFixed(2));
+
+        const updatedState = { 
+            ...state, 
+            walletAddress, 
+            step: "verify_usdt",
+            networkFee,
+            marketAdjustmentFee,
+            finalReceive
+        };
+        await setDoc(doc(db, "users", userId), { pendingWithdrawal: updatedState }, { merge: true });
+
+        const message = `💲 Verify Withdrawal Details
+
+Requested:
+${amount} USDT
+
+Network Fee:
+${networkFee} USDT
+
+Market Adjustment (${usdtMarketAdjustmentPct}%):
+${marketAdjustmentFee} USDT
+
+Final Receive:
+${finalReceive} USDT
+
+Wallet:
+${walletAddress}
+
+Please confirm your withdrawal details.`;
+
+        const inlineKeyboard = {
+            inline_keyboard: [
+                [
+                    { text: "✅ Confirm", callback_data: "withdraw_confirm_usdt" },
+                    { text: "✏️ Edit Address", callback_data: "withdraw_edit_usdt" }
+                ]
+            ]
+        };
+
+        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+
+    } else if (step === "human_verification_pending") {
+        await sendTelegramMessage(botToken, chatId, "❌ Please click the '🔐 Verify Human' button above to complete the verification in your browser.");
+    }
+}
+
+async function processWithdraw(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    const availableBalance = await getUserAvailableBalance(db, String(user.id));
+
+    const minWithdrawStr = formatCurrency(10, currency);
+    const maxWithdrawStr = formatCurrency(300, currency);
+
+    const message = `💸 Withdrawal Center
+
+💰 Available Balance: ${formatCurrency(availableBalance, currency)}
+
+━━━━━━━━━━━━━━━
+
+Withdrawal Limits:
+
+Minimum Withdrawal: ${minWithdrawStr}
+
+Maximum Withdrawal: ${maxWithdrawStr}
+
+💲 USDT Minimum Withdrawal: 10 USDT
+
+💲 USDT Maximum Withdrawal: 100 USDT
+
+━━━━━━━━━━━━━━━
+
+⚠️ Withdrawal Rules
+
+UPI ID must be correct.
+
+Bank Account details must be correct.
+
+TRC20 Wallet Address must be correct.
+
+Any Problem Contact:
+@roynoruless
+
+━━━━━━━━━━━━━━━`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "➡️ Continue", callback_data: "withdraw_continue" }]
+        ]
+    };
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+function maskUPI(upi: string): string {
+    if (!upi) return "N/A";
+    const parts = upi.split("@");
+    if (parts.length < 2) return upi.slice(0, 2) + "****";
+    const handle = parts[0];
+    const domain = parts[1];
+    if (handle.length <= 2) {
+        return handle + "****" + "@" + domain;
+    }
+    return handle.slice(0, 2) + "****" + "@" + domain;
+}
+
+function maskBank(account: string): string {
+    if (!account) return "N/A";
+    if (account.length <= 4) {
+        return "*".repeat(8) + account;
+    }
+    return "*".repeat(8) + account.slice(-4);
+}
+
+function maskWallet(wallet: string): string {
+    if (!wallet) return "N/A";
+    if (wallet.length <= 6) {
+        return wallet;
+    }
+    return wallet.slice(0, 4) + "************" + wallet.slice(-2);
+}
+
+function formatDate(dateStr: string): string {
+    try {
+        const d = new Date(dateStr);
+        return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch (e) {
+        return "N/A";
+    }
+}
+
+function formatTime(dateStr: string): string {
+    try {
+        const d = new Date(dateStr);
+        return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch (e) {
+        return "N/A";
+    }
+}
+
+async function processWithdrawalHistory(botToken: string, chatId: number, user: any, page: number = 1, messageIdToEdit?: number) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+
+    const q = query(collection(db, "withdrawals"), where("userId", "==", String(user.id)));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+        const emptyMsg = `📜 Withdrawal History
+
+No withdrawal requests found.
+
+Create your first withdrawal from the 💸 Withdraw section.`;
+        if (messageIdToEdit) {
+            await editTelegramMessage(botToken, chatId, messageIdToEdit, emptyMsg);
+        } else {
+            await sendTelegramMessage(botToken, chatId, emptyMsg);
+        }
+        return;
+    }
+
+    let pendingAmount = 0;
+    let approvedAmount = 0;
+    let paidAmount = 0;
+    let totalWithdrawn = 0;
+
+    const allWithdrawals: any[] = [];
+    snapshot.forEach(docSnap => {
+        const w = docSnap.data();
+        allWithdrawals.push({ id: docSnap.id, ...w });
+        
+        const stat = String(w.status || "").toLowerCase();
+        const isUsdt = w.method.includes("USDT") || w.walletAddress || String(w.method).toLowerCase().includes("usdt");
+        const amtInr = isUsdt ? (w.amount * USDT_RATE) : w.amount;
+
+        if (stat.includes("pending")) {
+            pendingAmount += amtInr;
+        } else if (stat.includes("approved")) {
+            approvedAmount += amtInr;
+        } else if (stat.includes("paid")) {
+            paidAmount += amtInr;
+        }
+    });
+
+    // Sort in memory to avoid composite index requirement
+    allWithdrawals.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+    });
+
+    totalWithdrawn = paidAmount + approvedAmount;
+
+    const limit = 5;
+    const startIndex = (page - 1) * limit;
+    const pageWithdrawals = allWithdrawals.slice(startIndex, startIndex + limit);
+    const hasNextPage = allWithdrawals.length > startIndex + limit;
+
+    let message = `📜 Withdrawal History
+
+📊 Withdrawal Summary
+
+💸 Total Withdrawn: ${formatCurrency(totalWithdrawn, currency)}
+
+🟡 Pending: ${formatCurrency(pendingAmount, currency)}
+
+🟢 Approved: ${formatCurrency(approvedAmount, currency)}
+
+💸 Paid: ${formatCurrency(paidAmount, currency)}
+
+━━━━━━━━━━━━━━━
+
+Latest Withdrawal Requests`;
+
+    for (const w of pageWithdrawals) {
+        const amtLabel = w.method.includes("USDT") ? `${w.amount} USDT` : formatCurrency(w.amount, currency);
+        const dateVal = formatDate(w.createdAt);
+        const statusVal = getWithdrawalStatusLabel(w.status);
+
+        message += `
+
+Withdrawal ID:
+${w.withdrawalId}
+
+💰 Amount: ${amtLabel}
+
+💳 Method: ${w.method}
+
+📅 Date:
+${dateVal}
+
+📌 Status:
+${statusVal}
+
+━━━━━━━━━━━━━━━`;
+    }
+
+    const inlineKeyboard: any = { inline_keyboard: [] };
+
+    const detailsButtons = [];
+    for (const w of pageWithdrawals) {
+        detailsButtons.push({ text: `📋 ${w.withdrawalId}`, callback_data: `withdrawal_details_${w.id}` });
+    }
+    
+    for (let i = 0; i < detailsButtons.length; i += 2) {
+        inlineKeyboard.inline_keyboard.push(detailsButtons.slice(i, i + 2));
+    }
+
+    const navRow = [];
+    if (page > 1) {
+        navRow.push({ text: "⬅️ Prev Page", callback_data: `history_page_${page - 1}` });
+    }
+    if (hasNextPage) {
+        navRow.push({ text: "📄 Next Page", callback_data: `history_page_${page + 1}` });
+    }
+    navRow.push({ text: "🔄 Refresh", callback_data: "history_refresh" });
+
+    inlineKeyboard.inline_keyboard.push(navRow);
+
+    if (messageIdToEdit) {
+        await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { reply_markup: inlineKeyboard });
+    } else {
+        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+    }
+}
+
+async function processWithdrawalDetails(botToken: string, chatId: number, withdrawalId: string) {
+    const db = getDb();
+    const docSnap = await getDoc(doc(db, "withdrawals", withdrawalId));
+    if (!docSnap.exists()) {
+         await sendTelegramMessage(botToken, chatId, "❌ Withdrawal not found.");
+         return;
+    }
+    const w = docSnap.data();
+    const userDoc = await getDoc(doc(db, "users", String(w.userId)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    
+    let methodSpecific = "";
+    if (w.method === "UPI ID" || w.method === "UPI" || w.upiId) {
+        methodSpecific = `📱 UPI:
+${maskUPI(w.upiId || "")}`;
+    } else if (w.method === "Bank Account" || w.method === "Bank" || w.accountNumber) {
+        methodSpecific = `🏦 Account:
+${maskBank(w.accountNumber || "")}
+
+IFSC:
+${w.ifscCode || "N/A"}`;
+    } else if (w.method === "USDT (TRC20)" || w.method === "USDT TRC20" || w.walletAddress) {
+        methodSpecific = `💲 Wallet:
+${maskWallet(w.walletAddress || "")}`;
+    }
+
+    const amtLabel = w.method.includes("USDT") ? `${w.amount} USDT` : formatCurrency(w.amount, currency);
+    const dateVal = formatDate(w.createdAt);
+    const timeVal = formatTime(w.createdAt);
+    const statusVal = getWithdrawalStatusLabel(w.status);
+    const adminRemark = w.adminRemark || "None";
+
+    let message = `📜 Withdrawal Details
+
+Withdrawal ID:
+${w.withdrawalId}
+
+━━━━━━━━━━━━━━━
+
+💰 Amount:
+${amtLabel}
+
+💳 Method:
+${w.method}
+
+━━━━━━━━━━━━━━━
+
+${methodSpecific}
+
+━━━━━━━━━━━━━━━
+
+📅 Request Date:
+${dateVal}
+
+🕒 Request Time:
+${timeVal}
+
+━━━━━━━━━━━━━━━
+
+Status:
+${statusVal}
+
+━━━━━━━━━━━━━━━
+
+Admin Remark:
+
+${adminRemark}`;
+
+    const statLower = String(w.status || "").toLowerCase();
+    
+    if (statLower.includes("paid")) {
+        const transRef = w.transactionRef || "N/A";
+        const pDate = w.paidDate ? formatDate(w.paidDate) : dateVal;
+        message += `
+
+━━━━━━━━━━━━━━━
+
+💸 Payment Completed
+
+Transaction Reference:
+${transRef}
+
+Paid Date:
+${pDate}`;
+    } else if (statLower.includes("reject")) {
+        const rejReason = w.rejectReason || "N/A";
+        message += `
+
+━━━━━━━━━━━━━━━
+
+🔴 Withdrawal Rejected
+
+Reason:
+${rejReason}`;
+    } else if (statLower.includes("pending")) {
+        message += `
+
+━━━━━━━━━━━━━━━
+
+🟡 Pending Review
+
+Estimated Processing Time:
+
+24-48 Hours`;
+    }
+
+    const buttons = [];
+    if (statLower.includes("pending")) {
+        buttons.push([{ text: "❌ Cancel Withdrawal", callback_data: `withdraw_cancel_${w.withdrawalId}` }]);
+    }
+    
+    await sendTelegramMessage(botToken, chatId, message, buttons.length ? { reply_markup: { inline_keyboard: buttons } } : undefined);
+}
+
+async function processDashboard(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDocRef = doc(db, "users", String(user.id));
+    const userDoc = await getDoc(userDocRef);
+    const userData = userDoc.data();
+    const currency = userDoc.exists() ? (userData?.currency || "INR") : "INR";
+
+    const availableBalance = userData?.availableBalance !== undefined ? userData.availableBalance : 0;
+    const fileEarnings = userData?.fileEarnings !== undefined ? userData.fileEarnings : 0;
+    const linkEarnings = userData?.linkEarnings !== undefined ? userData.linkEarnings : 0;
+    const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : 0;
+    const referralEarnings = userData?.referralEarnings !== undefined ? userData.referralEarnings : 0;
+    const todayEarnings = userData?.todayEarnings !== undefined ? userData.todayEarnings : 0;
+    const monthEarnings = userData?.monthEarnings !== undefined ? userData.monthEarnings : 0;
+    const totalFiles = userData?.totalFiles !== undefined ? userData.totalFiles : 0;
+    const totalLinks = userData?.totalLinks !== undefined ? userData.totalLinks : 0;
+    const totalReferrals = userData?.totalReferrals !== undefined ? userData.totalReferrals : 0;
+    const status = userData?.status || "Active";
+
+    const hasData = userData && (
+        availableBalance > 0 ||
+        fileEarnings > 0 ||
+        linkEarnings > 0 ||
+        bonusBalance > 0 ||
+        referralEarnings > 0 ||
+        todayEarnings > 0 ||
+        monthEarnings > 0 ||
+        totalFiles > 0 ||
+        totalLinks > 0 ||
+        totalReferrals > 0
+    );
+
+    if (!hasData) {
+        const message = `📊 Dashboard
+
+Welcome to RoyShare.
+
+Start uploading files, creating links and inviting friends to build your dashboard.`;
+        await sendTelegramMessage(botToken, chatId, message);
+        return;
+    }
+
+    const name = userData?.firstName || user?.first_name || "User";
+
+    const message = `📊 RoyShare Dashboard
+
+━━━━━━━━━━━━━━━
+
+👤 User: ${name}
+
+💰 Available Balance: ${formatCurrency(availableBalance, currency)}
+
+📁 Total Files: ${totalFiles}
+
+🔗 Total Links: ${totalLinks}
+
+👥 Total Referrals: ${totalReferrals}
+
+━━━━━━━━━━━━━━━
+
+📤 File Earnings: ${formatCurrency(fileEarnings, currency)}
+
+🔗 Link Earnings: ${formatCurrency(linkEarnings, currency)}
+
+🎁 Bonus Earnings: ${formatCurrency(bonusBalance, currency)}
+
+👥 Referral Earnings: ${formatCurrency(referralEarnings, currency)}
+
+━━━━━━━━━━━━━━━
+
+📈 Today's Earnings: ${formatCurrency(todayEarnings, currency)}
+
+📅 This Month Earnings: ${formatCurrency(monthEarnings, currency)}
+
+━━━━━━━━━━━━━━━
+
+🔥 Account Status: ${status}
+
+━━━━━━━━━━━━━━━`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔄 Refresh Dashboard", callback_data: "dashboard_refresh" }],
+            [{ text: "📊 Detailed Stats", callback_data: "dashboard_stats" }],
+            [{ text: "📜 Recent Activity", callback_data: "dashboard_activity" }]
+        ]
+    };
+
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processDashboardStats(botToken: string, chatId: number, user: any, callbackQueryId?: string) {
+    const db = getDb();
+    const userDocRef = doc(db, "users", String(user.id));
+    const userDoc = await getDoc(userDocRef);
+    const userData = userDoc.data();
+    const currency = userDoc.exists() ? (userData?.currency || "INR") : "INR";
+
+    const totalFiles = userData?.totalFiles !== undefined ? userData.totalFiles : 0;
+    const totalLinks = userData?.totalLinks !== undefined ? userData.totalLinks : 0;
+    const totalReferrals = userData?.totalReferrals !== undefined ? userData.totalReferrals : 0;
+
+    let totalDownloads = 0;
+    try {
+        const uploadsQuery = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
+        const uploadsSnapshot = await getDocs(uploadsQuery);
+        uploadsSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.status !== "deleted") {
+                totalDownloads += (data.downloads || 0);
+            }
+        });
+    } catch (e) {
+        console.error("Error summing downloads:", e);
+    }
+    
+    let totalUrlVisits = userData?.totalUrlVisits || 0;
+    if (totalUrlVisits === 0) {
+        try {
+            const linksQuery = query(collection(db, "links"), where("userId", "==", String(user.id)));
+            const linksSnapshot = await getDocs(linksQuery);
+            linksSnapshot.forEach(doc => {
+                const data = doc.data();
+                if (data.status !== "deleted") {
+                    totalUrlVisits += (data.clicks || data.visits || 0);
+                }
+            });
+        } catch (e) {
+            console.error("Error summing clicks:", e);
+        }
+    }
+
+    const availableBalance = userData?.availableBalance !== undefined ? userData.availableBalance : 0;
+    const fileEarnings = userData?.fileEarnings !== undefined ? userData.fileEarnings : 0;
+    const linkEarnings = userData?.linkEarnings !== undefined ? userData.linkEarnings : 0;
+    const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : 0;
+    const referralEarnings = userData?.referralEarnings !== undefined ? userData.referralEarnings : 0;
+
+    const lifetimeEarnings = userData?.lifetimeEarnings !== undefined ? userData.lifetimeEarnings : (availableBalance + fileEarnings + linkEarnings + referralEarnings + bonusBalance);
+
+    const message = `📊 Detailed Statistics
+
+📁 Uploaded Files: ${totalFiles}
+
+🔗 Created Links: ${totalLinks}
+
+📥 Total Downloads: ${totalDownloads}
+
+👁 Total URL Visits: ${totalUrlVisits}
+
+💰 Lifetime Earnings: ${formatCurrency(lifetimeEarnings, currency)}
+
+👥 Total Referrals: ${totalReferrals}
+
+━━━━━━━━━━━━━━━`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "📥 Download Analytics", callback_data: "feature_download_analytics" }],
+            [{ text: "👁 URL Analytics", callback_data: "feature_url_analytics" }],
+            [{ text: "📊 Advanced Earnings Reports", callback_data: "feature_earnings_reports" }],
+            [{ text: "🔙 Back to Dashboard", callback_data: "dashboard_home" }]
+        ]
+    };
+
+    if (callbackQueryId) {
+        try {
+            await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ callback_query_id: callbackQueryId })
+            });
+        } catch (e) {}
+    }
+
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processDashboardActivity(botToken: string, chatId: number, user: any, callbackQueryId?: string) {
+    const db = getDb();
+    
+    const uploadsQuery = query(collection(db, "uploads"), where("userId", "==", String(user.id)), limit(5));
+    const linksQuery = query(collection(db, "links"), where("userId", "==", String(user.id)), limit(5));
+    
+    const [uploadsSnap, linksSnap] = await Promise.all([
+        getDocs(uploadsQuery).catch(() => null),
+        getDocs(linksQuery).catch(() => null)
+    ]);
+    
+    const activities: string[] = [];
+    
+    if (uploadsSnap) {
+        uploadsSnap.forEach(d => {
+            const data = d.data();
+            if (data.status !== "deleted") {
+                activities.push(`📤 Uploaded ${data.fileName || "File"}`);
+            }
+        });
+    }
+    
+    if (linksSnap) {
+        linksSnap.forEach(d => {
+            const data = d.data();
+            if (data.status !== "deleted") {
+                activities.push(`🔗 Created Link ${data.linkId || d.id}`);
+            }
+        });
+    }
+
+    const userDoc = await getDoc(doc(db, "users", String(user.id))).catch(() => null);
+    const userData = userDoc?.data();
+    
+    if (userData?.totalReferrals > 0) {
+        activities.push(`👥 New Referral Joined`);
+    }
+    if (userData?.bonusBalance > 0) {
+        activities.push(`🎁 Daily Bonus Claimed`);
+    }
+
+    if (activities.length === 0) {
+        activities.push("📤 Uploaded Movie.apk");
+        activities.push("🔗 Created Link RS78291");
+        activities.push("👥 New Referral Joined");
+        activities.push("🎁 Daily Bonus Claimed");
+    }
+
+    const formattedActivities = activities.slice(0, 5).join("\n\n");
+
+    const message = `📜 Recent Activity
+
+${formattedActivities}
+
+━━━━━━━━━━━━━━━`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔙 Back to Dashboard", callback_data: "dashboard_home" }]
+        ]
+    };
+
+    if (callbackQueryId) {
+        try {
+            await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ callback_query_id: callbackQueryId })
+            });
+        } catch (e) {}
+    }
+
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processDashboardFeature(botToken: string, chatId: number, featureName: string, callbackQueryId?: string) {
+    const message = `🚧 Under Development
+
+${featureName}`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔙 Back to Detailed Stats", callback_data: "dashboard_stats" }]
+        ]
+    };
+
+    if (callbackQueryId) {
+        try {
+            await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ callback_query_id: callbackQueryId })
+            });
+        } catch (e) {}
+    }
+
+    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function processCallback(botToken: string, callbackQuery: any) {
+    const chatId = callbackQuery.message.chat.id;
+    const userId = callbackQuery.from.id;
+    const db = getDb();
+    
+    // Default settings with user-provided links
+    let settings: any = {
+        channelLink: "https://t.me/royshare_official",
+        groupLink: "https://t.me/RoyShareCommunity"
+    };
+
+    // Try read settings, fallback on fail
+    try {
+        const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+        if (settingsDoc.exists()) {
+            const data = settingsDoc.data();
+            if (data) {
+                console.log("Found settings in DB:", data);
+                settings = { 
+                    channelUsername: data.channelUsername || data.channelLink, 
+                    groupUsername: data.groupUsername || data.groupLink 
+                };
+            }
+        } else {
+            console.log("Settings document does not exist, using default.");
+        }
+    } catch (e) {
+        await logDbError({ collection: "settings", docId: "telegram", operation: "get", userId });
+    }
+
+    try {
+        const data = callbackQuery.data;
+
+        if (data === "verify_join") {
+            try {
+                // Log settings precisely
+                const db = getDb();
+                const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+                const data = settingsDoc.data();
+                
+                console.log("DEBUG: Full Firestore Data:", JSON.stringify(data));
+                
+                const getUsername = (link: string | undefined) => {
+                    if (!link) return "";
+                    let cleaned = link.replace(/https?:\/\/(t\.me\/|telegram\.me\/)/i, '');
+                    cleaned = cleaned.replace(/^@/, '');
+                    return cleaned.split('/')[0];
+                };
+
+                const channelId = -1003385031126;
+                const groupId = -1003929156200;
+                
+                console.log("DEBUG: Verification started using IDs", { channelId, groupId });
+
+                const checkMemberById = async (chatId: number, uId: number) => {
+                    const response = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${chatId}&user_id=${uId}`);
+                    const data = await response.json();
+                    console.log(`DEBUG: Raw getChatMember result for ${chatId}:`, JSON.stringify(data));
+                    if (data.ok && data.result) {
+                        const status = data.result.status;
+                        const isJoined = status === 'member' || status === 'administrator' || status === 'creator';
+                        return { isJoined, status, raw: data.result };
+                    }
+                    return { isJoined: false, status: data.description || "Unknown error", raw: data };
+                };
+
+                const resChannel = await checkMemberById(channelId, userId);
+                const resGroup = await checkMemberById(groupId, userId);
+
+                console.log("DEBUG: Final verification result", { resChannel, resGroup });
+
+                if (resChannel.isJoined && resGroup.isJoined) {
+                    // Success: Delete verification message
+                    await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ chat_id: chatId, message_id: callbackQuery.message.message_id })
+                    });
+
+                    await setDoc(doc(db, "users", String(userId)), {
+                        contactVerified: true,
+                        membershipVerified: true
+                    }, { merge: true });
+
+                    // Process referral counting if they were referred
+                    try {
+                        const referralDocRef = doc(db, "referrals", String(userId));
+                        const referralDoc = await getDoc(referralDocRef);
+                        if (referralDoc.exists()) {
+                            const refData = referralDoc.data();
+                            const referrerId = refData.referrerId;
+                            
+                            // Let's update referred user info in referrals
+                            const rFirstName = callbackQuery.from.first_name || refData.referredFirstName || "User";
+                            const rLastName = callbackQuery.from.last_name || refData.referredLastName || "";
+                            const rUsername = callbackQuery.from.username || refData.referredUsername || "";
+                            const joinDate = refData.joinDate || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+                            await setDoc(referralDocRef, {
+                                referredFirstName: rFirstName,
+                                referredLastName: rLastName,
+                                referredUsername: rUsername,
+                                joinDate: joinDate
+                            }, { merge: true });
+
+                            // Let's increment totalReferrals and referrals on the referrer
+                            const referrerDocRef = doc(db, "users", String(referrerId));
+                            const referrerDoc = await getDoc(referrerDocRef);
+                            if (referrerDoc.exists()) {
+                                const rData = referrerDoc.data();
+                                const currentTotalRef = rData?.totalReferrals || 0;
+                                const currentRef = rData?.referrals || 0;
+                                await setDoc(referrerDocRef, {
+                                    totalReferrals: currentTotalRef + 1,
+                                    referrals: currentRef + 1
+                                }, { merge: true });
+                            }
+                            
+                            // Notify the referrer!
+                            try {
+                                const name = rLastName ? `${rFirstName} ${rLastName}` : rFirstName;
+                                const usernameStr = rUsername ? `@${rUsername}` : "N/A";
+                                const notifyMsg = `🎉 New Referral Joined\n\n👤 Name: ${name}\n📛 Username: ${usernameStr}\n🆔 User ID: ${userId}\n📅 Join Date: ${joinDate}\n\n⏳ Status: Pending Commission`;
+                                await sendTelegramMessage(botToken, Number(referrerId), notifyMsg);
+                            } catch (eNotify) {}
+                        }
+                    } catch (refErr) {
+                        console.error("Error processing referral on membership verification:", refErr);
+                    }
+
+                    await sendTelegramMessage(botToken, chatId, "🎉 Welcome to RoyShare! Upload files, create links, earn rewards and manage your content easily.", {
+                        reply_markup: { remove_keyboard: true }
+                    });
+
+                    await sendTelegramMessage(botToken, chatId, "Main Menu:", { reply_markup: getMainMenuKeyboard() });
+                } else {
+                    const channelStatusStr = resChannel.isJoined ? "Joined" : "Not Joined";
+                    const groupStatusStr = resGroup.isJoined ? "Joined" : "Not Joined";
+
+                    let errorMessage = "";
+
+                    if (!resChannel.isJoined && !resGroup.isJoined) {
+                        errorMessage = `❌ Verification Failed
+
+⚠️ Kripya pehle Channel aur Group dono join karein, phir Verify Join button dabayein.
+
+📢 Channel: ${channelStatusStr}
+👥 Group: ${groupStatusStr}`;
+                    } else if (!resChannel.isJoined) {
+                        errorMessage = `❌ Verification Failed
+
+⚠️ Kripya pehle Channel join karein, phir Verify Join button dabayein.
+
+📢 Channel: ${channelStatusStr}`;
+                    } else if (!resGroup.isJoined) {
+                        errorMessage = `❌ Verification Failed
+
+⚠️ Kripya pehle Group join karein, phir Verify Join button dabayein.
+
+👥 Group: ${groupStatusStr}`;
+                    }
+
+                    await sendTelegramMessage(botToken, chatId, errorMessage);
+                }
+            } catch (e: any) {
+                console.error("DEBUG: Verification failed", e);
+                await sendTelegramMessage(botToken, chatId, `❌ Verification error: ${e.message}`);
+            }
+        } else if (data === "withdraw_continue") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+
+            const userDoc = await getDoc(doc(db, "users", String(userId)));
+            const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+
+            const aliveBalance = await getUserAvailableBalance(db, String(userId));
+            if (aliveBalance < 10) {
+                await sendTelegramMessage(botToken, chatId, `❌ Your available balance is below the minimum limit of ${formatCurrency(10, currency)}. Current balance: ${formatCurrency(aliveBalance, currency)}`);
+                return;
+            }
+
+            const qPendingCheck = query(collection(db, "withdrawals"), where("userId", "==", String(userId)), where("status", "==", "Pending"));
+            const pendingSnap = await getDocs(qPendingCheck);
+            if (!pendingSnap.empty) {
+                await sendTelegramMessage(botToken, chatId, "❌ You already have a pending withdrawal request. Please wait until it is processed or cancel it before making a new one.");
+                return;
+            }
+
+            const message = `Choose Withdrawal Method:`;
+            const inlineKeyboard = {
+                inline_keyboard: [
+                    [{ text: "📱 UPI ID", callback_data: "withdraw_method_upi" }],
+                    [{ text: "🏦 Bank Account", callback_data: "withdraw_method_bank" }],
+                    [{ text: "💲 USDT TRC20", callback_data: "withdraw_method_usdt" }]
+                ]
+            };
+            await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+        } else if (data.startsWith("withdraw_method_")) {
+            const method = data.replace("withdraw_method_", "");
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+
+            const userDoc = await getDoc(doc(db, "users", String(userId)));
+            const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+
+            const aliveBalance = await getUserAvailableBalance(db, String(userId));
+            if (aliveBalance < 10) {
+                await sendTelegramMessage(botToken, chatId, `❌ Your available balance is below the minimum limit of ${formatCurrency(10, currency)}. Current balance: ${formatCurrency(aliveBalance, currency)}`);
+                return;
+            }
+
+            const qPendingCheck = query(collection(db, "withdrawals"), where("userId", "==", String(userId)), where("status", "==", "Pending"));
+            const pendingSnap = await getDocs(qPendingCheck);
+            if (!pendingSnap.empty) {
+                await sendTelegramMessage(botToken, chatId, "❌ You already have a pending withdrawal request. Please wait until it is processed or cancel it before making a new one.");
+                return;
+            }
+
+            // Update user with starting withdrawal state
+            const state = { method, step: "enter_amount", amount: 0 };
+            await setDoc(doc(db, "users", String(userId)), { 
+                pendingWithdrawal: state,
+                pendingShortenUrl: false,
+                pendingSearchFile: false
+            }, { merge: true });
+
+            if (method === "usdt") {
+                await sendTelegramMessage(botToken, chatId, "Please enter the withdrawal amount (10 - 100 USDT):");
+            } else {
+                await sendTelegramMessage(botToken, chatId, `Please enter the withdrawal amount (${formatCurrency(10, currency)} - ${formatCurrency(300, currency)}):`);
+            }
+        } else if (data.startsWith("withdraw_confirm_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const uDoc = await getDoc(doc(db, "users", String(userId)));
+            const state = uDoc.data()?.pendingWithdrawal;
+            if (state) {
+                await initiateHumanVerification(botToken, chatId, String(userId), state);
+            } else {
+                await sendTelegramMessage(botToken, chatId, "❌ Withdrawal session expired. Please start again using 💸 Withdraw.");
+            }
+        } else if (data === "withdraw_edit_upi") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const uDoc = await getDoc(doc(db, "users", String(userId)));
+            const state = uDoc.data()?.pendingWithdrawal;
+            if (state) {
+                const updatedState = { ...state, step: "edit_upi" };
+                await setDoc(doc(db, "users", String(userId)), { pendingWithdrawal: updatedState }, { merge: true });
+                await sendTelegramMessage(botToken, chatId, "Enter Your UPI ID");
+            }
+        } else if (data === "withdraw_edit_usdt") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const uDoc = await getDoc(doc(db, "users", String(userId)));
+            const state = uDoc.data()?.pendingWithdrawal;
+            if (state) {
+                const updatedState = { ...state, step: "edit_usdt" };
+                await setDoc(doc(db, "users", String(userId)), { pendingWithdrawal: updatedState }, { merge: true });
+                await sendTelegramMessage(botToken, chatId, "Enter TRC20 Wallet Address");
+            }
+        } else if (data === "withdraw_edit_bank") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const inlineKeyboard = {
+                inline_keyboard: [
+                    [{ text: "🏦 Account Number", callback_data: "withdraw_edit_bank_account" }],
+                    [{ text: "🏦 IFSC Code", callback_data: "withdraw_edit_bank_ifsc" }],
+                    [{ text: "🏦 Account Holder Name", callback_data: "withdraw_edit_bank_holder" }],
+                    [{ text: "🔙 Back", callback_data: "withdraw_verify_bank_screen" }]
+                ]
+            };
+            await sendTelegramMessage(botToken, chatId, "Allow editing:\n\n🏦 Account Number\n\n🏦 IFSC Code\n\n🏦 Account Holder Name", { reply_markup: inlineKeyboard });
+        } else if (data === "withdraw_edit_bank_account") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const uDoc = await getDoc(doc(db, "users", String(userId)));
+            const state = uDoc.data()?.pendingWithdrawal;
+            if (state) {
+                const updatedState = { ...state, step: "edit_bank_account_step" };
+                await setDoc(doc(db, "users", String(userId)), { pendingWithdrawal: updatedState }, { merge: true });
+                await sendTelegramMessage(botToken, chatId, "Enter Account Number");
+            }
+        } else if (data === "withdraw_edit_bank_ifsc") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const uDoc = await getDoc(doc(db, "users", String(userId)));
+            const state = uDoc.data()?.pendingWithdrawal;
+            if (state) {
+                const updatedState = { ...state, step: "edit_bank_ifsc_step" };
+                await setDoc(doc(db, "users", String(userId)), { pendingWithdrawal: updatedState }, { merge: true });
+                await sendTelegramMessage(botToken, chatId, "Enter IFSC Code");
+            }
+        } else if (data === "withdraw_edit_bank_holder") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const uDoc = await getDoc(doc(db, "users", String(userId)));
+            const state = uDoc.data()?.pendingWithdrawal;
+            if (state) {
+                const updatedState = { ...state, step: "edit_bank_holder_step" };
+                await setDoc(doc(db, "users", String(userId)), { pendingWithdrawal: updatedState }, { merge: true });
+                await sendTelegramMessage(botToken, chatId, "Enter Account Holder Name");
+            }
+        } else if (data === "withdraw_verify_bank_screen") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const uDoc = await getDoc(doc(db, "users", String(userId)));
+            const state = uDoc.data()?.pendingWithdrawal;
+            if (state) {
+                await showVerifyBankDetails(botToken, chatId, state);
+            }
+        } else if (data.startsWith("withdraw_cancel_")) {
+            const withdrawalId = data.replace("withdraw_cancel_", "");
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+
+            const wDocRef = doc(db, "withdrawals", withdrawalId);
+            const wDoc = await getDoc(wDocRef);
+            if (!wDoc.exists()) {
+                await sendTelegramMessage(botToken, chatId, "❌ Withdrawal request not found or already processed.");
+                return;
+            }
+
+            const wData = wDoc.data();
+            if (wData.status !== "Pending" && wData.status !== "🟡 Pending") {
+                await sendTelegramMessage(botToken, chatId, `❌ Cannot cancel this withdrawal. Current status: ${wData.status}`);
+                return;
+            }
+
+            // Animate cancel progress
+            const initialMsg = `Cancelling Request...`;
+            const msgId = await sendTelegramMessage(botToken, chatId, initialMsg);
+            if (msgId) {
+                const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+                await sleep(300);
+                await editTelegramMessage(botToken, chatId, msgId, "Cancelling Request...\n10%");
+                await sleep(300);
+                await editTelegramMessage(botToken, chatId, msgId, "Cancelling Request...\n25%");
+                await sleep(300);
+                await editTelegramMessage(botToken, chatId, msgId, "Cancelling Request...\n50%");
+                await sleep(300);
+                await editTelegramMessage(botToken, chatId, msgId, "Cancelling Request...\n100%");
+                await sleep(300);
+                await editTelegramMessage(botToken, chatId, msgId, `✅ Withdrawal Cancelled Successfully\n\nStatus:\n❌ Cancelled`);
+            } else {
+                await sendTelegramMessage(botToken, chatId, `✅ Withdrawal Cancelled Successfully\n\nStatus:\n❌ Cancelled`);
+            }
+
+            // Update DB status to Cancelled
+            await setDoc(wDocRef, { status: "Cancelled" }, { merge: true });
+
+            // Restore/deduct user's pendingWithdrawals amount
+            const uDocRef = doc(db, "users", String(userId));
+            const uDoc = await getDoc(uDocRef);
+            if (uDoc.exists()) {
+                const currentPending = uDoc.data().pendingWithdrawals || 0;
+                const isUsdt = wData.method.includes("USDT") || wData.walletAddress;
+                const inrRefund = isUsdt ? (wData.amount * USDT_RATE) : wData.amount;
+                const newPending = Math.max(0, currentPending - inrRefund);
+                await setDoc(uDocRef, { pendingWithdrawals: newPending }, { merge: true });
+            }
+        } else if (data === "support_create") {
+            const inlineKeyboard = {
+                inline_keyboard: [
+                    [{ text: "💸 Withdrawal Issue", callback_data: "support_type_withdrawal" }],
+                    [{ text: "📤 Upload Issue", callback_data: "support_type_upload" }],
+                    [{ text: "🔗 Link Issue", callback_data: "support_type_link" }],
+                    [{ text: "💰 Earnings Issue", callback_data: "support_type_earnings" }],
+                    [{ text: "👥 Referral Issue", callback_data: "support_type_referral" }],
+                    [{ text: "⚙️ Other Issue", callback_data: "support_type_other" }]
+                ]
+            };
+            await sendTelegramMessage(botToken, chatId, "Select Issue Type:", { reply_markup: inlineKeyboard });
+        } else if (data.startsWith("support_type_")) {
+            const type = data.split("_")[2];
+            await setDoc(doc(db, "users", String(userId)), { pendingSupportTicket: { type, status: 'typing_description' } }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, `Please describe your problem for the ${type.toUpperCase()} issue.`);
+        } else if (data.startsWith("announce_type_")) {
+            const type = data.replace("announce_type_", "").replace(/_/g, " ");
+            const userDoc = await getDoc(doc(db, "users", String(userId)));
+            const pending = userDoc.data()?.pendingAnnouncement;
+            
+            await addDoc(collection(db, "announcements"), {
+                 title: pending.title,
+                 message: pending.message,
+                 type: type,
+                 createdAt: new Date().toISOString()
+            });
+            await setDoc(doc(db, "users", String(userId)), { pendingAnnouncement: null }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, `✅ Announcement Published: ${pending.title}`);
+        } else if (data === "support_create") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+
+            const inlineKeyboard = {
+                inline_keyboard: [
+                    [
+                        { text: "💸 Withdrawal Issue", callback_data: "support_type_withdrawal" },
+                        { text: "📤 Upload Issue", callback_data: "support_type_upload" }
+                    ],
+                    [
+                        { text: "🔗 Link Issue", callback_data: "support_type_link" },
+                        { text: "👥 Referral Issue", callback_data: "support_type_referral" }
+                    ],
+                    [
+                        { text: "💰 Earnings Issue", callback_data: "support_type_earnings" },
+                        { text: "⚙️ Other Issue", callback_data: "support_type_other" }
+                    ]
+                ]
+            };
+            await sendTelegramMessage(botToken, chatId, "Select Issue Type", { reply_markup: inlineKeyboard });
+        } else if (data.startsWith("support_type_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+
+            const sType = data.replace("support_type_", "");
+            await setDoc(doc(db, "users", String(userId)), {
+                pendingSupportTicket: {
+                    type: sType,
+                    status: "typing_description"
+                }
+            }, { merge: true });
+
+            await sendTelegramMessage(botToken, chatId, "📝 Please describe your issue in detail.");
+        } else if (data === "support_list") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await processMyTickets(botToken, chatId, callbackQuery.from, 1, callbackQuery.message?.message_id);
+        } else if (data.startsWith("support_page_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const page = Number(data.replace("support_page_", ""));
+            await processMyTickets(botToken, chatId, callbackQuery.from, page, callbackQuery.message?.message_id);
+        } else if (data === "support_refresh") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await processMyTickets(botToken, chatId, callbackQuery.from, 1, callbackQuery.message?.message_id);
+        } else if (data.startsWith("ticket_details_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const ticketDocId = data.replace("ticket_details_", "");
+            await processTicketDetails(botToken, chatId, ticketDocId);
+        } else if (data === "support_admin") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const adminMsg = `📞 Admin Contact
+
+Telegram:
+@roynoruless`;
+            await sendTelegramMessage(botToken, chatId, adminMsg);
+        } else if (data.startsWith("admin_reply_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const ticketDocId = data.replace("admin_reply_", "");
+            const tSnap = await getDoc(doc(db, "tickets", ticketDocId));
+            if (tSnap.exists()) {
+                const tData = tSnap.data();
+                await setDoc(doc(db, "users", String(userId)), {
+                    pendingAdminReply: {
+                        docId: ticketDocId,
+                        ticketId: tData?.ticketId
+                    }
+                }, { merge: true });
+                await sendTelegramMessage(botToken, chatId, `📝 Please enter your reply for Ticket ${tData?.ticketId}:`);
+            } else {
+                await sendTelegramMessage(botToken, chatId, "⚠️ Ticket not found.");
+            }
+        } else if (data.startsWith("admin_resolve_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const ticketDocId = data.replace("admin_resolve_", "");
+            const ticketRef = doc(db, "tickets", ticketDocId);
+            const tSnap = await getDoc(ticketRef);
+            if (tSnap.exists()) {
+                const tData = tSnap.data();
+                await setDoc(ticketRef, { status: "🟢 Resolved" }, { merge: true });
+                
+                await sendTelegramMessage(botToken, chatId, `✅ Ticket ${tData.ticketId} resolved successfully.`);
+                
+                // Notify user
+                const userChatId = tData.userId;
+                const userNotifyMsg = `✅ Ticket Resolved
+
+🎫 Ticket ID:
+${tData.ticketId}
+
+Thank you for contacting RoyShare Support.`;
+                try {
+                    await sendTelegramMessage(botToken, Number(userChatId), userNotifyMsg);
+                } catch (err) {
+                    console.error("Error notifying user of ticket resolve:", err);
+                }
+            } else {
+                await sendTelegramMessage(botToken, chatId, "⚠️ Ticket not found.");
+            }
+        } else if (data.startsWith("admin_close_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const ticketDocId = data.replace("admin_close_", "");
+            const ticketRef = doc(db, "tickets", ticketDocId);
+            const tSnap = await getDoc(ticketRef);
+            if (tSnap.exists()) {
+                const tData = tSnap.data();
+                await setDoc(ticketRef, { status: "🔴 Closed" }, { merge: true });
+                await sendTelegramMessage(botToken, chatId, `🔴 Ticket ${tData.ticketId} closed successfully.`);
+            } else {
+                await sendTelegramMessage(botToken, chatId, "⚠️ Ticket not found.");
+            }
+        } else if (data === "refresh_account") {
+            await processAccount(botToken, chatId, callbackQuery.from);
+        } else if (data === "copy_user_id") {
+            await sendTelegramMessage(botToken, chatId, `Your User ID is: ${userId}`);
+        } else if (data === "refresh_balance") {
+            await processBalance(botToken, chatId, callbackQuery.from);
+        } else if (data === "earnings_history") {
+            await processEarningsHistory(botToken, chatId, callbackQuery.from);
+        } else if (data === "withdraw") {
+            await processWithdraw(botToken, chatId, callbackQuery.from);
+        } else if (data === "history_refresh") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await processWithdrawalHistory(botToken, chatId, callbackQuery.from, 1, callbackQuery.message.message_id);
+        } else if (data.startsWith("history_page_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const page = parseInt(data.replace("history_page_", ""), 10);
+            await processWithdrawalHistory(botToken, chatId, callbackQuery.from, page, callbackQuery.message.message_id);
+        } else if (data === "leaderboard_refresh") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "🔄 Leaderboard Refreshed!" })
+                });
+            } catch (e) {}
+            await processLeaderboard(botToken, chatId, callbackQuery.from, callbackQuery.message?.message_id);
+        } else if (data === "leaderboard_back_main") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await processLeaderboard(botToken, chatId, callbackQuery.from, callbackQuery.message?.message_id);
+        } else if (data.startsWith("leaderboard_cat_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const category = data.replace("leaderboard_cat_", "");
+            await showLeaderboardCategory(botToken, chatId, String(userId), category, callbackQuery.message?.message_id);
+        } else if (data.startsWith("ann_page_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const page = parseInt(data.replace("ann_page_", ""), 10) || 1;
+            await processAnnouncements(botToken, chatId, callbackQuery.from, page, callbackQuery.message.message_id);
+        } else if (data.startsWith("ann_refresh_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "🔄 Announcements Refreshed!" })
+                });
+            } catch (e) {}
+            const page = parseInt(data.replace("ann_refresh_", ""), 10) || 1;
+            await processAnnouncements(botToken, chatId, callbackQuery.from, page, callbackQuery.message.message_id);
+        } else if (data.startsWith("ann_details_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const parts = data.replace("ann_details_", "").split("_");
+            const docId = parts[0];
+            const page = parts[1] ? parseInt(parts[1], 10) : 1;
+            await processAnnouncementDetails(botToken, chatId, docId, page, callbackQuery.message.message_id);
+        } else if (data.startsWith("ann_list_page_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const page = parseInt(data.replace("ann_list_page_", ""), 10) || 1;
+            await processAnnouncements(botToken, chatId, callbackQuery.from, page, callbackQuery.message.message_id);
+        } else if (data === "bonus_claim") {
+            await claimBonus(botToken, chatId, callbackQuery.from);
+        } else if (data === "bonus_history") {
+            await processBonusHistory(botToken, chatId, callbackQuery.from);
+        } else if (data.startsWith("withdrawal_details_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const withdrawalId = data.replace("withdrawal_details_", "");
+            await processWithdrawalDetails(botToken, chatId, withdrawalId);
+        } else if (data === "mycontent_upload") {
+            await setDoc(doc(db, "users", String(userId)), { uploadTestMode: true }, { merge: true });
+            
+            const message = `📤 Send the file you want to upload.
+
+Supported Files:
+
+📄 PDF
+📦 APK
+🎬 Video
+🎵 Audio
+🖼 Image
+📁 ZIP/RAR
+📃 Documents
+
+Maximum File Size:
+2 GB`;
+            await sendTelegramMessage(botToken, chatId, message);
+        } else if (data === "mycontent_search") {
+            await setDoc(doc(db, "users", String(userId)), { 
+                pendingSearchFile: true,
+                pendingWithdrawal: null,
+                pendingShortenUrl: false
+            }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "🔍 Enter file name to search.");
+        } else if (data === "mycontent_stats") {
+            await processMyContentStats(botToken, chatId, callbackQuery.from);
+        } else if (data === "mycontent_back") {
+            await processMyContent(botToken, chatId, callbackQuery.from, 0);
+        } else if (data.startsWith("mycontent_next_")) {
+            const pageIndex = parseInt(data.replace("mycontent_next_", ""), 10) || 0;
+            await processMyContent(botToken, chatId, callbackQuery.from, pageIndex);
+        } else if (data.startsWith("mycontent_view_")) {
+            const fileId = data.replace("mycontent_view_", "");
+            await processMyFileDetails(botToken, chatId, fileId);
+        } else if (data.startsWith("mycontent_analytics_")) {
+            const fileId = data.replace("mycontent_analytics_", "");
+            await processMyFileAnalytics(botToken, chatId, fileId);
+        } else if (data.startsWith("mycontent_delete_")) {
+            const fileId = data.replace("mycontent_delete_", "");
+            await askDeleteMyFile(botToken, chatId, fileId);
+        } else if (data.startsWith("mycontent_confdel_")) {
+            const fileId = data.replace("mycontent_confdel_", "");
+            await confirmDeleteMyFile(botToken, chatId, callbackQuery.from, fileId);
+        } else if (data.startsWith("mycontent_copy_")) {
+            const fileId = data.replace("mycontent_copy_", "");
+            const fileSnap = await getDoc(doc(db, "uploads", fileId));
+            if (fileSnap.exists()) {
+                const file = fileSnap.data();
+                const link = file.publicLink || file.downloadLink || "N/A";
+                await sendTelegramMessage(botToken, chatId, `📋 *Copyable Link:*\n\n\`${link}\``, { parse_mode: "Markdown" });
+            } else {
+                await sendTelegramMessage(botToken, chatId, "❌ Link not found.");
+            }
+        } else if (data.startsWith("shortlink_copy_")) {
+            const linkId = data.replace("shortlink_copy_", "");
+            const linkSnap = await getDoc(doc(db, "links", linkId));
+            if (linkSnap.exists()) {
+                const linkData = linkSnap.data();
+                const link = linkData.shortUrl || "N/A";
+                await sendTelegramMessage(botToken, chatId, `📋 *Copyable Link:*\n\n\`${link}\``, { parse_mode: "Markdown" });
+            } else {
+                await sendTelegramMessage(botToken, chatId, "❌ Link not found.");
+            }
+        } else if (data.startsWith("shortlink_delete_")) {
+            const linkId = data.replace("shortlink_delete_", "");
+            await setDoc(doc(db, "links", linkId), { status: "deleted" }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "🗑 Short link has been deleted successfully.");
+        } else if (data === "shortlink_mylinks") {
+            await processMyLinks(botToken, chatId, callbackQuery.from);
+        } else if (data === "shortlink_another") {
+            await setDoc(doc(db, "users", String(userId)), { 
+                pendingShortenUrl: true,
+                pendingWithdrawal: null,
+                pendingSearchFile: false
+            }, { merge: true });
+            const message = `🔗 Enter the URL you want to shorten.
+
+Example:
+
+https://google.com
+https://youtube.com`;
+            await sendTelegramMessage(botToken, chatId, message);
+        } else if (data === "dashboard_refresh") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "🔄 Dashboard Refreshed!" })
+                });
+            } catch (e) {}
+            await processDashboard(botToken, chatId, callbackQuery.from);
+        } else if (data === "dashboard_stats") {
+            await processDashboardStats(botToken, chatId, callbackQuery.from, callbackQuery.id);
+        } else if (data === "dashboard_activity") {
+            await processDashboardActivity(botToken, chatId, callbackQuery.from, callbackQuery.id);
+        } else if (data === "feature_download_analytics") {
+            await processDashboardFeature(botToken, chatId, "📥 Download Analytics", callbackQuery.id);
+        } else if (data === "feature_url_analytics") {
+            await processDashboardFeature(botToken, chatId, "👁 URL Analytics", callbackQuery.id);
+        } else if (data === "feature_earnings_reports") {
+            await processDashboardFeature(botToken, chatId, "📊 Advanced Earnings Reports", callbackQuery.id);
+        } else if (data === "dashboard_home") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await processDashboard(botToken, chatId, callbackQuery.from);
+        } else if (data.startsWith("referral_copy_")) {
+            const rUserId = data.replace("referral_copy_", "");
+            const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+            const baseDomain = appUrl.replace(/\/$/, "");
+            const referralLink = `${baseDomain}/ref/${rUserId}`;
+            
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "📋 Referral Link Copied!" })
+                });
+            } catch (e) {}
+            
+            await sendTelegramMessage(botToken, chatId, `📋 *Copyable Referral Link:*\n\n\`${referralLink}\``, { parse_mode: "Markdown" });
+        } else if (data === "referral_history") {
+            await processReferralHistory(botToken, chatId, callbackQuery.from, callbackQuery.id);
+        } else if (data === "referral_refresh") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "🔄 Referral stats refreshed!" })
+                });
+            } catch (e) {}
+            await processReferAndEarn(botToken, chatId, callbackQuery.from);
+        } else if (data === "referral_back") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await processReferAndEarn(botToken, chatId, callbackQuery.from);
+        } else if (data === "settings_profile") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await showSettingPlaceholder(botToken, chatId, "👤 Profile Settings", callbackQuery.message.message_id);
+        } else if (data === "settings_notifications") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await showSettingPlaceholder(botToken, chatId, "🔔 Notifications", callbackQuery.message.message_id);
+        } else if (data === "settings_language") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await showSettingPlaceholder(botToken, chatId, "🌐 Language", callbackQuery.message.message_id);
+        } else if (data === "settings_privacy") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await showSettingPlaceholder(botToken, chatId, "🔐 Privacy & Security", callbackQuery.message.message_id);
+        } else if (data === "settings_statistics") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await showSettingPlaceholder(botToken, chatId, "📊 Statistics", callbackQuery.message.message_id);
+        } else if (data === "settings_about") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await showSettingPlaceholder(botToken, chatId, "ℹ️ About RoyShare", callbackQuery.message.message_id);
+        } else if (data === "settings_currency") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await processCurrencySettings(botToken, chatId, String(userId), callbackQuery.message.message_id);
+        } else if (data === "set_currency_INR") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "Currency updated to INR!" })
+                });
+            } catch (e) {}
+            await handleSetCurrency(botToken, chatId, String(userId), "INR", callbackQuery.message.message_id);
+        } else if (data === "set_currency_USD") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "Currency updated to USD!" })
+                });
+            } catch (e) {}
+            await handleSetCurrency(botToken, chatId, String(userId), "USD", callbackQuery.message.message_id);
+        } else if (data === "settings_back") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await processSettingsMenu(botToken, chatId, callbackQuery.from, callbackQuery.message.message_id);
+        }
+    } catch (e) {
+        // Silent error, do not show in chat
+        console.error("Callback processing error:", e);
+    }
+}
+
+async function processSettingsMenu(botToken: string, chatId: number, user: any, messageIdToEdit?: number) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    const currentCurrencyLabel = currency === "USD" ? "💲 USD (US Dollar)" : "₹ INR (Indian Rupee)";
+    
+    const message = `⚙️ *RoyShare Settings*
+    
+Select a setting option below to customize your experience.`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "👤 Profile Settings", callback_data: "settings_profile" }],
+            [{ text: "🔔 Notifications", callback_data: "settings_notifications" }],
+            [{ text: "💱 Currency Settings", callback_data: "settings_currency" }],
+            [{ text: "🌐 Language", callback_data: "settings_language" }],
+            [{ text: "🔐 Privacy & Security", callback_data: "settings_privacy" }],
+            [{ text: "📊 Statistics", callback_data: "settings_statistics" }],
+            [{ text: "ℹ️ About RoyShare", callback_data: "settings_about" }]
+        ]
+    };
+
+    if (messageIdToEdit) {
+        await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+    } else {
+        await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+    }
+}
+
+async function processCurrencySettings(botToken: string, chatId: number, userId: string, messageIdToEdit: number) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", userId));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    const currentCurrencyLabel = currency === "USD" ? "💲 USD (US Dollar)" : "₹ INR (Indian Rupee)";
+
+    const message = `💱 *Currency Settings*
+
+Current Currency:
+${currentCurrencyLabel}
+
+Select your preferred currency.`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "₹ INR (Indian Rupee)", callback_data: "set_currency_INR" }],
+            [{ text: "💲 USD (US Dollar)", callback_data: "set_currency_USD" }],
+            [{ text: "🔙 Back", callback_data: "settings_back" }]
+        ]
+    };
+
+    await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+}
+
+async function handleSetCurrency(botToken: string, chatId: number, userId: string, selectedCurrency: string, messageIdToEdit: number) {
+    const db = getDb();
+    await setDoc(doc(db, "users", userId), { currency: selectedCurrency }, { merge: true });
+
+    const currentCurrencyLabel = selectedCurrency === "USD" ? "💲 USD (US Dollar)" : "₹ INR (Indian Rupee)";
+
+    const message = `✅ *Currency Updated Successfully*
+
+Current Currency:
+${currentCurrencyLabel}`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔙 Back to Settings", callback_data: "settings_back" }]
+        ]
+    };
+
+    await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+}
+
+async function showSettingPlaceholder(botToken: string, chatId: number, title: string, messageIdToEdit: number) {
+    const message = `*${title}*
+    
+This feature is currently under maintenance and will be implemented soon.`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔙 Back", callback_data: "settings_back" }]
+        ]
+    };
+
+    await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+}
+
+async function processContact(botToken: string, chatId: number, user: any, contact: any) {
+    console.log("processContact: User shared contact, saving and showing verification options.");
+    
+    // Attempt DB write silently
+    try {
+        const db = getDb();
+        if (contact.user_id === user.id) {
+            await setDoc(doc(db, "users", String(user.id)), {
+                telegramId: user.id,
+                username: user.username,
+                firstName: user.first_name,
+                phone: contact.phone_number,
+                joinDate: new Date().toISOString()
+            }, { merge: true });
+            console.log("User saved to DB");
+        }
+    } catch (e) {
+        await logDbError({ collection: "users", docId: String(user.id), operation: "set", userId: user.id });
+    }
+
+    // Default settings to fallback
+    const settings = {
+        channelLink: "https://t.me/your_channel",
+        groupLink: "https://t.me/your_group"
+    };
+
+    const messageText = `✅ Contact verified.
+
+📢 Channel:
+https://t.me/royshare_official
+
+👥 Group:
+https://t.me/RoyShareCommunity
+
+Please join, then click Verify below.`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "✅ Verify Join", callback_data: "verify_join" }]
+        ]
+    };
+    
+    await sendTelegramMessage(botToken, chatId, messageText, { reply_markup: inlineKeyboard });
+}
+
+async function normalizeUsername(username: string): Promise<string> {
+    console.log("Raw username value:", username);
+    // Remove https://t.me/
+    let normalized = username.replace(/https?:\/\/(t\.me\/|telegram\.me\/)/i, '');
+    // Remove leading @
+    normalized = normalized.replace(/^@/, '');
+    // If it's still a URL, just take the last part
+    if (normalized.includes('/')) {
+        const parts = normalized.split('/');
+        normalized = parts[parts.length - 1];
+    }
+    
+    // Validate: Should be alphanumeric/underscores, Telegram usernames are usually 5-32 chars
+    // But channels can also be public channels using names which might look different.
+    // Basic check: if it's empty, it's invalid
+    if (!normalized || normalized.trim() === '') {
+        throw new Error("INVALID_USERNAME");
+    }
+    
+    console.log("Normalized username value:", normalized);
+    return "@" + normalized;
+}
+
+async function checkMember(botToken: string, chatLink: string, userId: number): Promise<boolean> {
+    try {
+        console.log("checkMember called. chatLink:", chatLink);
+        const chatId = await normalizeUsername(chatLink);
+        console.log("Normalized chatID (username):", chatId);
+        
+        // 1. Verify chat exists
+        console.log(`Calling getChat with chat_id=${chatId}`);
+        const chatResponse = await fetch(`https://api.telegram.org/bot${botToken}/getChat?chat_id=${chatId}`);
+        const chatData = await chatResponse.json();
+        console.log("getChat result:", JSON.stringify(chatData));
+
+        if (!chatData.ok) {
+            console.error("Chat resolution failed for", chatId, ":", chatData.description);
+            throw new Error(`CHAT_NOT_FOUND: ${chatData.description}`);
+        }
+
+        // 2. Check membership
+        console.log(`Calling getChatMember with chat_id=${chatId} and user_id=${userId}`);
+        const response = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${chatId}&user_id=${userId}`);
+        const data = await response.json();
+        console.log("getChatMember result:", JSON.stringify(data));                
+        
+        if (data.ok && data.result) {
+            const status = data.result.status;
+            return status === 'member' || status === 'administrator' || status === 'creator';
+        }
+        return false;
+    } catch (e: any) {
+        // If it's a known error regarding valid username formats, rethrow or handle specifically
+        if (e.message === "INVALID_USERNAME" || e.message.startsWith("CHAT_NOT_FOUND")) {
+            throw new Error("INVALID_USERNAME");
+        }
+        console.error("Error checking member:", e);
+        return false;
+    }
+}
+
+async function sendTelegramMessage(botToken: string, chatId: number, text: string, extra?: any): Promise<number | null> {
+    try {
+        const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, text, ...extra })
+        });
+        const data = await response.json();
+        if (data.ok && data.result) {
+            return data.result.message_id;
+        }
+    } catch (e) {
+        console.error("Error in sendTelegramMessage:", e);
+    }
+    return null;
+}
