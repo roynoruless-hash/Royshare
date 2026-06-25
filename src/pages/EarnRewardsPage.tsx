@@ -516,7 +516,7 @@ export default function EarnRewardsPage() {
             placementKey="Footer Banner"
             fallback={
               <div 
-                onClick={() => handleAdClick("https://ais-dev-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app")}
+                onClick={() => handleAdClick("https://royshare.onrender.com")}
                 className="bg-slate-900/50 border border-slate-800 rounded-xl p-3 cursor-pointer hover:border-slate-700 hover:bg-slate-900/70 transition-all shadow-sm group relative"
               >
                 <span className="absolute top-1.5 right-2 bg-slate-800 text-[8px] text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase tracking-widest">Ad</span>

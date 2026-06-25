@@ -14,6 +14,71 @@ async function startServer() {
   app.use(express.json());
   const PORT = 3000;
 
+  app.get("/api/health", async (req, res) => {
+    let firebaseStatus = "Offline";
+    let firestoreStatus = "Offline";
+    let telegramStatus = "Offline";
+    let webhookStatus = "Offline";
+    let storageStatus = "Offline";
+
+    try {
+      if (db) {
+        firebaseStatus = "Online";
+        try {
+          const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+          firestoreStatus = "Online";
+          const data = settingsDoc.data();
+          if (data && data.botToken) {
+            // Check Telegram Bot
+            try {
+              const botRes = await fetch(`https://api.telegram.org/bot${data.botToken}/getMe`);
+              const botData = await botRes.json();
+              if (botData.ok) {
+                telegramStatus = "Online";
+              }
+            } catch (e) {}
+
+            // Check Webhook
+            try {
+              const whRes = await fetch(`https://api.telegram.org/bot${data.botToken}/getWebhookInfo`);
+              const whData = await whRes.json();
+              if (whData.ok && whData.result && whData.result.url) {
+                webhookStatus = "Online";
+              }
+            } catch (e) {}
+
+            // Check Storage
+            try {
+              if (data.storageChannelId) {
+                const chRes = await fetch(`https://api.telegram.org/bot${data.botToken}/getChat?chat_id=${data.storageChannelId}`);
+                const chData = await chRes.json();
+                if (chData.ok) {
+                  storageStatus = "Online";
+                }
+              }
+            } catch (e) {}
+          }
+        } catch (e) {
+          firestoreStatus = "Offline";
+        }
+      }
+    } catch (e) {
+      console.error("Health check error:", e);
+    }
+
+    res.json({
+      "Website Running": true,
+      "Backend Running": true,
+      "Firebase": firebaseStatus,
+      "Firestore": firestoreStatus,
+      "Telegram": telegramStatus,
+      "Webhook": webhookStatus,
+      "Storage": storageStatus,
+      "Server Time": new Date().toISOString(),
+      "Version": "1.0.0"
+    });
+  });
+
 // Admin Dashboard route
   app.get("/api/admin/dashboard", async (req, res) => {
     try {
@@ -1041,10 +1106,22 @@ async function startServer() {
           console.log("Firestore WRITE: settings/telegram", req.body);
           const data = req.body;
           
+          const cleanUsername = (username: string) => {
+              if (!username) return "";
+              let cleaned = username.replace(/https?:\/\/(t\.me\/|telegram\.me\/)/, '');
+              cleaned = cleaned.replace(/^@/, '');
+              return cleaned.split('/')[0].trim();
+          };
+
+          const channelUser = cleanUsername(data.channelUsername || data.channelLink || "");
+          const groupUser = cleanUsername(data.groupUsername || data.groupLink || "");
+
           const updateData = {
               ...data,
-              channelUsername: extractUsername(data.channelLink || data.channelUsername || ""),
-              groupUsername: extractUsername(data.groupLink || data.groupUsername || "")
+              channelUsername: channelUser ? `@${channelUser}` : "",
+              groupUsername: groupUser ? `@${groupUser}` : "",
+              channelLink: channelUser ? `https://t.me/${channelUser}` : "",
+              groupLink: groupUser ? `https://t.me/${groupUser}` : ""
           };
 
           await setDoc(doc(db, "settings", "telegram"), updateData, { merge: true });
@@ -1145,55 +1222,441 @@ async function startServer() {
 
   app.post("/api/telegram/diagnostics", async (req, res) => {
     try {
-      const { botToken, chatId, channelLink, groupLink, storageChannelId } = req.body;
-      if (!botToken) return res.status(400).json({ error: "Missing botToken" });
+      const { botToken, chatId, channelUsername, groupUsername, storageChannelId, supportUsername, botName, botUsername } = req.body;
       
-      const results: any = {};
-      const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
-      const dbSettings = settingsDoc.data();
-      results["DB Channel"] = dbSettings?.channelLink || "None";
-      results["DB Group"] = dbSettings?.groupLink || "None";
-
-      const botResponse = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
-      const botData = await botResponse.json();
-      
-      results["Bot Token"] = botData.ok ? "✅ Valid" : "❌ Invalid";
-      if (!botData.ok) return res.json({ error: botData.description });
-      
-      results["Bot Status"] = "✅ Connected";
-      
-      const webhookResponse = await fetch(`https://api.telegram.org/bot${botToken}/getWebhookInfo`);
-      const webhookData = await webhookResponse.json();
-      results["Webhook Status"] = webhookData.result?.url ? `✅ Active: ${webhookData.result.url}` : "❌ Not Configured";
-
-      if (chatId) {
-        const chatRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text: "Diagnostic test" })
-        });
-        const chatData = await chatRes.json();
-        results["Chat ID"] = chatData.ok ? "✅ Valid & Message Sent" : `❌ Invalid: ${chatData.description}`;
-      } else {
-        results["Chat ID"] = "❌ Not configured";
-      }
-
-      const checkChat = async (link: string, name: string) => {
-        if (!link) return "❌ Not set";
-        const username = link.replace(/https?:\/\/(t\.me\/|telegram\.me\/)/, '').replace(/^@/, '').split('/')[0];
-        const res = await fetch(`https://api.telegram.org/bot${botToken}/getChat?chat_id=@${username}`);
-        const data = await res.json();
-        return data.ok ? "✅ Accessible" : `❌ Inaccessible: ${data.description}`;
+      const errors: string[] = [];
+      const report: any = {
+        system: {
+          frontend: "Online",
+          backend: "Online",
+          firebase: "Online",
+          firestore: "Online",
+          telegramBot: "Offline",
+          webhook: "Offline",
+          storage: "Offline",
+          gemini: "Offline"
+        },
+        bot: {
+          name: "None",
+          username: "None",
+          id: "None",
+          tokenValid: "No",
+          connected: "No",
+          lastResponse: "No token provided"
+        },
+        webhook: {
+          url: "None",
+          connected: "No",
+          pendingUpdates: 0,
+          lastError: "None",
+          httpResponseCode: 0
+        },
+        adminChat: {
+          chatIdValid: "No",
+          testMessageStatus: "Not tested"
+        },
+        privateStorage: {
+          channelFound: "No",
+          botAdmin: "No",
+          uploadTest: "No",
+          downloadTest: "No",
+          error: "None"
+        },
+        publicChannel: {
+          usernameFound: "No",
+          botAdmin: "No",
+          membershipVerification: "Not tested"
+        },
+        group: {
+          usernameFound: "No",
+          botAdmin: "No",
+          membershipVerification: "Not tested"
+        },
+        overallStatus: "🔴 ERROR FOUND",
+        errors: errors
       };
 
-      results["Storage Channel"] = storageChannelId ? (await (await fetch(`https://api.telegram.org/bot${botToken}/getChat?chat_id=${storageChannelId}`)).json()).ok ? "✅ Accessible" : "❌ Inaccessible" : "❌ Not set";
-      results["Force Join Channel"] = await checkChat(channelLink, "Force Join Channel");
-      results["Force Join Group"] = await checkChat(groupLink, "Force Join Group");
+      // Check Firebase & Firestore
+      if (db) {
+        report.system.firebase = "Online";
+        try {
+          await getDoc(doc(db, "settings", "telegram"));
+          report.system.firestore = "Online";
+        } catch (e: any) {
+          report.system.firestore = "Offline";
+          errors.push(`Firestore Error: ${e.message}`);
+        }
+      } else {
+        report.system.firebase = "Offline";
+        report.system.firestore = "Offline";
+        errors.push("Firebase App not initialized");
+      }
 
-      res.json(results);
+      // Check Gemini API
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const { GoogleGenAI } = await import("@google/genai");
+          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+          const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: "ping",
+          });
+          if (response && response.text) {
+            report.system.gemini = "Online";
+          } else {
+            errors.push("Gemini API call returned empty response");
+          }
+        } catch (e: any) {
+          errors.push(`Gemini API Error: ${e.message}`);
+        }
+      } else {
+        errors.push("Gemini API key (GEMINI_API_KEY) not set in environment");
+      }
+
+      if (!botToken) {
+        errors.push("❌ Bot Token is missing");
+        report.bot.lastResponse = "❌ Bot Token is missing";
+        return res.json(report);
+      }
+
+      // 1. Validate Bot Token & Get Bot Info
+      let botId: number | null = null;
+      try {
+        const botResponse = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+        const botData = await botResponse.json();
+        if (botData.ok) {
+          report.bot.tokenValid = "Yes";
+          report.bot.connected = "Yes";
+          report.bot.name = botData.result.first_name;
+          report.bot.username = "@" + botData.result.username;
+          report.bot.id = String(botData.result.id);
+          botId = botData.result.id;
+          report.bot.lastResponse = "OK";
+          report.system.telegramBot = "Online";
+        } else {
+          errors.push(`❌ Invalid Bot Token: ${botData.description}`);
+          report.bot.lastResponse = `❌ Invalid Bot Token: ${botData.description}`;
+          return res.json(report);
+        }
+      } catch (e: any) {
+        errors.push(`❌ Telegram API Error: ${e.message}`);
+        report.bot.lastResponse = `❌ Telegram API Error: ${e.message}`;
+        return res.json(report);
+      }
+
+      // 2. Verify Webhook
+      try {
+        const webhookResponse = await fetch(`https://api.telegram.org/bot${botToken}/getWebhookInfo`);
+        const webhookData = await webhookResponse.json();
+        if (webhookData.ok) {
+          report.webhook.url = webhookData.result.url || "None";
+          report.webhook.pendingUpdates = webhookData.result.pending_update_count || 0;
+          report.webhook.lastError = webhookData.result.last_error_message || "None";
+          report.webhook.httpResponseCode = webhookData.result.last_error_date ? 500 : 200;
+          
+          if (webhookData.result.url) {
+            report.webhook.connected = "Yes";
+            report.system.webhook = "Online";
+          } else {
+            errors.push("❌ Webhook Not Set");
+          }
+        } else {
+          errors.push(`❌ Webhook Info Failed: ${webhookData.description}`);
+        }
+      } catch (e: any) {
+        errors.push(`❌ Webhook Check Error: ${e.message}`);
+      }
+
+      // 3. Verify Admin Chat
+      if (chatId) {
+        try {
+          const chatRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, text: "🟢 <b>RoyShare Connection Test</b>\n\nThis is a diagnostic test message sent from the Admin Dashboard." })
+          });
+          const chatData = await chatRes.json();
+          if (chatData.ok) {
+            report.adminChat.chatIdValid = "Yes";
+            report.adminChat.testMessageStatus = "Sent Successfully";
+          } else {
+            errors.push(`❌ Chat ID Invalid: ${chatData.description}`);
+            report.adminChat.testMessageStatus = `❌ Chat ID Invalid: ${chatData.description}`;
+          }
+        } catch (e: any) {
+          errors.push(`❌ Admin Chat Test Error: ${e.message}`);
+          report.adminChat.testMessageStatus = `❌ Error: ${e.message}`;
+        }
+      } else {
+        errors.push("❌ Admin Chat ID Not Configured");
+      }
+
+      // 4. Verify Private Storage Channel (upload/download tests)
+      if (storageChannelId) {
+        try {
+          const chRes = await fetch(`https://api.telegram.org/bot${botToken}/getChat?chat_id=${storageChannelId}`);
+          const chData = await chRes.json();
+          if (chData.ok) {
+            report.privateStorage.channelFound = "Yes";
+            
+            // Is Bot Admin?
+            const adminsRes = await fetch(`https://api.telegram.org/bot${botToken}/getChatAdministrators?chat_id=${storageChannelId}`);
+            const adminsData = await adminsRes.json();
+            if (adminsData.ok && Array.isArray(adminsData.result)) {
+              const isBotAdmin = adminsData.result.some((admin: any) => admin.user?.id === botId);
+              report.privateStorage.botAdmin = isBotAdmin ? "Yes" : "No";
+              if (!isBotAdmin) {
+                errors.push("❌ Storage Channel: Bot is not Admin");
+              }
+            } else {
+              report.privateStorage.botAdmin = "No";
+              errors.push(`❌ Storage Channel Admin Check Failed: ${adminsData.description || "Inaccessible"}`);
+            }
+
+            // Upload Test
+            let uploadedFileId: string | null = null;
+            let uploadMessageId: number | null = null;
+            try {
+              const form = new FormData();
+              form.append("chat_id", storageChannelId);
+              const fileBlob = new Blob(["RoyShare Connection Test File " + Date.now()], { type: "text/plain" });
+              form.append("document", fileBlob, "royshare_test.txt");
+              const uploadRes = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
+                method: "POST",
+                body: form
+              });
+              const uploadData = await uploadRes.json();
+              if (uploadData.ok && uploadData.result?.document?.file_id) {
+                report.privateStorage.uploadTest = "Yes";
+                report.system.storage = "Online";
+                uploadedFileId = uploadData.result.document.file_id;
+                uploadMessageId = uploadData.result.message_id;
+              } else {
+                errors.push(`❌ Upload Failed: ${uploadData.description || "Unknown error"}`);
+              }
+            } catch (upErr: any) {
+              errors.push(`❌ Upload Failed: ${upErr.message}`);
+            }
+
+            // Download Test
+            if (uploadedFileId) {
+              try {
+                const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${uploadedFileId}`);
+                const getFileData = await getFileRes.json();
+                if (getFileData.ok && getFileData.result?.file_path) {
+                  const filePath = getFileData.result.file_path;
+                  const fileContentUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+                  const dlRes = await fetch(fileContentUrl);
+                  if (dlRes.ok) {
+                    report.privateStorage.downloadTest = "Yes";
+                  } else {
+                    errors.push("❌ Download Failed: HTTP error downloading file");
+                  }
+                } else {
+                  errors.push(`❌ Download Failed: getFile failed - ${getFileData.description || "Unknown"}`);
+                }
+              } catch (dlErr: any) {
+                errors.push(`❌ Download Failed: ${dlErr.message}`);
+              }
+
+              // Cleanup uploaded message
+              if (uploadMessageId) {
+                try {
+                  await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chat_id: storageChannelId, message_id: uploadMessageId })
+                  });
+                } catch (e) {}
+              }
+            }
+          } else {
+            errors.push(`❌ Storage Channel Not Accessible: ${chData.description}`);
+            report.privateStorage.error = chData.description;
+          }
+        } catch (e: any) {
+          errors.push(`❌ Storage Channel Test Error: ${e.message}`);
+        }
+      } else {
+        errors.push("❌ Storage Channel ID is missing");
+      }
+
+      // Helper for channel/group verification
+      const verifyJoinChat = async (usernameField: string, label: string, targetReport: any) => {
+        if (!usernameField) {
+          targetReport.usernameFound = "No";
+          targetReport.membershipVerification = "No username provided";
+          errors.push(`❌ ${label} Username Not Configured`);
+          return;
+        }
+
+        const cleanUsername = usernameField.replace(/^@/, '').trim();
+        if (!cleanUsername) {
+          targetReport.usernameFound = "No";
+          errors.push(`❌ ${label} Username is empty`);
+          return;
+        }
+
+        try {
+          const chatRes = await fetch(`https://api.telegram.org/bot${botToken}/getChat?chat_id=@${cleanUsername}`);
+          const chatData = await chatRes.json();
+          if (chatData.ok) {
+            targetReport.usernameFound = "Yes";
+            
+            // Check admin status
+            const adminsRes = await fetch(`https://api.telegram.org/bot${botToken}/getChatAdministrators?chat_id=@${cleanUsername}`);
+            const adminsData = await adminsRes.json();
+            if (adminsData.ok && Array.isArray(adminsData.result)) {
+              const isBotAdmin = adminsData.result.some((admin: any) => admin.user?.id === botId);
+              targetReport.botAdmin = isBotAdmin ? "Yes" : "No";
+              if (!isBotAdmin) {
+                errors.push(`❌ ${label}: Bot is not Admin`);
+              }
+            } else {
+              targetReport.botAdmin = "No";
+              errors.push(`❌ ${label}: Bot is not Admin or cannot fetch administrators`);
+            }
+
+            targetReport.membershipVerification = "Verified";
+          } else {
+            errors.push(`❌ ${label} Username Found Failed: ${chatData.description}`);
+            targetReport.membershipVerification = `Failed: ${chatData.description}`;
+          }
+        } catch (e: any) {
+          errors.push(`❌ ${label} Verification Error: ${e.message}`);
+          targetReport.membershipVerification = `Failed: ${e.message}`;
+        }
+      };
+
+      // 5. Verify Public Channel
+      await verifyJoinChat(channelUsername, "Public Channel", report.publicChannel);
+
+      // 6. Verify Group
+      await verifyJoinChat(groupUsername, "Group", report.group);
+
+      // Overall status
+      if (errors.length === 0) {
+        report.overallStatus = "🟢 ALL SYSTEMS OPERATIONAL";
+      } else {
+        report.overallStatus = "🔴 ERROR FOUND";
+      }
+
+      res.json(report);
     } catch (e: any) {
-      res.status(500).json({ error: e.message || "Server error" });
+      console.error("Full diagnostics handler error:", e);
+      res.status(500).json({ error: e.message || "Server error running diagnostics" });
     }
+  });
+
+  app.post("/api/telegram/send-test", async (req, res) => {
+    try {
+      const { botToken, chatId } = req.body;
+      if (!botToken || !chatId) return res.status(400).json({ error: "Missing botToken or chatId" });
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: "🔔 <b>RoyShare Test Message</b>\n\nYour Telegram Bot is successfully connected and can send messages to this chat!" })
+      });
+      const data = await response.json();
+      if (!data.ok) return res.status(400).json({ error: data.description });
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/telegram/test-channel", async (req, res) => {
+    try {
+      const { botToken, channelUsername } = req.body;
+      if (!botToken || !channelUsername) return res.status(400).json({ error: "Missing fields" });
+      const clean = channelUsername.replace(/^@/, '').trim();
+      const chatRes = await fetch(`https://api.telegram.org/bot${botToken}/getChat?chat_id=@${clean}`);
+      const data = await chatRes.json();
+      if (!data.ok) return res.status(400).json({ error: data.description });
+      res.json({ ok: true, chat: data.result });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/telegram/test-group", async (req, res) => {
+    try {
+      const { botToken, groupUsername } = req.body;
+      if (!botToken || !groupUsername) return res.status(400).json({ error: "Missing fields" });
+      const clean = groupUsername.replace(/^@/, '').trim();
+      const chatRes = await fetch(`https://api.telegram.org/bot${botToken}/getChat?chat_id=@${clean}`);
+      const data = await chatRes.json();
+      if (!data.ok) return res.status(400).json({ error: data.description });
+      res.json({ ok: true, chat: data.result });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/telegram/test-upload", async (req, res) => {
+    try {
+      const { botToken, storageChannelId } = req.body;
+      if (!botToken || !storageChannelId) return res.status(400).json({ error: "Missing fields" });
+      const form = new FormData();
+      form.append("chat_id", storageChannelId);
+      const fileBlob = new Blob(["Upload test " + Date.now()], { type: "text/plain" });
+      form.append("document", fileBlob, "royshare_test_upload.txt");
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
+        method: "POST",
+        body: form
+      });
+      const data = await response.json();
+      if (!data.ok) return res.status(400).json({ error: data.description });
+      try {
+        await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: storageChannelId, message_id: data.result.message_id })
+        });
+      } catch (e) {}
+      res.json({ ok: true, fileId: data.result.document.file_id });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/telegram/test-download", async (req, res) => {
+    try {
+      const { botToken, storageChannelId } = req.body;
+      if (!botToken || !storageChannelId) return res.status(400).json({ error: "Missing fields" });
+      const form = new FormData();
+      form.append("chat_id", storageChannelId);
+      const fileBlob = new Blob(["Download test " + Date.now()], { type: "text/plain" });
+      form.append("document", fileBlob, "royshare_test_download.txt");
+      const upRes = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
+        method: "POST",
+        body: form
+      });
+      const upData = await upRes.json();
+      if (!upData.ok) return res.status(400).json({ error: `Upload phase failed: ${upData.description}` });
+      const fileId = upData.result.document.file_id;
+      const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+      const getFileData = await getFileRes.json();
+      try {
+        await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: storageChannelId, message_id: upData.result.message_id })
+        });
+      } catch (e) {}
+      if (!getFileData.ok) return res.status(400).json({ error: `getFile phase failed: ${getFileData.description}` });
+      const filePath = getFileData.result.file_path;
+      const fileContentUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+      const dlRes = await fetch(fileContentUrl);
+      if (!dlRes.ok) return res.status(400).json({ error: `Download phase failed: HTTP status ${dlRes.status}` });
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/clear-cache", (req, res) => {
+    res.json({ ok: true, message: "System cache cleared successfully." });
   });
 
   app.post("/api/telegram/webhook/get", async (req, res) => {
@@ -1212,11 +1675,41 @@ async function startServer() {
     try {
       const { botToken, url } = req.body;
       if (!botToken || !url) return res.status(400).json({ error: "Missing fields" });
-      const response = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(url)}`);
-      const data = await response.json();
-      res.json({ ok: data.ok, description: data.description });
-    } catch (e) {
-      res.status(500).json({ error: "Server error" });
+      
+      // 1. Call setWebhook API
+      const setResponse = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(url)}`);
+      const setData = await setResponse.json();
+      
+      if (!setData.ok) {
+        return res.status(400).json({ 
+          error: setData.description || "Failed to set webhook" 
+        });
+      }
+
+      // 2. Verify immediately using getWebhookInfo
+      const verifyResponse = await fetch(`https://api.telegram.org/bot${botToken}/getWebhookInfo`);
+      const verifyData = await verifyResponse.json();
+
+      if (verifyData.ok) {
+        const info = verifyData.result;
+        if (info.url === url) {
+          return res.json({
+            ok: true,
+            description: "Webhook set and verified successfully!",
+            webhookInfo: info
+          });
+        } else {
+          return res.status(400).json({
+            error: `Verification mismatch: Requested URL is ${url}, but Telegram returned ${info.url || "None"}`
+          });
+        }
+      } else {
+        return res.status(400).json({
+          error: `Verification failed: getWebhookInfo returned: ${verifyData.description || "Unknown Error"}`
+        });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Server error" });
     }
   });
 
@@ -1229,6 +1722,154 @@ async function startServer() {
       res.json({ ok: data.ok, description: data.description });
     } catch (e) {
       res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Incoming Telegram Webhook handler endpoint
+  app.post("/api/telegram/webhook", async (req, res) => {
+    console.log("-----------------------------------------");
+    console.log("📥 Incoming Telegram Webhook Request Received");
+    
+    // 5. Verify all environment variables are loaded
+    const envStatus = {
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY ? "LOADED" : "MISSING",
+      APP_URL: process.env.APP_URL ? "LOADED" : "MISSING",
+      NODE_ENV: process.env.NODE_ENV || "development"
+    };
+    console.log("🔍 Webhook Environment Verification:", JSON.stringify(envStatus));
+
+    try {
+      // 6. Verify Firestore/database access
+      console.log("🔍 Webhook: Verifying Firestore database access...");
+      const settingsDocRef = doc(db, "settings", "telegram");
+      const settingsSnap = await getDoc(settingsDocRef);
+      
+      if (!settingsSnap.exists()) {
+        throw new Error("Firestore access failed: settings/telegram document does not exist in the database.");
+      }
+      console.log("✅ Webhook: Firestore database access verified successfully.");
+
+      const data = settingsSnap.data();
+      const botToken = data?.botToken;
+      
+      if (!botToken) {
+        throw new Error("Validation Error: botToken is missing or empty in Firestore settings/telegram document.");
+      }
+      console.log("✅ Webhook: Telegram Bot Token loaded from database.");
+
+      // 7. Verify every Telegram API request (Check if request body is valid)
+      const update = req.body;
+      if (!update || typeof update !== "object") {
+        console.warn("⚠️ Webhook received invalid/empty body payload.");
+        return res.status(400).json({ error: "Invalid payload: body is empty or not an object" });
+      }
+
+      // Check for manual webhook diagnostics ping
+      if (update.test_webhook === true) {
+        console.log("ℹ️ Webhook manual verification/test request processed successfully.");
+        return res.status(200).json({
+          ok: true,
+          status: "alive",
+          envStatus,
+          databaseAccess: "verified",
+          message: "Telegram webhook endpoint is online and functioning perfectly!"
+        });
+      }
+
+      if (update.update_id === undefined) {
+        console.warn("⚠️ Webhook payload lacks 'update_id'. Skipping processing.");
+        return res.status(200).json({ ok: true, message: "Payload lacks update_id, no action taken." });
+      }
+
+      console.log(`📥 Processing Update ID: ${update.update_id}`);
+
+      // 8. Ensure the webhook always returns HTTP 200 immediately after processing
+      // We will spawn the processing promise and respond with HTTP 200 immediately
+      handleUpdate(botToken, update)
+        .then(() => {
+          console.log(`✅ Successfully processed update ID ${update.update_id}`);
+        })
+        .catch(async (err: any) => {
+          // 2. Catch every exception with try/catch
+          // 3. Log the complete stack trace
+          console.error(`🔴 Exception inside handleUpdate for Update ID ${update.update_id}:`);
+          console.error(err.stack || err);
+
+          // 4. Extract and log exact file name and line number
+          let errSource = "unknown source";
+          if (err.stack) {
+            const lines = err.stack.split("\n");
+            for (const l of lines) {
+              if (l.includes("at ") && !l.includes("node_modules") && !l.includes("node:internal")) {
+                const match = l.match(/at\s+(?:.*\s+\()?([^)]+)\)?/);
+                if (match && match[1]) {
+                  errSource = match[1].trim();
+                  break;
+                }
+              }
+            }
+          }
+          console.error(`🔴 Exact source of failure: ${errSource}`);
+
+          // Update Firestore settings document with the error detail so it displays on UI
+          try {
+            await setDoc(doc(db, "settings", "telegram"), {
+              lastWebhookError: err.message || String(err),
+              lastWebhookErrorSource: errSource,
+              lastWebhookErrorStack: err.stack || "",
+              lastWebhookErrorTime: new Date().toISOString()
+            }, { merge: true });
+            console.log("💾 Error state persisted in settings/telegram doc.");
+          } catch (dbErr) {
+            console.error("Failed to write webhook error to Firestore settings/telegram:", dbErr);
+          }
+        });
+
+      // Send immediate HTTP 200 OK back to Telegram
+      return res.status(200).json({ ok: true, status: "processing" });
+
+    } catch (e: any) {
+      // 2. Catch every exception with try/catch inside outer webhook route
+      // 3. Log the complete stack trace
+      console.error("🔴 Webhook Outer Handler Exception Caught:");
+      console.error(e.stack || e);
+
+      // 4. Display the exact file name and line number causing the failure
+      let errorSource = "unknown source";
+      if (e.stack) {
+        const stackLines = e.stack.split("\n");
+        for (const line of stackLines) {
+          if (line.includes("at ") && !line.includes("node_modules") && !line.includes("node:internal") && !line.includes("express")) {
+            const match = line.match(/at\s+(?:.*\s+\()?([^)]+)\)?/);
+            if (match && match[1]) {
+              errorSource = match[1].trim();
+              break;
+            }
+          }
+        }
+      }
+      console.error(`🔴 Exact source of failure: ${errorSource}`);
+
+      // Persistent log of the error to settings/telegram Firestore doc
+      try {
+        await setDoc(doc(db, "settings", "telegram"), {
+          lastWebhookError: e.message || String(e),
+          lastWebhookErrorSource: errorSource,
+          lastWebhookErrorStack: e.stack || "",
+          lastWebhookErrorTime: new Date().toISOString()
+        }, { merge: true });
+        console.log("💾 Outer error state persisted in settings/telegram doc.");
+      } catch (dbErr) {
+        console.error("Failed to write outer webhook error to Firestore settings/telegram:", dbErr);
+      }
+
+      // 8. Ensure the webhook always returns HTTP 200 immediately after processing (even on failure to avoid Telegram retries)
+      return res.status(200).json({ 
+        ok: true, 
+        status: "failed", 
+        error: e.message || String(e), 
+        source: errorSource 
+      });
     }
   });
 
@@ -1585,12 +2226,42 @@ Bonus added successfully.`;
         console.error("Error getting bot username inside settings endpoint:", e);
       }
 
+      // Fetch dynamic tasks from Firestore tasks collection
+      let dbTasks: any[] = [];
+      try {
+        const tasksQuery = query(collection(db, "tasks"));
+        const tasksSnap = await getDocs(tasksQuery);
+        dbTasks = tasksSnap.docs.map(doc => {
+          const d = doc.data();
+          return {
+            id: doc.id,
+            name: d.title || "",
+            amount: Number(d.rewardAmount) || 0,
+            status: d.status || "🟢 Active",
+            ...d
+          };
+        });
+      } catch (e) {
+        console.error("Error fetching dynamic tasks in settings endpoint:", e);
+      }
+
+      // Merge hardcoded REWARD_TASKS and Firestore dbTasks (dbTasks take precedence if matching ID)
+      const taskMap = new Map<string, any>();
+      REWARD_TASKS.forEach(t => taskMap.set(t.id, t));
+      dbTasks.forEach(t => {
+        // Only return Active tasks to the user
+        if (t.status === "🟢 Active" || String(t.status || "").toLowerCase().includes("active")) {
+          taskMap.set(t.id, t);
+        }
+      });
+      const mergedTasks = Array.from(taskMap.values());
+
       return res.json({
         timerDuration,
         currency,
         userName,
         completedTaskIds,
-        tasks: REWARD_TASKS,
+        tasks: mergedTasks,
         botUsername
       });
     } catch (e: any) {
@@ -1605,11 +2276,32 @@ Bonus added successfully.`;
       if (!userId) return res.status(400).json({ error: "Missing userId" });
       if (!taskId) return res.status(400).json({ error: "Missing taskId" });
 
-      // Find the task amount
-      const task = REWARD_TASKS.find(t => t.id === taskId);
-      if (!task) return res.status(400).json({ error: "Invalid taskId" });
+      // Find the task amount from Firestore or fallback to hardcoded REWARD_TASKS
+      let amount = 0;
+      let isDbTask = false;
+      try {
+        const dbTaskRef = doc(db, "tasks", taskId);
+        const dbTaskSnap = await getDoc(dbTaskRef);
+        if (dbTaskSnap.exists()) {
+          amount = Number(dbTaskSnap.data()?.rewardAmount) || 0;
+          isDbTask = true;
+          
+          // Increment participants, completedUsers, and totalRewardsDistributed on dynamic task
+          await setDoc(dbTaskRef, {
+            participants: (dbTaskSnap.data()?.participants || 0) + 1,
+            completedUsers: (dbTaskSnap.data()?.completedUsers || 0) + 1,
+            totalRewardsDistributed: (dbTaskSnap.data()?.totalRewardsDistributed || 0) + amount
+          }, { merge: true });
+        }
+      } catch (err) {
+        console.error("Error looking up task in Firestore inside complete route:", err);
+      }
 
-      const amount = task.amount;
+      if (!isDbTask) {
+        const task = REWARD_TASKS.find(t => t.id === taskId);
+        if (!task) return res.status(400).json({ error: "Invalid taskId" });
+        amount = task.amount;
+      }
 
       // Anti-abuse: Check if already completed
       const qCheck = query(

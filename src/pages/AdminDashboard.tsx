@@ -36,9 +36,13 @@ export default function AdminDashboard() {
   const [taskLogs, setTaskLogs] = useState<any[]>([]);
   const [taskLogsLoading, setTaskLogsLoading] = useState(false);
   const [taskForm, setTaskForm] = useState({
-    title: "", description: "", rewardAmount: "", timerDuration: "", totalPages: "", imageUrl: "", status: "🟢 Active"
+    title: "", description: "", rewardAmount: "", timerDuration: "", totalPages: "", imageUrl: "", status: "🟢 Active", adNetwork: "", selectedAdIds: [] as string[]
   });
   const [taskView, setTaskView] = useState<'tasks' | 'stats'>('tasks');
+
+  const [adSearch, setAdSearch] = useState("");
+  const [adFilterNetwork, setAdFilterNetwork] = useState("All");
+  const [adFilterType, setAdFilterType] = useState("All");
 
   const [bonusSettings, setBonusSettings] = useState<any>(null);
   const [bonusSettingsLoading, setBonusSettingsLoading] = useState(false);
@@ -109,6 +113,142 @@ export default function AdminDashboard() {
   const [activityLogsLoading, setActivityLogsLoading] = useState(false);
   const [activityLogTab, setActivityLogTab] = useState('📋 View Logs');
   const [activityLogSearch, setActivityLogSearch] = useState('');
+
+  // Telegram States
+  const [telegramConfigs, setTelegramConfigs] = useState<any>({
+    botToken: "",
+    chatId: "",
+    storageChannelId: "",
+    channelUsername: "",
+    groupUsername: "",
+    supportUsername: "",
+    botName: "",
+    botUsername: ""
+  });
+  const [telegramLoading, setTelegramLoading] = useState(false);
+  const [telegramFeedback, setTelegramFeedback] = useState("");
+  const [diagnosticsReport, setDiagnosticsReport] = useState<any>(null);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState<any>({});
+  const [showBotToken, setShowBotToken] = useState(false);
+
+  const fetchTelegramSettings = async () => {
+    setTelegramLoading(true);
+    try {
+      const res = await fetch("/api/telegram/settings");
+      if (res.ok) {
+        const data = await res.json();
+        setTelegramConfigs({
+          botToken: data.botToken || "",
+          chatId: data.chatId || "",
+          storageChannelId: data.storageChannelId || "",
+          channelUsername: data.channelUsername || "",
+          groupUsername: data.groupUsername || "",
+          supportUsername: data.supportUsername || "",
+          botName: data.botName || "",
+          botUsername: data.botUsername || ""
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTelegramLoading(false);
+    }
+  };
+
+  const saveTelegramSettings = async () => {
+    setTelegramLoading(true);
+    setTelegramFeedback("");
+    try {
+      const res = await fetch("/api/telegram/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(telegramConfigs)
+      });
+      if (res.ok) {
+        setTelegramFeedback("✅ Settings Saved Successfully");
+        setTimeout(() => setTelegramFeedback(""), 3000);
+      } else {
+        setTelegramFeedback("❌ Failed to save settings");
+      }
+    } catch (err: any) {
+      setTelegramFeedback(`❌ Error: ${err.message}`);
+    } finally {
+      setTelegramLoading(false);
+    }
+  };
+
+  const runTelegramAction = async (actionKey: string, endpoint: string, payload: any) => {
+    setActionLoading((prev: any) => ({ ...prev, [actionKey]: true }));
+    setTelegramFeedback("");
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (actionKey === 'runDiagnostics') {
+          setDiagnosticsReport(data);
+          setTelegramFeedback("✅ Diagnostics Completed Successfully");
+        } else if (actionKey === 'clearCache') {
+          setTelegramFeedback(`✅ Cache Cleared: ${data.message || "Success"}`);
+        } else {
+          setTelegramFeedback(`✅ Action Completed: ${actionKey} Succeeded`);
+        }
+      } else {
+        setTelegramFeedback(`❌ Action Failed: ${data.error || "Unknown Error"}`);
+      }
+    } catch (err: any) {
+      setTelegramFeedback(`❌ Action Error: ${err.message}`);
+    } finally {
+      setActionLoading((prev: any) => ({ ...prev, [actionKey]: false }));
+    }
+  };
+
+  const handleSetWebhook = async () => {
+    setActionLoading((prev: any) => ({ ...prev, setWebhook: true }));
+    setTelegramFeedback("");
+    try {
+      const res = await fetch("/api/telegram/webhook/set", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          botToken: telegramConfigs.botToken,
+          url: "https://royshare.onrender.com/api/telegram/webhook"
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTelegramFeedback(`✅ Webhook Set & Verified Successfully!\nURL: ${data.webhookInfo?.url || "https://royshare.onrender.com/api/telegram/webhook"}`);
+        
+        // Refresh the diagnostics panel automatically
+        setActionLoading((prev: any) => ({ ...prev, runDiagnostics: true }));
+        try {
+          const diagRes = await fetch('/api/telegram/diagnostics', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(telegramConfigs)
+          });
+          if (diagRes.ok) {
+            const diagData = await diagRes.json();
+            setDiagnosticsReport(diagData);
+          }
+        } catch (diagErr) {
+          console.error("Failed to automatically refresh diagnostics:", diagErr);
+        } finally {
+          setActionLoading((prev: any) => ({ ...prev, runDiagnostics: false }));
+        }
+      } else {
+        setTelegramFeedback(`❌ Action Failed: ${data.error || "Unknown Error"}`);
+      }
+    } catch (err: any) {
+      setTelegramFeedback(`❌ Action Error: ${err.message}`);
+    } finally {
+      setActionLoading((prev: any) => ({ ...prev, setWebhook: false }));
+    }
+  };
 
   const [backups, setBackups] = useState<any[]>([]);
   const [backupSettings, setBackupSettings] = useState<any>({ autoBackupEnabled: false, backupFrequency: 'Daily', retentionDays: 30 });
@@ -611,6 +751,7 @@ export default function AdminDashboard() {
       if (broadcastTab === '📊 Broadcast History') fetchBroadcasts();
     } else if (activeTab === '⚙️ System Settings') {
       fetchSystemSettings();
+      fetchTelegramSettings();
     } else if (activeTab === '🛡 Security Center') {
       fetchSecurityData();
     } else if (activeTab === '📜 Activity Logs') {
@@ -1227,7 +1368,7 @@ export default function AdminDashboard() {
                   <button
                     onClick={() => {
                       setTaskForm({
-                        title: "", description: "", rewardAmount: "", timerDuration: "", totalPages: "", imageUrl: "", status: "🟢 Active"
+                        title: "", description: "", rewardAmount: "", timerDuration: "", totalPages: "", imageUrl: "", status: "🟢 Active", adNetwork: "", selectedAdIds: []
                       });
                       setModalAction('create_task');
                     }}
@@ -1322,7 +1463,11 @@ export default function AdminDashboard() {
                                   <div className="flex items-center justify-end gap-2">
                                     <button 
                                       onClick={() => {
-                                        setTaskForm(t);
+                                        setTaskForm({
+                                          adNetwork: "",
+                                          selectedAdIds: [],
+                                          ...t
+                                        });
                                         setModalAction('view_task');
                                       }}
                                       className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
@@ -1332,7 +1477,11 @@ export default function AdminDashboard() {
                                     </button>
                                     <button 
                                       onClick={() => {
-                                        setTaskForm(t);
+                                        setTaskForm({
+                                          adNetwork: "",
+                                          selectedAdIds: [],
+                                          ...t
+                                        });
                                         setModalAction('edit_task');
                                       }}
                                       className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
@@ -1797,65 +1946,185 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               ) : (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
-                        <tr>
-                          <th className="px-4 py-3">Ad Name</th>
-                          <th className="px-4 py-3">Ad Source</th>
-                          <th className="px-4 py-3">Page & Placement</th>
-                          <th className="px-4 py-3">Stats (V / C / CTR)</th>
-                          <th className="px-4 py-3">Status</th>
-                          <th className="px-4 py-3 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ads.length === 0 ? (
-                          <tr><td colSpan={6} className="text-center py-8 text-slate-500">No ads found. Create one!</td></tr>
-                        ) : (
-                          ads.map(ad => {
-                            const views = Number(ad.views) || 0;
-                            const clicks = Number(ad.clicks) || 0;
-                            const ctr = views > 0 ? ((clicks / views) * 100).toFixed(2) : "0.00";
-                            return (
-                              <tr key={ad.id} className="border-b border-slate-800/50 hover:bg-slate-800/20">
-                                <td className="px-4 py-3">
-                                  <div className="font-bold text-white">{ad.adName}</div>
-                                  <div className="text-xs text-slate-400 font-mono mt-0.5">{ad.id}</div>
-                                </td>
-                                <td className="px-4 py-3 text-xs">{ad.adSource}</td>
-                                <td className="px-4 py-3 text-xs">
-                                  <div className="font-bold text-slate-200">{ad.targetPage || 'All Pages'}</div>
-                                  <div className="text-slate-400 mt-0.5">{ad.placement}</div>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="flex gap-3 text-xs font-medium">
-                                    <span className="text-slate-400">👀 {views}</span>
-                                    <span className="text-blue-400">🖱 {clicks}</span>
-                                    <span className="text-emerald-400">📈 {ctr}%</span>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <span className={`px-2 py-1 rounded text-xs font-bold ${ad.status === '🟢 Active' ? 'bg-emerald-500/20 text-emerald-400' : ad.status === '🟡 Paused' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>
-                                    {ad.status}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-right space-x-2">
-                                  <button onClick={() => { setShowAdPreview(false); setAdForm(ad); setModalAction('edit_ad'); }} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 text-xs transition-colors">✏️ Edit</button>
-                                  <button onClick={async () => {
-                                    if(confirm('Delete ad?')) {
-                                      await fetch(`/api/admin/ads/${ad.id}`, { method: 'DELETE' });
-                                      fetchAds();
-                                    }
-                                  }} className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded border border-red-500/20 text-xs transition-colors">🗑 Delete</button>
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
+                <div className="space-y-4">
+                  {/* Search and Filters Bar */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">🔍 Search Ads</label>
+                      <input 
+                        type="text"
+                        value={adSearch}
+                        onChange={(e) => setAdSearch(e.target.value)}
+                        placeholder="Search by Name, Zone ID, Placement..."
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-white text-xs placeholder-slate-600 focus:outline-none focus:border-blue-500 font-medium"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">🔌 Filter Network</label>
+                      <select
+                        value={adFilterNetwork}
+                        onChange={(e) => setAdFilterNetwork(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-blue-500 font-bold"
+                      >
+                        <option value="All">All Networks</option>
+                        <option value="Adsterra">Adsterra</option>
+                        <option value="Monetag">Monetag</option>
+                        <option value="AdCash">AdCash</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">🎯 Filter Type</label>
+                      <select
+                        value={adFilterType}
+                        onChange={(e) => setAdFilterType(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-blue-500 font-bold"
+                      >
+                        <option value="All">All Types</option>
+                        <option value="Banner">Banner</option>
+                        <option value="Native">Native</option>
+                        <option value="Direct Link">Direct Link</option>
+                        <option value="Interstitial">Interstitial</option>
+                        <option value="Display">Display Banner</option>
+                        <option value="Video Slider">Video Slider</option>
+                        <option value="Pop-Under">Pop-Under</option>
+                        <option value="In-stream Video">In-stream Video</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm text-slate-300">
+                        <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                          <tr>
+                            <th className="px-4 py-3">Ad Name</th>
+                            <th className="px-4 py-3">Ad Source & Type</th>
+                            <th className="px-4 py-3">Page & Placement</th>
+                            <th className="px-4 py-3">Stats (V / C / CTR)</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(() => {
+                            const filteredAds = ads.filter(ad => {
+                              // 1. Search filter
+                              const s = adSearch.toLowerCase();
+                              const matchesSearch = !adSearch || 
+                                String(ad.adName || "").toLowerCase().includes(s) || 
+                                String(ad.id || "").toLowerCase().includes(s) || 
+                                String(ad.placement || "").toLowerCase().includes(s);
+
+                              // 2. Network filter
+                              const matchesNetwork = adFilterNetwork === "All" || 
+                                String(ad.adSource || "").toLowerCase() === adFilterNetwork.toLowerCase();
+
+                              // 3. Type filter
+                              const matchesType = adFilterType === "All" || (() => {
+                                const t = String(ad.adType || "").toLowerCase();
+                                const filterLower = adFilterType.toLowerCase();
+                                if (filterLower === "banner") {
+                                  return t.includes("banner") && !t.includes("display");
+                                }
+                                if (filterLower === "display") {
+                                  return t.includes("display") || t.includes("display banner");
+                                }
+                                if (filterLower === "native") {
+                                  return t.includes("native");
+                                }
+                                if (filterLower === "direct link") {
+                                  return t.includes("direct") || t.includes("link");
+                                }
+                                if (filterLower === "interstitial") {
+                                  return t.includes("interstitial");
+                                }
+                                if (filterLower === "pop-under") {
+                                  return t.includes("pop") || t.includes("under");
+                                }
+                                if (filterLower === "video slider") {
+                                  return t.includes("slider");
+                                }
+                                if (filterLower === "in-stream video") {
+                                  return t.includes("video") || t.includes("stream") || t.includes("vast");
+                                }
+                                return t.includes(filterLower);
+                              })();
+
+                              return matchesSearch && matchesNetwork && matchesType;
+                            });
+
+                            if (filteredAds.length === 0) {
+                              return (
+                                <tr>
+                                  <td colSpan={6} className="text-center py-8 text-slate-500">
+                                    No ads found matching the search criteria or filters.
+                                  </td>
+                                </tr>
+                              );
+                            }
+
+                            return filteredAds.map(ad => {
+                              const views = Number(ad.views) || 0;
+                              const clicks = Number(ad.clicks) || 0;
+                              const ctr = views > 0 ? ((clicks / views) * 100).toFixed(2) : "0.00";
+                              const usedTasks = tasks.filter(t => t.selectedAdIds?.includes(ad.id));
+                              return (
+                                <tr key={ad.id} className="border-b border-slate-800/50 hover:bg-slate-800/20">
+                                  <td className="px-4 py-3">
+                                    <div className="font-bold text-white">{ad.adName}</div>
+                                    <div className="text-xs text-slate-400 font-mono mt-0.5">{ad.id}</div>
+                                    
+                                    {/* Used In Tasks list */}
+                                    {usedTasks.length > 0 ? (
+                                      <div className="text-[10px] font-bold text-slate-500 mt-1 flex items-center gap-1">
+                                        <span>💼 Used In:</span>
+                                        <span className="text-blue-400 font-medium truncate max-w-[150px]">
+                                          {usedTasks.map(t => t.title).join(", ")}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <div className="text-[10px] font-medium text-slate-600 italic mt-1">
+                                        🚫 Unused in tasks
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="text-xs text-slate-200 font-semibold">{ad.adSource}</div>
+                                    <div className="text-[10px] text-slate-400 mt-0.5">{ad.adType}</div>
+                                  </td>
+                                  <td className="px-4 py-3 text-xs">
+                                    <div className="font-bold text-slate-200">{ad.targetPage || 'All Pages'}</div>
+                                    <div className="text-slate-400 mt-0.5">{ad.placement}</div>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="flex gap-3 text-xs font-medium">
+                                      <span className="text-slate-400">👀 {views}</span>
+                                      <span className="text-blue-400">🖱 {clicks}</span>
+                                      <span className="text-emerald-400">📈 {ctr}%</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className={`px-2 py-1 rounded text-xs font-bold ${ad.status === '🟢 Active' ? 'bg-emerald-500/20 text-emerald-400' : ad.status === '🟡 Paused' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>
+                                      {ad.status}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-right space-x-2">
+                                    <button onClick={() => { setAdForm(ad); setModalAction('preview_ad'); }} className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded border border-blue-500/20 text-xs transition-colors">👁 Preview</button>
+                                    <button onClick={() => { setShowAdPreview(false); setAdForm(ad); setModalAction('edit_ad'); }} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 text-xs transition-colors">✏️ Edit</button>
+                                    <button onClick={async () => {
+                                      if(confirm('Delete ad?')) {
+                                        await fetch(`/api/admin/ads/${ad.id}`, { method: 'DELETE' });
+                                        fetchAds();
+                                      }
+                                    }} className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded border border-red-500/20 text-xs transition-colors">🗑 Delete</button>
+                                  </td>
+                                </tr>
+                              );
+                            });
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}
@@ -2695,13 +2964,338 @@ export default function AdminDashboard() {
                     <h3 className="text-xl font-bold text-white mb-6 border-b border-slate-800 pb-4">{settingsTab}</h3>
                     
                     {settingsTab === '🤖 Bot Settings' && (
-                      <div className="space-y-4 max-w-lg">
-                        {['Bot Name', 'Bot Username', 'Support Username', 'Channel Link', 'Group Link'].map(field => (
-                          <div key={field}>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">{field}</label>
-                            <input type="text" value={systemSettings?.botSettings?.[field] || ''} onChange={(e) => setSystemSettings({...systemSettings, botSettings: {...systemSettings.botSettings, [field]: e.target.value}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                      <div className="space-y-6">
+                        {telegramFeedback && (
+                          <div className="p-4 bg-slate-800 rounded-xl text-white text-sm whitespace-pre-wrap flex justify-between items-center border border-indigo-500/30">
+                            <span>{telegramFeedback}</span>
+                            <button onClick={() => setTelegramFeedback("")} className="text-slate-400 hover:text-white font-bold ml-2">✕</button>
                           </div>
-                        ))}
+                        )}
+
+                        {/* Top Read Only Webhook Panel */}
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                          <div>
+                            <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider block">Automatic Webhook URL (Read-Only)</span>
+                            <code className="text-sm font-mono text-slate-300 select-all break-all">https://royshare.onrender.com/api/telegram/webhook</code>
+                          </div>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText("https://royshare.onrender.com/api/telegram/webhook");
+                              setTelegramFeedback("📋 Webhook URL Copied to Clipboard!");
+                              setTimeout(() => setTelegramFeedback(""), 2000);
+                            }}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-white rounded-lg font-medium transition-colors border border-slate-700 shrink-0"
+                          >
+                            📋 Copy Link
+                          </button>
+                        </div>
+
+                        {/* Config Form Fields */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Bot Token</label>
+                            <div className="relative">
+                              <input
+                                type={showBotToken ? "text" : "password"}
+                                value={telegramConfigs.botToken}
+                                onChange={(e) => setTelegramConfigs({ ...telegramConfigs, botToken: e.target.value })}
+                                placeholder="1234567890:ABCdefGhI..."
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-10 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowBotToken(!showBotToken)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-medium"
+                              >
+                                {showBotToken ? "👁️ Hide" : "👁️ Show"}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Admin Chat ID</label>
+                            <input
+                              type="text"
+                              value={telegramConfigs.chatId}
+                              onChange={(e) => setTelegramConfigs({ ...telegramConfigs, chatId: e.target.value })}
+                              placeholder="e.g. 987654321"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Private Storage Channel ID</label>
+                            <input
+                              type="text"
+                              value={telegramConfigs.storageChannelId}
+                              onChange={(e) => setTelegramConfigs({ ...telegramConfigs, storageChannelId: e.target.value })}
+                              placeholder="e.g. -1001234567890"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Support Username</label>
+                            <input
+                              type="text"
+                              value={telegramConfigs.supportUsername}
+                              onChange={(e) => setTelegramConfigs({ ...telegramConfigs, supportUsername: e.target.value })}
+                              placeholder="e.g. @RoyShareSupport"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Public Channel Username</label>
+                            <input
+                              type="text"
+                              value={telegramConfigs.channelUsername}
+                              onChange={(e) => setTelegramConfigs({ ...telegramConfigs, channelUsername: e.target.value })}
+                              placeholder="e.g. @royshare_official"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Group Username</label>
+                            <input
+                              type="text"
+                              value={telegramConfigs.groupUsername}
+                              onChange={(e) => setTelegramConfigs({ ...telegramConfigs, groupUsername: e.target.value })}
+                              placeholder="e.g. @RoyShareCommunity"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Bot Name</label>
+                            <input
+                              type="text"
+                              value={telegramConfigs.botName}
+                              onChange={(e) => setTelegramConfigs({ ...telegramConfigs, botName: e.target.value })}
+                              placeholder="e.g. RoyShare Bot"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Bot Username</label>
+                            <input
+                              type="text"
+                              value={telegramConfigs.botUsername}
+                              onChange={(e) => setTelegramConfigs({ ...telegramConfigs, botUsername: e.target.value })}
+                              placeholder="e.g. @royshare_bot"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Core Save Settings & Run Diagnostics Button Toolbar */}
+                        <div className="border-t border-slate-800 pt-6 space-y-4">
+                          <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider">Control Panel Utilities</h4>
+                          
+                          <div className="flex flex-wrap gap-3">
+                            {/* Database Operations */}
+                            <button
+                              onClick={saveTelegramSettings}
+                              disabled={telegramLoading}
+                              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold rounded-xl shadow-lg shadow-emerald-950/20 transition-all"
+                            >
+                              💾 {telegramLoading ? "Saving..." : "Save Settings"}
+                            </button>
+
+                            {/* Diagnostics */}
+                            <button
+                              onClick={() => runTelegramAction('runDiagnostics', '/api/telegram/diagnostics', telegramConfigs)}
+                              disabled={actionLoading['runDiagnostics']}
+                              className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl shadow-lg shadow-indigo-950/20 transition-all"
+                            >
+                              🔍 {actionLoading['runDiagnostics'] ? "Diagnosing..." : "Run Full Diagnostics"}
+                            </button>
+
+                            <button
+                              onClick={() => runTelegramAction('runDiagnostics', '/api/telegram/diagnostics', telegramConfigs)}
+                              disabled={actionLoading['runDiagnostics']}
+                              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white rounded-xl transition-all border border-slate-700 text-sm font-medium"
+                            >
+                              🔄 {actionLoading['runDiagnostics'] ? "Refreshing..." : "Refresh Diagnostics"}
+                            </button>
+
+                            {/* Webhook Operations */}
+                            <button
+                              onClick={handleSetWebhook}
+                              disabled={actionLoading['setWebhook']}
+                              className="flex items-center gap-2 px-4 py-2 bg-indigo-900/40 hover:bg-indigo-900/60 text-indigo-200 rounded-xl transition-all border border-indigo-500/20 text-sm font-medium"
+                            >
+                              📡 {actionLoading['setWebhook'] ? "Connecting..." : "Set Webhook"}
+                            </button>
+
+                            <button
+                              onClick={handleSetWebhook}
+                              disabled={actionLoading['setWebhook']}
+                              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl transition-all border border-slate-700 text-sm font-medium"
+                            >
+                              🔄 {actionLoading['setWebhook'] ? "Refreshing..." : "Refresh Webhook"}
+                            </button>
+
+                            <button
+                              onClick={() => runTelegramAction('deleteWebhook', '/api/telegram/webhook/delete', { botToken: telegramConfigs.botToken })}
+                              disabled={actionLoading['deleteWebhook']}
+                              className="flex items-center gap-2 px-4 py-2 bg-red-950/40 hover:bg-red-950/70 text-red-400 rounded-xl transition-all border border-red-500/20 text-sm font-medium"
+                            >
+                              🗑️ {actionLoading['deleteWebhook'] ? "Removing..." : "Delete Webhook"}
+                            </button>
+                          </div>
+
+                          <div className="flex flex-wrap gap-3">
+                            {/* Individual Tests */}
+                            <button
+                              onClick={() => runTelegramAction('sendTestMessage', '/api/telegram/send-test', telegramConfigs)}
+                              disabled={actionLoading['sendTestMessage']}
+                              className="flex items-center gap-2 px-4 py-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl text-sm font-medium"
+                            >
+                              💬 {actionLoading['sendTestMessage'] ? "Sending..." : "Send Test Message"}
+                            </button>
+
+                            <button
+                              onClick={() => runTelegramAction('testChannel', '/api/telegram/test-channel', telegramConfigs)}
+                              disabled={actionLoading['testChannel']}
+                              className="flex items-center gap-2 px-4 py-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl text-sm font-medium"
+                            >
+                              📢 {actionLoading['testChannel'] ? "Testing..." : "Test Channel"}
+                            </button>
+
+                            <button
+                              onClick={() => runTelegramAction('testGroup', '/api/telegram/test-group', telegramConfigs)}
+                              disabled={actionLoading['testGroup']}
+                              className="flex items-center gap-2 px-4 py-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl text-sm font-medium"
+                            >
+                              👥 {actionLoading['testGroup'] ? "Testing..." : "Test Group"}
+                            </button>
+
+                            <button
+                              onClick={() => runTelegramAction('testUpload', '/api/telegram/test-upload', telegramConfigs)}
+                              disabled={actionLoading['testUpload']}
+                              className="flex items-center gap-2 px-4 py-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl text-sm font-medium"
+                            >
+                              📤 {actionLoading['testUpload'] ? "Uploading..." : "Test Upload"}
+                            </button>
+
+                            <button
+                              onClick={() => runTelegramAction('testDownload', '/api/telegram/test-download', telegramConfigs)}
+                              disabled={actionLoading['testDownload']}
+                              className="flex items-center gap-2 px-4 py-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl text-sm font-medium"
+                            >
+                              📥 {actionLoading['testDownload'] ? "Downloading..." : "Test Download"}
+                            </button>
+
+                            <button
+                              onClick={() => runTelegramAction('clearCache', '/api/admin/clear-cache', {})}
+                              disabled={actionLoading['clearCache']}
+                              className="flex items-center gap-2 px-4 py-2 bg-slate-950 border border-red-900/30 hover:bg-red-950/10 text-slate-400 rounded-xl text-sm font-medium"
+                            >
+                              🧹 {actionLoading['clearCache'] ? "Clearing..." : "Clear Cache"}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Diagnostics Cockpit Panel */}
+                        {diagnosticsReport && (
+                          <div className="border-t border-slate-800 pt-6 space-y-6">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                              <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                                📡 Connection Diagnostics Cockpit
+                              </h4>
+                              <div className="flex items-center gap-2.5">
+                                <button
+                                  onClick={() => runTelegramAction('runDiagnostics', '/api/telegram/diagnostics', telegramConfigs)}
+                                  disabled={actionLoading['runDiagnostics']}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-xs text-white rounded-lg font-medium transition-colors border border-slate-700"
+                                >
+                                  🔄 {actionLoading['runDiagnostics'] ? "Refreshing..." : "Refresh Diagnostics"}
+                                </button>
+                                <span className={`px-4 py-1.5 rounded-full text-xs font-bold ${diagnosticsReport.overallStatus.includes("OPERATIONAL") ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400" : "bg-red-500/10 border border-red-500/20 text-red-400"}`}>
+                                  {diagnosticsReport.overallStatus}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Errors list if any */}
+                            {diagnosticsReport.errors && diagnosticsReport.errors.length > 0 && (
+                              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 space-y-2">
+                                <h5 className="text-sm font-bold text-red-400">⚠️ System Failures Found</h5>
+                                <ul className="list-disc pl-5 space-y-1 text-xs text-red-300 font-mono">
+                                  {diagnosticsReport.errors.map((err: string, idx: number) => (
+                                    <li key={idx}>{err}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {/* System Status Grid */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                              {Object.entries(diagnosticsReport.system).map(([sys, status]: any) => (
+                                <div key={sys} className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-center">
+                                  <span className="text-xs text-slate-400 capitalize block mb-1">{sys.replace(/([A-Z])/g, ' $1').trim()}</span>
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${status === 'Online' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                                    {status === 'Online' ? '🟢 Online' : '🔴 Offline'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Telegram Bot Panel */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
+                                <h5 className="font-bold text-indigo-400 border-b border-slate-800 pb-2 mb-2 flex items-center gap-1.5">🤖 Telegram Bot</h5>
+                                <div className="space-y-1 font-mono text-xs text-slate-300">
+                                  <div className="flex justify-between"><span className="text-slate-500">Bot Name:</span> <span>{diagnosticsReport.bot.name}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Bot Username:</span> <span>{diagnosticsReport.bot.username}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Bot ID:</span> <span>{diagnosticsReport.bot.id}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Token Valid:</span> <span className={diagnosticsReport.bot.tokenValid === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.bot.tokenValid}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Connected:</span> <span className={diagnosticsReport.bot.connected === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.bot.connected}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Last Response:</span> <span className="text-slate-400">{diagnosticsReport.bot.lastResponse}</span></div>
+                                </div>
+                              </div>
+
+                              {/* Webhook Panel */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
+                                <h5 className="font-bold text-indigo-400 border-b border-slate-800 pb-2 mb-2 flex items-center gap-1.5">📡 Webhook Info</h5>
+                                <div className="space-y-1 font-mono text-xs text-slate-300">
+                                  <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Current URL:</span> <span className="truncate max-w-[200px]" title={diagnosticsReport.webhook.url}>{diagnosticsReport.webhook.url}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Connected:</span> <span className={diagnosticsReport.webhook.connected === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.webhook.connected}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Pending Updates:</span> <span>{diagnosticsReport.webhook.pendingUpdates}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Response Code:</span> <span>{diagnosticsReport.webhook.httpResponseCode}</span></div>
+                                  <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Last Telegram Error:</span> <span className="truncate max-w-[180px] text-red-400" title={diagnosticsReport.webhook.lastError}>{diagnosticsReport.webhook.lastError}</span></div>
+                                </div>
+                              </div>
+
+                              {/* Storage Channel Panel */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
+                                <h5 className="font-bold text-indigo-400 border-b border-slate-800 pb-2 mb-2 flex items-center gap-1.5">📦 Private Storage Channel</h5>
+                                <div className="space-y-1 font-mono text-xs text-slate-300">
+                                  <div className="flex justify-between"><span className="text-slate-500">Channel Found:</span> <span className={diagnosticsReport.privateStorage.channelFound === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.privateStorage.channelFound}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Bot Admin:</span> <span className={diagnosticsReport.privateStorage.botAdmin === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.privateStorage.botAdmin}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Upload Test:</span> <span className={diagnosticsReport.privateStorage.uploadTest === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.privateStorage.uploadTest}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Download Test:</span> <span className={diagnosticsReport.privateStorage.downloadTest === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.privateStorage.downloadTest}</span></div>
+                                </div>
+                              </div>
+
+                              {/* Admin Chat ID & Resources Panel */}
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
+                                <h5 className="font-bold text-indigo-400 border-b border-slate-800 pb-2 mb-2 flex items-center gap-1.5">👥 Group & Channels Status</h5>
+                                <div className="space-y-1 font-mono text-xs text-slate-300">
+                                  <div className="flex justify-between"><span className="text-slate-500">Admin Chat Valid:</span> <span className={diagnosticsReport.adminChat.chatIdValid === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.adminChat.chatIdValid}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Test Message Status:</span> <span>{diagnosticsReport.adminChat.testMessageStatus}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Public Channel Username:</span> <span className={diagnosticsReport.publicChannel.usernameFound === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.publicChannel.usernameFound}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Public Channel Admin:</span> <span className={diagnosticsReport.publicChannel.botAdmin === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.publicChannel.botAdmin}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Group Username Found:</span> <span className={diagnosticsReport.group.usernameFound === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.group.usernameFound}</span></div>
+                                  <div className="flex justify-between"><span className="text-slate-500">Group Bot Admin:</span> <span className={diagnosticsReport.group.botAdmin === "Yes" ? "text-emerald-400" : "text-red-400"}>{diagnosticsReport.group.botAdmin}</span></div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -2848,7 +3442,7 @@ export default function AdminDashboard() {
         </div>
       ) : null}
 
-      {modalAction !== 'none' && (selectedWithdrawal || selectedTicket || selectedUser || modalAction.includes('announcement') || modalAction.includes('task') || modalAction.includes('ad')) && (
+      {modalAction !== 'none' && (selectedWithdrawal || selectedTicket || selectedUser || modalAction.includes('announcement') || modalAction.includes('task') || modalAction.includes('ad') || modalAction === 'preview_ad') && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
             <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
@@ -2874,6 +3468,7 @@ export default function AdminDashboard() {
                 {modalAction === 'deduct_balance' && '➖ Deduct Balance'}
                 {modalAction === 'ban_user' && '🚫 Ban User'}
                 {modalAction === 'message_user' && '📨 Send Message'}
+                {modalAction === 'preview_ad' && '👁 Ad Preview'}
               </h3>
               <button 
                 onClick={() => setModalAction('none')}
@@ -3447,6 +4042,120 @@ export default function AdminDashboard() {
                       placeholder="https://..."
                     />
                   </div>
+
+                  {/* Step 1: Ad Network selection */}
+                  <div className="border-t border-slate-800 pt-4 mt-4 space-y-3">
+                    <h4 className="text-sm font-bold text-slate-300 flex items-center gap-2">
+                      🔌 Ad Network Integration (Step 1)
+                    </h4>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Select Network</label>
+                      <select 
+                        value={taskForm.adNetwork || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setTaskForm({
+                            ...taskForm,
+                            adNetwork: val,
+                            selectedAdIds: [] // reset selected ads when changing network
+                          });
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 font-bold"
+                      >
+                        <option value="">-- No Ad Network --</option>
+                        <option value="Adsterra">Adsterra</option>
+                        <option value="Monetag">Monetag</option>
+                        <option value="AdCash">AdCash</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Step 2: Add Ads (Select Ads based on network and type) */}
+                  {taskForm.adNetwork && (
+                    <div className="bg-slate-950/40 p-4 border border-slate-800 rounded-xl mt-3 space-y-3">
+                      <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">🎯 Select {taskForm.adNetwork} Ads (Step 2)</span>
+                        <span className="text-[10px] text-slate-400 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-full font-bold">
+                          {ads.filter(ad => {
+                            const n = String(taskForm.adNetwork || "").toLowerCase();
+                            const adSource = String(ad.adSource || "").toLowerCase();
+                            if (adSource !== n) return false;
+                            
+                            // Supported types filtering
+                            const adType = String(ad.adType || "").toLowerCase();
+                            if (n === "adsterra" || n === "monetag") {
+                              return adType.includes("banner") || adType.includes("native") || adType.includes("direct") || adType.includes("link");
+                            } else if (n === "adcash") {
+                              return adType.includes("display") || adType.includes("interstitial") || adType.includes("pop") || adType.includes("slider") || adType.includes("video") || adType.includes("vast") || adType.includes("stream");
+                            }
+                            return false;
+                          }).length} Available
+                        </span>
+                      </div>
+                      
+                      <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                        {(() => {
+                          const filteredAds = ads.filter(ad => {
+                            const n = String(taskForm.adNetwork || "").toLowerCase();
+                            const adSource = String(ad.adSource || "").toLowerCase();
+                            if (adSource !== n) return false;
+                            
+                            // Supported types filtering
+                            const adType = String(ad.adType || "").toLowerCase();
+                            if (n === "adsterra" || n === "monetag") {
+                              return adType.includes("banner") || adType.includes("native") || adType.includes("direct") || adType.includes("link");
+                            } else if (n === "adcash") {
+                              return adType.includes("display") || adType.includes("interstitial") || adType.includes("pop") || adType.includes("slider") || adType.includes("video") || adType.includes("vast") || adType.includes("stream");
+                            }
+                            return false;
+                          });
+
+                          if (filteredAds.length === 0) {
+                            return (
+                              <div className="text-xs text-slate-500 italic py-2">
+                                No active {taskForm.adNetwork} ads matching supported types found in your Ads Manager.
+                              </div>
+                            );
+                          }
+
+                          return filteredAds.map(ad => {
+                            const isSelected = taskForm.selectedAdIds?.includes(ad.id);
+                            return (
+                              <label key={ad.id} className="flex items-start gap-2.5 p-2 bg-slate-950/80 rounded-lg hover:bg-slate-800/40 cursor-pointer border border-slate-800/40 transition-all select-none">
+                                <input 
+                                  type="checkbox"
+                                  checked={isSelected || false}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    const currentIds = taskForm.selectedAdIds || [];
+                                    const nextIds = checked 
+                                      ? [...currentIds, ad.id]
+                                      : currentIds.filter(id => id !== ad.id);
+                                    setTaskForm({
+                                      ...taskForm,
+                                      selectedAdIds: nextIds
+                                    });
+                                  }}
+                                  className="mt-0.5 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-950"
+                                />
+                                <div className="text-xs">
+                                  <div className="font-semibold text-slate-200">{ad.adName}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-blue-400">{ad.adType}</span>
+                                    <span>•</span>
+                                    <span>Placement: {ad.placement}</span>
+                                    <span>•</span>
+                                    <span className={ad.status === '🟢 Active' || String(ad.status).includes('🟢') ? 'text-emerald-400' : 'text-amber-400'}>{ad.status}</span>
+                                  </div>
+                                </div>
+                              </label>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (modalAction === 'create_ad' || modalAction === 'edit_ad') ? (
                 <div className="space-y-4">
@@ -3636,6 +4345,31 @@ export default function AdminDashboard() {
                         <p className="font-medium text-white">{(taskForm as any).participants || 0}</p>
                       </div>
                     </div>
+
+                    {taskForm.adNetwork && (
+                      <div className="pt-4 border-t border-slate-800 space-y-2">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-slate-500">🔌 Ad Network</span>
+                          <span className="font-bold text-blue-400">{taskForm.adNetwork}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-slate-500">🎯 Selected Ads ({taskForm.selectedAdIds?.length || 0})</span>
+                          <span className="font-mono text-slate-300">
+                            {taskForm.selectedAdIds && taskForm.selectedAdIds.length > 0 ? "Configured" : "None"}
+                          </span>
+                        </div>
+                        {taskForm.selectedAdIds && taskForm.selectedAdIds.length > 0 && (
+                          <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 space-y-1.5 max-h-24 overflow-y-auto">
+                            {ads.filter(ad => taskForm.selectedAdIds?.includes(ad.id)).map(ad => (
+                              <div key={ad.id} className="text-[10px] text-slate-400 flex justify-between">
+                                <span className="font-semibold truncate max-w-[140px]">{ad.adName}</span>
+                                <span className="text-slate-500 shrink-0">{ad.adType}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <button 
                     onClick={() => setModalAction('edit_task')}
@@ -3643,6 +4377,45 @@ export default function AdminDashboard() {
                   >
                     ✏️ Edit Task
                   </button>
+                </div>
+              ) : modalAction === 'preview_ad' && adForm ? (
+                <div className="space-y-4">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <h4 className="font-bold text-lg text-white mb-2">{adForm.adName}</h4>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-400 mb-4 border-b border-slate-800 pb-3">
+                      <div>Network: <span className="text-blue-400 font-bold">{adForm.adSource}</span></div>
+                      <div>Type: <span className="text-blue-400 font-bold">{adForm.adType}</span></div>
+                      <div>Placement: <span className="text-slate-300 font-semibold">{adForm.placement}</span></div>
+                      <div>Status: <span className="text-slate-300 font-semibold">{adForm.status}</span></div>
+                    </div>
+                    
+                    <div className="w-full bg-slate-950 border border-slate-800 rounded-xl overflow-hidden min-h-[180px] flex items-center justify-center p-3 relative">
+                      {adForm.scriptCode ? (
+                        <div className="w-full flex justify-center items-center">
+                          {adForm.adType === "Direct Link" || adForm.adType === "Direct Link Ad" ? (
+                            <a 
+                              href={adForm.scriptCode} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-xs font-bold"
+                            >
+                              🔗 Open Direct Link URL
+                            </a>
+                          ) : (
+                            <AdScriptRenderer 
+                              scriptCode={adForm.scriptCode} 
+                              adType={adForm.adType}
+                              onStatusChange={(status, msg) => {
+                                console.log("Modal Ad Preview Status:", status, msg);
+                              }}
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 font-mono text-xs">No script code found</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : modalAction === 'view_user' && selectedUser ? (
                 <div className="space-y-4">
@@ -3732,7 +4505,7 @@ export default function AdminDashboard() {
                 className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white transition-colors"
                 disabled={modalLoading}
               >
-                {(modalAction === 'view_withdrawal' || modalAction === 'view_ticket' || modalAction === 'view_announcement' || modalAction === 'view_task' || modalAction === 'view_user') ? 'Close' : (modalAction === 'create_ad' || modalAction === 'edit_ad') ? '❌ Cancel' : 'Back'}
+                {(modalAction === 'view_withdrawal' || modalAction === 'view_ticket' || modalAction === 'view_announcement' || modalAction === 'view_task' || modalAction === 'view_user' || modalAction === 'preview_ad') ? 'Close' : (modalAction === 'create_ad' || modalAction === 'edit_ad') ? '❌ Cancel' : 'Back'}
               </button>
               
               {modalAction === 'approve' && (
@@ -3949,15 +4722,31 @@ export default function AdminDashboard() {
                                     <div class="space-y-1.5 font-mono text-sm p-3 bg-slate-950/80 rounded-xl border border-slate-800">
                                       <div class="flex items-center justify-between">
                                         <span class="text-slate-400">Library Loaded</span>
-                                        <span class="text-emerald-400 font-bold">🟢 Yes</span>
+                                        <span class="${diag?.libraryLoaded === 'Yes' ? 'text-emerald-400 font-bold' : 'text-slate-500'}">
+                                          ${diag?.libraryLoaded === 'Yes' ? '🟢 Yes' : '⚫ No'}
+                                        </span>
                                       </div>
                                       <div class="flex items-center justify-between">
                                         <span class="text-slate-400">window.aclib Available</span>
-                                        <span class="text-emerald-400 font-bold">🟢 Yes</span>
+                                        <span class="${diag?.aclibAvailable === 'Yes' ? 'text-emerald-400 font-bold' : 'text-slate-500'}">
+                                          ${diag?.aclibAvailable === 'Yes' ? '🟢 Yes' : '⚫ No'}
+                                        </span>
+                                      </div>
+                                      <div class="flex items-center justify-between">
+                                        <span class="text-slate-400">Zone ID</span>
+                                        <span class="text-emerald-400 font-bold">${diag?.zoneId || '11511010'}</span>
                                       </div>
                                       <div class="flex items-center justify-between">
                                         <span class="text-slate-400">runInterstitial Executed</span>
-                                        <span class="text-emerald-400 font-bold">🟢 Yes</span>
+                                        <span class="${diag?.runExecuted === 'Yes' ? 'text-emerald-400 font-bold' : 'text-slate-500'}">
+                                          ${diag?.runExecuted === 'Yes' ? '🟢 Yes' : '⚫ No'}
+                                        </span>
+                                      </div>
+                                      <div class="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                                        <span class="text-slate-400 font-bold">Result</span>
+                                        <span class="${diag?.result === 'Success' ? 'text-emerald-400 font-bold' : (diag?.result === 'Failed' ? 'text-red-400 font-bold' : 'text-yellow-400 font-bold')}">
+                                          ${diag?.result || 'Pending'}
+                                        </span>
                                       </div>
                                     </div>
                                     <div class="mt-2 text-xs text-slate-500 italic">AdCash Interstitial library loaded once and executed successfully.</div>

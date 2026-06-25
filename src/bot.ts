@@ -481,7 +481,7 @@ async function processRealUpload(botToken: string, chatId: number, user: any, ms
     const uniqueFileId = "FL" + Math.random().toString(36).substring(2, 10).toUpperCase();
     
     // 5. Generate public link
-    const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
     const baseDomain = appUrl.replace(/\/$/, "");
     const generatedLink = `${baseDomain}/download/${uniqueFileId}`;
     
@@ -567,7 +567,7 @@ async function processShortenUrl(botToken: string, chatId: number, user: any, ur
     }
     
     const linkId = "LN" + Math.random().toString(36).substring(2, 10).toUpperCase();
-    const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
     const baseDomain = appUrl.replace(/\/$/, "");
     const shortLink = `${baseDomain}/lnk/${linkId}`;
     
@@ -824,7 +824,7 @@ async function processReferAndEarn(botToken: string, chatId: number, user: any) 
     const refQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
     const refSnap = await getDocs(refQuery);
 
-    const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
     const baseDomain = appUrl.replace(/\/$/, "");
     const referralLink = `${baseDomain}/ref/${userId}`;
 
@@ -2043,7 +2043,7 @@ async function processDailyBonus(botToken: string, chatId: number, user: any) {
     const userDoc = await getDoc(doc(db, "users", String(user.id)));
     const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
 
-    const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
     const webAppUrl = `${appUrl}/daily-bonus?userId=${user.id}`;
 
     const maxRewardStr = formatCurrency(5, currency);
@@ -2082,12 +2082,42 @@ async function processEarnRewards(botToken: string, chatId: number, user: any) {
         if (c.taskId) completedTaskIds.add(c.taskId);
     });
 
-    const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+
+    // Fetch dynamic tasks from Firestore tasks collection
+    let dbTasks: any[] = [];
+    try {
+        const tasksQuery = query(collection(db, "tasks"));
+        const tasksSnap = await getDocs(tasksQuery);
+        dbTasks = tasksSnap.docs.map(doc => {
+            const d = doc.data();
+            return {
+                id: doc.id,
+                name: d.title || "",
+                amount: Number(d.rewardAmount) || 0,
+                status: d.status || "🟢 Active",
+                ...d
+            };
+        });
+    } catch (e) {
+        console.error("Error fetching dynamic tasks in bot.ts:", e);
+    }
+
+    // Merge hardcoded REWARD_TASKS and Firestore dbTasks (dbTasks take precedence if matching ID)
+    const taskMap = new Map<string, any>();
+    REWARD_TASKS.forEach(t => taskMap.set(t.id, t));
+    dbTasks.forEach(t => {
+        // Only show Active tasks
+        if (t.status === "🟢 Active" || String(t.status || "").toLowerCase().includes("active")) {
+            taskMap.set(t.id, t);
+        }
+    });
+    const mergedTasks = Array.from(taskMap.values());
 
     let message = `💰 *Reward Tasks*\n\n`;
     const buttons: any[] = [];
 
-    for (const t of REWARD_TASKS) {
+    for (const t of mergedTasks) {
         const isCompleted = completedTaskIds.has(t.id);
         const formattedAmount = formatCurrency(t.amount, currency);
         
@@ -2509,7 +2539,7 @@ Processing Time:
 
 async function initiateHumanVerification(botToken: string, chatId: number, userId: string, state: any) {
     const db = getDb();
-    const appUrl = process.env.VITE_APP_URL || process.env.APP_URL || "https://ais-dev-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+    const appUrl = process.env.VITE_APP_URL || process.env.APP_URL || "https://royshare.onrender.com";
     const verifyUrl = `${appUrl}/verify-withdrawal/${userId}`;
     
     // Generate captcha
@@ -4202,7 +4232,7 @@ https://youtube.com`;
             await processDashboard(botToken, chatId, callbackQuery.from);
         } else if (data.startsWith("referral_copy_")) {
             const rUserId = data.replace("referral_copy_", "");
-            const appUrl = process.env.APP_URL || "https://ais-pre-5jd7r4tpejyvwp32zvb3ha-444517033714.asia-southeast1.run.app";
+            const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
             const baseDomain = appUrl.replace(/\/$/, "");
             const referralLink = `${baseDomain}/ref/${rUserId}`;
             

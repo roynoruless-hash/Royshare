@@ -11,6 +11,8 @@ interface Task {
   id: string;
   name: string;
   amount: number;
+  adNetwork?: string;
+  selectedAdIds?: string[];
 }
 
 export default function RewardTasksPage() {
@@ -53,6 +55,7 @@ export default function RewardTasksPage() {
 
   // Ad State
   const [videoAd, setVideoAd] = useState<any>(null);
+  const [selectedAds, setSelectedAds] = useState<any[]>([]);
   const [adExecuted, setAdExecuted] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -113,7 +116,7 @@ export default function RewardTasksPage() {
           return;
         }
 
-        // Fetch AdCash VAST Video Ad or fell back
+        // Fetch all Ads from Firestore
         const adsQuery = query(collection(db, "ads"));
         const adsSnap = await getDocs(adsQuery);
         const adsList: any[] = [];
@@ -121,22 +124,40 @@ export default function RewardTasksPage() {
           adsList.push({ id: docSnap.id, ...docSnap.data() });
         });
 
-        // Search for active VAST Video Ad in AdCash -> Adsterra -> Monetag
         const isAdActive = (ad: any) => {
           const statusStr = String(ad.status || "").toLowerCase();
           return statusStr.includes("active") || statusStr === "active";
         };
 
-        const activeVideoAds = adsList.filter(ad => 
-          isAdActive(ad) && 
-          (ad.adType === "VAST Video Ad" || ad.adType === "VAST Video") && 
-          (ad.placement === "Video Slot" || ad.placement === "Video Slot")
-        );
+        // Populate selected ads specifically assigned to this task
+        let taskSelectedAds: any[] = [];
+        if (resolvedTask.selectedAdIds && Array.isArray(resolvedTask.selectedAdIds)) {
+          taskSelectedAds = adsList.filter(ad => resolvedTask.selectedAdIds.includes(ad.id));
+        }
+        setSelectedAds(taskSelectedAds);
 
-        // Fallback Order: AdCash -> Adsterra -> Monetag
-        let chosenAd = activeVideoAds.find(ad => ad.adSource === "AdCash");
-        if (!chosenAd) chosenAd = activeVideoAds.find(ad => ad.adSource === "Adsterra");
-        if (!chosenAd) chosenAd = activeVideoAds.find(ad => ad.adSource === "Monetag");
+        // Try to find an active video ad from the task's assigned ads
+        let chosenAd = null;
+        if (taskSelectedAds.length > 0) {
+          chosenAd = taskSelectedAds.find(ad => {
+            const t = String(ad.adType || "").toLowerCase();
+            return (t.includes("video") || t.includes("vast") || t.includes("stream") || t.includes("slider"));
+          });
+        }
+
+        // If no video ad is found inside the task-assigned ads, search globally
+        if (!chosenAd) {
+          const activeVideoAds = adsList.filter(ad => 
+            isAdActive(ad) && 
+            (ad.adType === "VAST Video Ad" || ad.adType === "VAST Video" || ad.adType === "In-stream Video" || ad.adType === "Video Slider") && 
+            (ad.placement === "Video Slot" || ad.placement === "Video Slot")
+          );
+
+          // Fallback Order: AdCash -> Adsterra -> Monetag
+          chosenAd = activeVideoAds.find(ad => ad.adSource === "AdCash");
+          if (!chosenAd) chosenAd = activeVideoAds.find(ad => ad.adSource === "Adsterra");
+          if (!chosenAd) chosenAd = activeVideoAds.find(ad => ad.adSource === "Monetag");
+        }
 
         if (chosenAd) {
           setVideoAd(chosenAd);
@@ -461,6 +482,33 @@ export default function RewardTasksPage() {
         <div className="w-full">
           <AdRenderer targetPage="Reward Tasks Page" placementKey="Header Banner" />
         </div>
+
+        {/* Dynamic task-specific selected ads */}
+        {selectedAds.length > 0 && (
+          <div className="space-y-4">
+            {selectedAds.filter(ad => ad.id !== videoAd?.id).map(ad => (
+              <div key={ad.id} className="w-full bg-slate-900/40 border border-slate-800/40 rounded-2xl p-4">
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2 flex items-center gap-1">
+                  <span>Sponsored Ad ({ad.adSource} - {ad.adType})</span>
+                </p>
+                <div className="flex justify-center items-center overflow-hidden w-full">
+                  {ad.adType === "Direct Link" || ad.adType === "Direct Link Ad" ? (
+                    <a 
+                      href={ad.scriptCode} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600/80 to-indigo-600/80 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3 px-6 rounded-xl text-sm transition-all shadow-md"
+                    >
+                      🚀 Visit Sponsor Link ({ad.adName})
+                    </a>
+                  ) : (
+                    <AdScriptRenderer scriptCode={ad.scriptCode} adType={ad.adType} />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Footer Controls */}

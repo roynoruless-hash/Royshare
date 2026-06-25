@@ -1,13 +1,25 @@
+import React, { useState, useRef, useEffect } from "react";
 import { motion } from "motion/react";
 import { Send } from "lucide-react";
-import { useState, useRef } from "react";
 
 export default function TelegramOrb({ onTriggerAdmin }: { onTriggerAdmin: () => void }) {
   const [progress, setProgress] = useState(0);
   const pressTimer = useRef<number | null>(null);
+  const isTouch = useRef(false);
   
   const [tapCount, setTapCount] = useState(0);
   const tapTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pressTimer.current) {
+        clearInterval(pressTimer.current);
+      }
+      if (tapTimerRef.current) {
+        clearTimeout(tapTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleTap = () => {
     setTapCount(prev => prev + 1);
@@ -20,26 +32,48 @@ export default function TelegramOrb({ onTriggerAdmin }: { onTriggerAdmin: () => 
     }
   };
 
-  const startPress = () => {
+  const startPress = (e: React.MouseEvent | React.TouchEvent) => {
+    if (e.type === "touchstart") {
+      isTouch.current = true;
+    } else if (e.type === "mousedown" && isTouch.current) {
+      // Ignore simulated mouse event on mobile/touch screens
+      return;
+    }
+
+    if (pressTimer.current) {
+      clearInterval(pressTimer.current);
+    }
+
     let startTime = Date.now();
     pressTimer.current = window.setInterval(() => {
       const elapsed = Date.now() - startTime;
-      const newProgress = Math.min((elapsed / 5000) * 100, 100);
+      // Triggers precisely at 2 seconds (2000ms)
+      const newProgress = Math.min((elapsed / 2000) * 100, 100);
       setProgress(newProgress);
       if (newProgress >= 100) {
-        clearInterval(pressTimer.current!);
+        if (pressTimer.current) {
+          clearInterval(pressTimer.current);
+          pressTimer.current = null;
+        }
         onTriggerAdmin();
         setProgress(0);
       }
     }, 50);
   };
 
+  const endPress = (e: React.MouseEvent | React.TouchEvent) => {
+    if (e.type === "touchend" || e.type === "touchcancel") {
+      // Allow simulated events to pass before resetting the touch flag
+      setTimeout(() => {
+        isTouch.current = false;
+      }, 500);
+    }
 
-  const endPress = () => {
     if (pressTimer.current) {
         clearInterval(pressTimer.current);
-        setProgress(0);
+        pressTimer.current = null;
     }
+    setProgress(0);
   };
 
   return (
@@ -50,6 +84,7 @@ export default function TelegramOrb({ onTriggerAdmin }: { onTriggerAdmin: () => 
       onMouseLeave={endPress}
       onTouchStart={startPress}
       onTouchEnd={endPress}
+      onTouchCancel={endPress}
       whileHover={{ scale: 1.1 }}
       className="relative flex items-center justify-center w-32 h-32 mb-10 mx-auto cursor-pointer"
       animate={{ y: [0, -10, 0] }}

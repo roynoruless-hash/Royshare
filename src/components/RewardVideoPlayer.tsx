@@ -104,6 +104,54 @@ export default function RewardVideoPlayer({ scriptCode, onComplete }: RewardVide
   useEffect(() => {
     let isMounted = true;
 
+    // Save references to original network and global handlers
+    const originalFetch = window.fetch;
+    const originalXhrOpen = XMLHttpRequest.prototype.open;
+
+    // Diagnostic hook to intercept and log fetch requests
+    window.fetch = function(...args) {
+      try {
+        const url = typeof args[0] === 'string' ? args[0] : (args[0] as any)?.url || String(args[0] || '');
+        if (isMounted && url) {
+          addLog(`Fetch Request: ${url.substring(0, 100)}${url.length > 100 ? '...' : ''}`);
+        }
+      } catch (err) {
+        console.error("Fetch intercept error", err);
+      }
+      return originalFetch.apply(this, args);
+    };
+
+    // Diagnostic hook to intercept and log XHR requests
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+      try {
+        const urlStr = String(url || '');
+        if (isMounted && urlStr) {
+          addLog(`XHR Request: [${method}] ${urlStr.substring(0, 100)}${urlStr.length > 100 ? '...' : ''}`);
+        }
+      } catch (err) {
+        console.error("XHR intercept error", err);
+      }
+      return originalXhrOpen.apply(this, [method, url, ...rest] as any);
+    };
+
+    // Global error handlers
+    const handleErrorEvent = (event: ErrorEvent) => {
+      if (isMounted) {
+        addLog(`JS Global Error: ${event.message || 'Unknown message'} at ${event.filename || 'unknown'}:${event.lineno || 0}`);
+      }
+    };
+    
+    const handleRejectionEvent = (event: PromiseRejectionEvent) => {
+      if (isMounted) {
+        const reason = event.reason;
+        const msg = reason ? (reason.message || String(reason)) : 'Unknown rejection';
+        addLog(`Promise Rejected: ${msg}`);
+      }
+    };
+
+    window.addEventListener('error', handleErrorEvent);
+    window.addEventListener('unhandledrejection', handleRejectionEvent);
+
     if (!savedVastUrl) {
       setErrorMessage("No valid VAST URL provided by the administrator.");
       setVastErrorMessage("No VAST URL configured.");
@@ -180,6 +228,13 @@ export default function RewardVideoPlayer({ scriptCode, onComplete }: RewardVide
 
     return () => {
       isMounted = false;
+
+      // Restore original handlers
+      window.fetch = originalFetch;
+      XMLHttpRequest.prototype.open = originalXhrOpen;
+      window.removeEventListener('error', handleErrorEvent);
+      window.removeEventListener('unhandledrejection', handleRejectionEvent);
+
       if (playerRef.current) {
         try {
           addLog("Disposing player...");
