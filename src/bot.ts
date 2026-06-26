@@ -791,7 +791,10 @@ async function processShortenUrl(botToken: string, chatId: number, user: any, ur
         shortUrl: finalShortLink,
         localShortUrl: localShortLink,
         createdAt: formattedDate,
-        status: "active"
+        status: "Active",
+        Status: "Active",
+        enabled: true,
+        Enabled: true
     });
     
     // Update user stats

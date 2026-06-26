@@ -3048,24 +3048,60 @@ Bonus added successfully.`;
 
       let itemData: any = null;
       let docRef: any = null;
-      let col = type === "shortener" ? "smart_links" : "uploads";
+      let col = type === "shortener" ? "links" : "uploads";
+
+      // Requirement 6: Debug log - Link ID received
+      console.log(`[DEBUG SHORTENER] Link ID received: "${id}"`);
 
       if (type === "shortener") {
-        // Find the smart link. Note: id can be the alias or the id itself!
-        const q = query(collection(db, "smart_links"), where("alias", "==", id));
-        const qSnap = await getDocs(q);
-        if (!qSnap.empty) {
-          docRef = qSnap.docs[0].ref;
-          itemData = qSnap.docs[0].data();
+        // Requirement 6: Debug log - Collection searched
+        console.log(`[DEBUG SHORTENER] Searching collection: "links" (used by bot) and fallback to "smart_links"`);
+
+        // 1. Try "links" collection first
+        const directLinkRef = doc(db, "links", id);
+        const directLinkSnap = await getDoc(directLinkRef);
+        if (directLinkSnap.exists()) {
+          docRef = directLinkRef;
+          itemData = directLinkSnap.data();
+          col = "links";
         } else {
-          const directRef = doc(db, "smart_links", id);
-          const directSnap = await getDoc(directRef);
-          if (directSnap.exists()) {
-            docRef = directRef;
-            itemData = directSnap.data();
+          const qLink = query(collection(db, "links"), where("linkId", "==", id));
+          const qLinkSnap = await getDocs(qLink);
+          if (!qLinkSnap.empty) {
+            docRef = qLinkSnap.docs[0].ref;
+            itemData = qLinkSnap.docs[0].data();
+            col = "links";
+          } else {
+            const qLinkAlias = query(collection(db, "links"), where("alias", "==", id));
+            const qLinkAliasSnap = await getDocs(qLinkAlias);
+            if (!qLinkAliasSnap.empty) {
+              docRef = qLinkAliasSnap.docs[0].ref;
+              itemData = qLinkAliasSnap.docs[0].data();
+              col = "links";
+            }
+          }
+        }
+
+        // 2. Try "smart_links" collection as fallback
+        if (!itemData) {
+          const qSmart = query(collection(db, "smart_links"), where("alias", "==", id));
+          const qSmartSnap = await getDocs(qSmart);
+          if (!qSmartSnap.empty) {
+            docRef = qSmartSnap.docs[0].ref;
+            itemData = qSmartSnap.docs[0].data();
+            col = "smart_links";
+          } else {
+            const directSmartRef = doc(db, "smart_links", id);
+            const directSmartSnap = await getDoc(directSmartRef);
+            if (directSmartSnap.exists()) {
+              docRef = directSmartRef;
+              itemData = directSmartSnap.data();
+              col = "smart_links";
+            }
           }
         }
       } else {
+        console.log(`[DEBUG SHORTENER] Searching collection: "uploads"`);
         const directRef = doc(db, "uploads", id);
         const directSnap = await getDoc(directRef);
         if (directSnap.exists()) {
@@ -3074,7 +3110,50 @@ Bonus added successfully.`;
         }
       }
 
-      if (!itemData || itemData.status === "deleted" || itemData.status === "Disabled") {
+      if (itemData) {
+        // Compatibility mapping for "links" and "smart_links"
+        itemData.destinationUrl = itemData.destinationUrl || itemData.originalUrl;
+        itemData.id = itemData.id || itemData.linkId || id;
+        itemData.alias = itemData.alias || itemData.linkId || id;
+
+        // Ensure default status/enabled if missing
+        if (itemData.status === undefined && itemData.Status !== undefined) {
+          itemData.status = itemData.Status;
+        }
+        if (itemData.status === undefined) {
+          itemData.status = "Active";
+        }
+        if (itemData.Status === undefined) {
+          itemData.Status = itemData.status;
+        }
+        if (itemData.enabled === undefined && itemData.Enabled !== undefined) {
+          itemData.enabled = itemData.Enabled;
+        }
+        if (itemData.enabled === undefined) {
+          itemData.enabled = true;
+        }
+        if (itemData.Enabled === undefined) {
+          itemData.Enabled = itemData.enabled;
+        }
+
+        // Requirement 6: Debug logs
+        console.log(`[DEBUG SHORTENER] Firestore document found: true in collection: "${col}"`);
+        console.log(`[DEBUG SHORTENER] Document status: "${itemData.status || itemData.Status || 'N/A'}" (Enabled: ${itemData.enabled !== false && itemData.Enabled !== false})`);
+        console.log(`[DEBUG SHORTENER] Redirect destination: "${itemData.destinationUrl || "N/A"}"`);
+      } else {
+        console.log(`[DEBUG SHORTENER] Firestore document found: false`);
+      }
+
+      // Determine if disabled or deleted
+      let isDocEnabled = false;
+      if (itemData) {
+        const statusLower = String(itemData.status || itemData.Status || "").toLowerCase();
+        const isDeletedOrDisabled = statusLower === "deleted" || statusLower === "disabled" || statusLower === "inactive";
+        const hasEnabledFlag = itemData.enabled !== false && itemData.Enabled !== false;
+        isDocEnabled = !isDeletedOrDisabled && hasEnabledFlag;
+      }
+
+      if (!itemData || !isDocEnabled) {
         return res.status(404).json({ success: false, message: `${type === "shortener" ? "Smart link" : "File"} not found or disabled.` });
       }
 
@@ -3237,27 +3316,92 @@ Bonus added successfully.`;
       let itemData: any = null;
       let docRef: any = null;
 
+      // Debug log: Link ID received for claim
+      console.log(`[DEBUG CLAIM] Link ID received: "${linkId}"`);
+
       if (type === "shortener") {
-        const q = query(collection(db, "smart_links"), where("alias", "==", linkId));
-        const qSnap = await getDocs(q);
-        if (!qSnap.empty) {
-          docRef = qSnap.docs[0].ref;
-          itemData = qSnap.docs[0].data();
+        console.log(`[DEBUG CLAIM] Searching collection: "links" (used by bot) and fallback to "smart_links"`);
+
+        // 1. Try "links" collection first
+        const directLinkRef = doc(db, "links", linkId);
+        const directLinkSnap = await getDoc(directLinkRef);
+        if (directLinkSnap.exists()) {
+          docRef = directLinkRef;
+          itemData = directLinkSnap.data();
         } else {
-          const directRef = doc(db, "smart_links", linkId);
-          const directSnap = await getDoc(directRef);
-          if (directSnap.exists()) {
-            docRef = directRef;
-            itemData = directSnap.data();
+          const qLink = query(collection(db, "links"), where("linkId", "==", linkId));
+          const qLinkSnap = await getDocs(qLink);
+          if (!qLinkSnap.empty) {
+            docRef = qLinkSnap.docs[0].ref;
+            itemData = qLinkSnap.docs[0].data();
+          } else {
+            const qLinkAlias = query(collection(db, "links"), where("alias", "==", linkId));
+            const qLinkAliasSnap = await getDocs(qLinkAlias);
+            if (!qLinkAliasSnap.empty) {
+              docRef = qLinkAliasSnap.docs[0].ref;
+              itemData = qLinkAliasSnap.docs[0].data();
+            }
+          }
+        }
+
+        // 2. Try "smart_links" collection as fallback
+        if (!itemData) {
+          const qSmart = query(collection(db, "smart_links"), where("alias", "==", linkId));
+          const qSmartSnap = await getDocs(qSmart);
+          if (!qSmartSnap.empty) {
+            docRef = qSmartSnap.docs[0].ref;
+            itemData = qSmartSnap.docs[0].data();
+          } else {
+            const directSmartRef = doc(db, "smart_links", linkId);
+            const directSmartSnap = await getDoc(directSmartRef);
+            if (directSmartSnap.exists()) {
+              docRef = directSmartRef;
+              itemData = directSmartSnap.data();
+            }
           }
         }
       } else {
+        console.log(`[DEBUG CLAIM] Searching collection: "uploads"`);
         const directRef = doc(db, "uploads", linkId);
         const directSnap = await getDoc(directRef);
         if (directSnap.exists()) {
           docRef = directRef;
           itemData = directSnap.data();
         }
+      }
+
+      if (itemData) {
+        // Compatibility mapping for "links" and "smart_links"
+        itemData.destinationUrl = itemData.destinationUrl || itemData.originalUrl;
+        itemData.id = itemData.id || itemData.linkId || linkId;
+        itemData.alias = itemData.alias || itemData.linkId || linkId;
+
+        // Ensure default status/enabled if missing
+        if (itemData.status === undefined && itemData.Status !== undefined) {
+          itemData.status = itemData.Status;
+        }
+        if (itemData.status === undefined) {
+          itemData.status = "Active";
+        }
+        if (itemData.Status === undefined) {
+          itemData.Status = itemData.status;
+        }
+        if (itemData.enabled === undefined && itemData.Enabled !== undefined) {
+          itemData.enabled = itemData.Enabled;
+        }
+        if (itemData.enabled === undefined) {
+          itemData.enabled = true;
+        }
+        if (itemData.Enabled === undefined) {
+          itemData.Enabled = itemData.enabled;
+        }
+
+        // Debug logs
+        console.log(`[DEBUG CLAIM] Firestore document found: true`);
+        console.log(`[DEBUG CLAIM] Document status: "${itemData.status || itemData.Status || 'N/A'}" (Enabled: ${itemData.enabled !== false && itemData.Enabled !== false})`);
+        console.log(`[DEBUG CLAIM] Redirect destination: "${itemData.destinationUrl || "N/A"}"`);
+      } else {
+        console.log(`[DEBUG CLAIM] Firestore document found: false`);
       }
 
       if (!itemData) {
