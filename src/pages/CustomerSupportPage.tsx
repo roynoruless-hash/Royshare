@@ -76,6 +76,7 @@ export default function CustomerSupportPage() {
   const [escalating, setEscalating] = useState(false);
   const [escalated, setEscalated] = useState(false);
   const [escalatedTicketId, setEscalatedTicketId] = useState("");
+  const [solved, setSolved] = useState(false);
 
   // Ticket reply input
   const [replyInput, setReplyInput] = useState("");
@@ -239,7 +240,8 @@ export default function CustomerSupportPage() {
       if (res.ok && data.reply) {
         setLiveMessages(prev => [...prev, { sender: "agent" as const, text: data.reply, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
       } else {
-        setLiveMessages(prev => [...prev, { sender: "agent" as const, text: "I apologize, I'm experiencing a minor issue retrieving your information right now. Please feel free to escalate this conversation to our senior admin team by clicking 'Escalate to Support Team' above.", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+        const errorMsg = data.error || "I apologize, I'm experiencing a minor issue retrieving your information right now. Please feel free to escalate this conversation to our senior admin team by clicking 'Escalate to Support Team' above.";
+        setLiveMessages(prev => [...prev, { sender: "agent" as const, text: errorMsg, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
       }
     } catch (err) {
       console.error(err);
@@ -597,16 +599,16 @@ export default function CustomerSupportPage() {
                   <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 drop-shadow-[0_0_15px_rgba(16,185,129,0.2)]">
                     <CheckCircle className="w-8 h-8" />
                   </div>
-                  <h4 className="text-lg font-bold text-emerald-400">Conversation Escalated!</h4>
-                  <p className="text-sm text-slate-300 max-w-xs leading-relaxed">
-                    Your full conversation transcript has been compiled and escalated. A support ticket has been created automatically:
-                  </p>
-                  <div className="bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 font-mono text-white text-sm">
-                    {escalatedTicketId}
+                  <h4 className="text-lg font-bold text-emerald-400">Request Received</h4>
+                  <div className="text-sm text-slate-300 max-w-md space-y-3 leading-relaxed">
+                    <p className="font-semibold text-emerald-400 text-base">✅ Your request has been received successfully.</p>
+                    <p className="font-semibold text-slate-100">
+                      Your Ticket ID: <span className="font-mono text-indigo-400 text-lg bg-slate-950 px-2 py-0.5 rounded border border-slate-800 ml-1">{escalatedTicketId}</span>
+                    </p>
+                    <p>Our support team is currently reviewing your issue.</p>
+                    <p>Please wait approximately 2 hours while we investigate and resolve it.</p>
+                    <p className="text-xs text-slate-400">You will automatically receive a reply here as soon as an update is available.</p>
                   </div>
-                  <p className="text-xs text-slate-500 max-w-xs leading-relaxed">
-                    Our senior administrators have been notified on Telegram and will reply in your ticket dashboard or via Telegram soon.
-                  </p>
                   <button
                     onClick={() => {
                       setActiveModal("none");
@@ -616,9 +618,34 @@ export default function CustomerSupportPage() {
                         { sender: "agent", text: "Hello! My name is Sarah from RoyShare Support. How can I assist you today?", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
                       ]);
                     }}
-                    className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition"
+                    className="mt-2 px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition"
                   >
                     Return to Support
+                  </button>
+                </div>
+              ) : solved ? (
+                /* Solved Success Screen */
+                <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 drop-shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                    <CheckCircle className="w-8 h-8" />
+                  </div>
+                  <h4 className="text-lg font-bold text-emerald-400">Issue Resolved!</h4>
+                  <p className="text-sm text-slate-300 max-w-xs leading-relaxed">
+                    🎉 Great! We're glad we could help you resolve your issue. If you need any further assistance, feel free to contact support again.
+                  </p>
+                  <p className="text-xs text-slate-500">Thank you for using RoyShare!</p>
+                  <button
+                    onClick={() => {
+                      setActiveModal("none");
+                      setSolved(false);
+                      // Reset conversation
+                      setLiveMessages([
+                        { sender: "agent", text: "Hello! My name is Sarah from RoyShare Support. How can I assist you today?", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+                      ]);
+                    }}
+                    className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition"
+                  >
+                    Close Support
                   </button>
                 </div>
               ) : (
@@ -652,9 +679,9 @@ export default function CustomerSupportPage() {
                     <div ref={liveChatEndRef} />
                   </div>
 
-                  {/* Escalation Button - Show when conversation has active exchanges */}
+                  {/* Escalation/Solved Buttons - Show when conversation has active exchanges */}
                   {liveMessages.length >= 3 && (
-                    <div className="px-4 py-2 bg-slate-950/40 border-t border-slate-800/60 flex justify-center">
+                    <div className="px-4 py-3 bg-slate-950/40 border-t border-slate-800/60 flex items-center justify-center gap-3">
                       <button
                         onClick={handleEscalate}
                         disabled={escalating}
@@ -663,14 +690,20 @@ export default function CustomerSupportPage() {
                         {escalating ? (
                           <>
                             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Escalating Chat...</span>
+                            <span>Creating Ticket...</span>
                           </>
                         ) : (
                           <>
-                            <FileText className="w-3.5 h-3.5" />
-                            <span>🎫 Escalate to Support Team</span>
+                            <span>🎫</span> Create Ticket
                           </>
                         )}
+                      </button>
+                      <button
+                        onClick={() => setSolved(true)}
+                        disabled={escalating}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50"
+                      >
+                        <span>✅</span> Solved
                       </button>
                     </div>
                   )}

@@ -200,14 +200,30 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (res.ok) {
         setTestConnectionStatus("✅ Connected");
-        fetchSupportSettings();
+        setSupportSettings((prev: any) => ({
+          ...prev,
+          connectionStatus: "✅ Connected",
+          lastResponseTime: data.durationMs ? `${data.durationMs}ms` : "N/A",
+          lastError: "None",
+          testedAt: new Date().toISOString()
+        }));
       } else {
         setTestConnectionStatus(`❌ Invalid API Key: ${data.error || "Connection failed"}`);
-        fetchSupportSettings();
+        setSupportSettings((prev: any) => ({
+          ...prev,
+          connectionStatus: "❌ Invalid API Key",
+          lastError: data.error || "Connection failed",
+          lastResponseTime: "-"
+        }));
       }
     } catch (err: any) {
       setTestConnectionStatus(`❌ Connection Error: ${err.message || "Failed to connect"}`);
-      fetchSupportSettings();
+      setSupportSettings((prev: any) => ({
+        ...prev,
+        connectionStatus: "❌ Connection Error",
+        lastError: err.message || "Failed to connect",
+        lastResponseTime: "-"
+      }));
     } finally {
       setTestConnectionLoading(false);
     }
@@ -232,6 +248,22 @@ export default function AdminDashboard() {
     scheduledAtTime: ''
   });
   const [isScheduling, setIsScheduling] = useState(false);
+
+  // AI message rewrite states
+  const [isImprovingWithAi, setIsImprovingWithAi] = useState(false);
+  const [aiOriginalText, setAiOriginalText] = useState("");
+  const [aiGeneratedText, setAiGeneratedText] = useState("");
+  const [showAiView, setShowAiView] = useState(false);
+  const [aiError, setAiError] = useState("");
+
+  // Broadcast send progress / stats states
+  const [sendStatus, setSendStatus] = useState<'idle' | 'preparing' | 'sending' | 'success' | 'failed'>('idle');
+  const [broadcastStats, setBroadcastStats] = useState<{ totalUsers: number, delivered: number, failed: number, skipped: number, timeTaken: string } | null>(null);
+
+  // Self test states
+  const [isSelfTesting, setIsSelfTesting] = useState(false);
+  const [selfTestResults, setSelfTestResults] = useState<{ apiWorking: boolean, deliveryWorking: boolean, usersLoaded: boolean, buttonsWorking: boolean, completedSuccessfully: boolean } | null>(null);
+  const [selfTestError, setSelfTestError] = useState("");
 
   const [securityLogs, setSecurityLogs] = useState<any[]>([]);
   const [securityStats, setSecurityStats] = useState<any>({});
@@ -696,12 +728,17 @@ export default function AdminDashboard() {
   };
 
   const sendBroadcast = async (status: string) => {
-    if (!broadcastForm.message && !broadcastForm.mediaUrl) {
+    if (status === 'Sent' && !broadcastForm.message && !broadcastForm.mediaUrl) {
       alert("Please provide a message or media content.");
       return;
     }
     
     setBroadcastsLoading(true);
+    setBroadcastStats(null);
+    if (status === 'Sent') {
+      setSendStatus('preparing');
+    }
+
     try {
       let scheduledAt = null;
       if (status === 'Scheduled' && broadcastForm.scheduledAtDate && broadcastForm.scheduledAtTime) {
@@ -720,27 +757,117 @@ export default function AdminDashboard() {
         scheduledAt
       };
       
+      if (status === 'Sent') {
+        // Show preparing state for 600ms for high quality feedback
+        await new Promise(r => setTimeout(r, 600));
+        setSendStatus('sending');
+      }
+
       const res = await fetch("/api/admin/broadcasts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
       
+      const data = await res.json();
       if (res.ok) {
-        alert("✅ Broadcast " + (status === 'Sent' ? "Sent" : "Scheduled") + " Successfully");
+        if (status === 'Sent') {
+          setSendStatus('success');
+          setBroadcastStats({
+            totalUsers: data.totalUsers,
+            delivered: data.delivered,
+            failed: data.failed,
+            skipped: data.skipped,
+            timeTaken: data.timeTaken
+          });
+
+          // Automatically run a self-test after live broadcast is done
+          setTimeout(() => {
+            runSelfTest();
+          }, 1500);
+        } else {
+          alert("✅ Broadcast Scheduled Successfully");
+        }
+
         setBroadcastForm({
           type: 'text', message: '', caption: '', mediaUrl: '', buttonText: '', buttonLink: '', targetAudience: '👥 All Users', scheduledAtDate: '', scheduledAtTime: ''
         });
         setIsScheduling(false);
         if (broadcastTab === '📊 Broadcast History') fetchBroadcasts();
       } else {
-        alert("Failed to send broadcast");
+        if (status === 'Sent') {
+          setSendStatus('failed');
+        } else {
+          alert("Failed to schedule broadcast: " + (data.error || "Unknown error"));
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Error sending broadcast");
+      if (status === 'Sent') {
+        setSendStatus('failed');
+      } else {
+        alert("Error sending broadcast: " + err.message);
+      }
     } finally {
       setBroadcastsLoading(false);
+    }
+  };
+
+  const runSelfTest = async () => {
+    setIsSelfTesting(true);
+    setSelfTestError("");
+    setSelfTestResults(null);
+    try {
+      const res = await fetch("/api/admin/broadcasts/self-test", {
+        method: "POST"
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSelfTestResults(data);
+      } else {
+        setSelfTestError(data.error || "Self-test failed.");
+      }
+    } catch (err: any) {
+      console.error("Self-test error:", err);
+      setSelfTestError(err.message || "Network error running self-test.");
+    } finally {
+      setIsSelfTesting(false);
+    }
+  };
+
+  const improveWithAi = async () => {
+    const originalText = broadcastForm.type === 'text' || broadcastTab === '🎯 Targeted Broadcast' 
+      ? broadcastForm.message 
+      : broadcastForm.caption;
+
+    if (!originalText || originalText.trim() === "") {
+      alert("Please enter some text before clicking 'Improve with AI'.");
+      return;
+    }
+
+    setIsImprovingWithAi(true);
+    setAiOriginalText(originalText);
+    setAiGeneratedText("");
+    setAiError("");
+    setShowAiView(true);
+
+    try {
+      const res = await fetch("/api/admin/broadcasts/improve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: originalText })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAiGeneratedText(data.improvedText);
+      } else {
+        setAiError(data.error || "AI Generation failed.");
+      }
+    } catch (err: any) {
+      console.error("AI Improvement error:", err);
+      setAiError(err.message || "Network error. Please check Gemini settings.");
+    } finally {
+      setIsImprovingWithAi(false);
     }
   };
 
@@ -974,6 +1101,7 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
+    let supportInterval: any = null;
     if (activeTab === 'Overview') {
       fetchDashboardData();
     } else if (activeTab === '🔗 Smart URL Shortener') {
@@ -984,6 +1112,7 @@ export default function AdminDashboard() {
       fetchWithdrawals();
     } else if (activeTab === '🎫 Support') {
       fetchTickets();
+      supportInterval = setInterval(fetchTickets, 5000);
     } else if (activeTab === '📢 Announcements') {
       fetchAnnouncements();
     } else if (activeTab === '💰 Rewards') {
@@ -1022,6 +1151,12 @@ export default function AdminDashboard() {
     } else if (activeTab === '📥 Backup & Restore') {
       fetchBackups();
     }
+
+    return () => {
+      if (supportInterval) {
+        clearInterval(supportInterval);
+      }
+    };
   }, [activeTab, taskView, bonusView, adView, analyticsView, broadcastTab]);
 
   const handleActionSubmit = async () => {
@@ -1428,7 +1563,7 @@ export default function AdminDashboard() {
                   >
                     <option value="all">🌐 All Statuses</option>
                     <option value="open">🟡 Open</option>
-                    <option value="in_progress">🔵 In Progress</option>
+                    <option value="in_progress">🔵 Pending</option>
                     <option value="replied">💬 Replied</option>
                     <option value="resolved">🟢 Resolved</option>
                     <option value="closed">🔴 Closed</option>
@@ -1449,8 +1584,8 @@ export default function AdminDashboard() {
                   <p className="text-2xl font-bold text-yellow-400">{tickets.filter(t => t.status === 'open').length}</p>
                 </div>
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
-                  <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">🔵 In Progress</h3>
-                  <p className="text-2xl font-bold text-blue-400">{tickets.filter(t => t.status === 'in_progress').length}</p>
+                  <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">🔵 Pending</h3>
+                  <p className="text-2xl font-bold text-blue-400">{tickets.filter(t => t.status === 'in_progress' || t.status === 'pending').length}</p>
                 </div>
                 <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
                   <h3 className="text-xs font-semibold text-purple-500/80 uppercase tracking-wider mb-1">💬 Replied</h3>
@@ -3315,6 +3450,23 @@ export default function AdminDashboard() {
                             placeholder="Enter your message here..."
                             className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white h-32 resize-none focus:outline-none focus:border-indigo-500"
                           />
+                          <button 
+                            type="button"
+                            onClick={improveWithAi}
+                            disabled={isImprovingWithAi || !broadcastForm.message}
+                            className="mt-2 flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 text-white font-semibold text-xs rounded-lg shadow-md transition-all duration-200"
+                          >
+                            {isImprovingWithAi ? (
+                              <>
+                                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                Improving with AI...
+                              </>
+                            ) : (
+                              <>
+                                <span>✨</span> Improve with AI
+                              </>
+                            )}
+                          </button>
                         </div>
                       ) : (
                         <>
@@ -3338,8 +3490,94 @@ export default function AdminDashboard() {
                               placeholder="Media caption..."
                               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white h-24 resize-none focus:outline-none focus:border-indigo-500"
                             />
+                            <button 
+                              type="button"
+                              onClick={improveWithAi}
+                              disabled={isImprovingWithAi || !broadcastForm.caption}
+                              className="mt-2 flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 text-white font-semibold text-xs rounded-lg shadow-md transition-all duration-200"
+                            >
+                              {isImprovingWithAi ? (
+                                <>
+                                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                  Improving with AI...
+                                </>
+                              ) : (
+                                <>
+                                  <span>✨</span> Improve with AI
+                                </>
+                              )}
+                            </button>
                           </div>
                         </>
+                      )}
+
+                      {/* AI Composer View */}
+                      {showAiView && (
+                        <div className="mt-4 p-4 bg-slate-950 rounded-xl border border-violet-500/30 space-y-4">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                            <h4 className="text-xs font-bold text-violet-400 flex items-center gap-1.5">
+                              <span>✨</span> AI Broadcast Composer
+                            </h4>
+                            {isImprovingWithAi && <span className="text-[10px] text-violet-300 animate-pulse">AI is crafting message...</span>}
+                          </div>
+
+                          {aiError && (
+                            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400">
+                              ⚠️ {aiError}
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <span className="text-[10px] font-bold text-slate-400 block mb-1 uppercase tracking-wider">Original Message</span>
+                              <div className="p-3 bg-slate-900 rounded-lg text-xs text-slate-300 min-h-[80px] border border-slate-800/50 whitespace-pre-wrap">
+                                {aiOriginalText}
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-bold text-violet-400 block mb-1 uppercase tracking-wider">AI Generated Message</span>
+                              <div className="p-3 bg-slate-900 rounded-lg text-xs text-white min-h-[80px] border border-violet-500/20 whitespace-pre-wrap relative">
+                                {isImprovingWithAi ? (
+                                  <div className="absolute inset-0 flex items-center justify-center bg-slate-900/80 rounded-lg">
+                                    <span className="w-6 h-6 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></span>
+                                  </div>
+                                ) : (
+                                  aiGeneratedText || <span className="text-slate-500 italic">Writing version...</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-900">
+                            <button 
+                              onClick={() => setShowAiView(false)} 
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs rounded-lg transition-all"
+                            >
+                              ❌ Cancel
+                            </button>
+                            <button 
+                              onClick={improveWithAi} 
+                              disabled={isImprovingWithAi} 
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-violet-400 font-medium text-xs rounded-lg border border-violet-500/30 transition-all flex items-center gap-1"
+                            >
+                              <span>🔄</span> Regenerate
+                            </button>
+                            <button 
+                              onClick={() => {
+                                if (broadcastForm.type === 'text' || broadcastTab === '🎯 Targeted Broadcast') {
+                                  setBroadcastForm({...broadcastForm, message: aiGeneratedText});
+                                } else {
+                                  setBroadcastForm({...broadcastForm, caption: aiGeneratedText});
+                                }
+                                setShowAiView(false);
+                              }} 
+                              disabled={isImprovingWithAi || !aiGeneratedText} 
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg shadow-md transition-all"
+                            >
+                              ✅ Use This Version
+                            </button>
+                          </div>
+                        </div>
                       )}
 
                       <div className="grid grid-cols-2 gap-4">
@@ -3393,6 +3631,65 @@ export default function AdminDashboard() {
                         )}
                       </div>
                     </div>
+
+                    {/* Integrated Self-Test Panel inside left column */}
+                    <div className="mt-6 bg-slate-950 border border-slate-800 rounded-2xl p-5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                        <div>
+                          <h4 className="font-bold text-white text-sm flex items-center gap-1.5 font-sans">
+                            <span>🧪</span> Automated System Self-Test
+                          </h4>
+                          <p className="text-xs text-slate-400">Test API, Telegram delivery to admin, database users, and inline buttons.</p>
+                        </div>
+                        <button 
+                          onClick={runSelfTest}
+                          disabled={isSelfTesting}
+                          className="self-start sm:self-center px-4 py-2 bg-indigo-600/80 hover:bg-indigo-600 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all duration-200 flex items-center gap-1.5"
+                        >
+                          {isSelfTesting ? (
+                            <>
+                              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                              Running...
+                            </>
+                          ) : (
+                            "Run Self-Test"
+                          )}
+                        </button>
+                      </div>
+
+                      {selfTestError && (
+                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 mb-4 whitespace-pre-wrap font-sans">
+                          ⚠️ {selfTestError}
+                        </div>
+                      )}
+
+                      {selfTestResults && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs bg-slate-900/50 p-4 rounded-xl border border-slate-800 font-sans">
+                          <div className="flex items-center gap-2">
+                            <span>{selfTestResults.apiWorking ? "✅" : "❌"}</span>
+                            <span className="text-slate-300 font-medium">Broadcast API Working</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span>{selfTestResults.deliveryWorking ? "✅" : "❌"}</span>
+                            <span className="text-slate-300 font-medium">Telegram Delivery Working</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span>{selfTestResults.usersLoaded ? "✅" : "❌"}</span>
+                            <span className="text-slate-300 font-medium">Database Users Loaded</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span>{selfTestResults.buttonsWorking ? "✅" : "❌"}</span>
+                            <span className="text-slate-300 font-medium font-sans">Inline Buttons Working</span>
+                          </div>
+                          <div className="col-span-1 md:col-span-2 border-t border-slate-800/60 pt-2 mt-1 flex items-center justify-between">
+                            <span className="text-slate-400 font-medium">Result:</span>
+                            <span className={`font-bold ${selfTestResults.completedSuccessfully ? "text-emerald-400" : "text-red-400"}`}>
+                              {selfTestResults.completedSuccessfully ? "All Tests Passed Successfully" : "Some Tests Failed"}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Preview Side */}
@@ -3400,8 +3697,8 @@ export default function AdminDashboard() {
                     <h3 className="text-sm font-bold text-slate-400 mb-3 uppercase tracking-wider">👁 Preview Broadcast</h3>
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden relative shadow-2xl">
                       <div className="bg-slate-800 px-4 py-2 text-xs font-bold text-center border-b border-slate-700">Message Preview</div>
-                      <div className="p-4 bg-slate-950/50 min-h-[200px]">
-                        {(broadcastForm.message || broadcastForm.caption || broadcastForm.mediaUrl) ? (
+                      <div className="p-4 bg-slate-950/50 min-h-[220px]">
+                        {((broadcastForm.message || broadcastForm.caption || broadcastForm.mediaUrl || showAiView) ? (
                           <div className="space-y-3">
                             {broadcastForm.mediaUrl && (
                               <div className="w-full h-32 bg-slate-800 rounded-lg border border-slate-700 flex items-center justify-center overflow-hidden">
@@ -3410,23 +3707,107 @@ export default function AdminDashboard() {
                                 {broadcastForm.type === 'document' && <div className="text-2xl">📄</div>}
                               </div>
                             )}
-                            {(broadcastForm.message || broadcastForm.caption) && (
-                              <p className="text-sm text-slate-200 whitespace-pre-wrap">{broadcastForm.type === 'text' || broadcastTab === '🎯 Targeted Broadcast' ? broadcastForm.message : broadcastForm.caption}</p>
+                            {(broadcastForm.message || broadcastForm.caption || showAiView) && (
+                              <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">
+                                {showAiView 
+                                  ? (isImprovingWithAi 
+                                      ? (aiGeneratedText || "✨ AI is crafting message...") 
+                                      : (aiGeneratedText || broadcastForm.message || broadcastForm.caption))
+                                  : (broadcastForm.type === 'text' || broadcastTab === '🎯 Targeted Broadcast' ? broadcastForm.message : broadcastForm.caption)}
+                              </p>
+                            )}
+                            {isImprovingWithAi && (
+                              <div className="flex items-center gap-2 text-[10px] text-violet-400 font-medium animate-pulse">
+                                <span className="w-2 h-2 rounded-full bg-violet-500 animate-ping"></span>
+                                <span>AI is rewriting...</span>
+                              </div>
                             )}
                             {broadcastForm.buttonText && (
-                              <div className="w-full text-center py-2 bg-indigo-600/20 text-indigo-400 rounded-lg text-sm font-bold border border-indigo-500/20">
+                              <div className="w-full text-center py-2 bg-indigo-600/20 text-indigo-400 rounded-lg text-sm font-bold border border-indigo-500/20 hover:bg-indigo-600/30 transition-all duration-200">
                                 {broadcastForm.buttonText}
                               </div>
                             )}
                           </div>
                         ) : (
-                          <div className="h-full flex items-center justify-center text-slate-600 text-sm italic">
+                          <div className="h-full flex flex-col items-center justify-center py-12 text-slate-600 text-sm italic">
                             Empty preview
                           </div>
-                        )}
+                        ))}
                       </div>
                     </div>
                   </div>
+
+                  {/* Broadcast Send Progress Overlay Modal */}
+                  {sendStatus !== 'idle' && (
+                    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+                      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-6">
+                        <div className="text-center space-y-3">
+                          {sendStatus === 'preparing' && (
+                            <>
+                              <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                              <h3 className="text-xl font-bold text-white">Preparing Broadcast...</h3>
+                              <p className="text-sm text-slate-400">Filtering database audience and establishing connection...</p>
+                            </>
+                          )}
+                          {sendStatus === 'sending' && (
+                            <>
+                              <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                              <h3 className="text-xl font-bold text-white">Sending...</h3>
+                              <p className="text-sm text-slate-400">Delivering messages to Telegram users with rate limiting...</p>
+                            </>
+                          )}
+                          {sendStatus === 'success' && (
+                            <>
+                              <div className="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center text-2xl mx-auto border border-emerald-500/30">✅</div>
+                              <h3 className="text-xl font-bold text-emerald-400 font-sans">Success</h3>
+                              <p className="text-sm text-slate-400 font-medium">The broadcast has been completed and logged.</p>
+                            </>
+                          )}
+                          {sendStatus === 'failed' && (
+                            <>
+                              <div className="w-12 h-12 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center text-2xl mx-auto border border-red-500/30">❌</div>
+                              <h3 className="text-xl font-bold text-red-400 font-sans">Broadcast Failed</h3>
+                              <p className="text-sm text-slate-400">An error occurred during delivery. Please check logs.</p>
+                            </>
+                          )}
+                        </div>
+
+                        {broadcastStats && (
+                          <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3 text-sm font-sans">
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Total Users</span>
+                              <span className="font-semibold text-white">{broadcastStats.totalUsers}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-emerald-400">Delivered</span>
+                              <span className="font-semibold text-emerald-400">{broadcastStats.delivered}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-red-400">Failed</span>
+                              <span className="font-semibold text-red-400">{broadcastStats.failed}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Skipped</span>
+                              <span className="font-semibold text-white">{broadcastStats.skipped}</span>
+                            </div>
+                            <div className="border-t border-slate-800/80 pt-2 flex justify-between text-xs uppercase tracking-wider font-semibold">
+                              <span className="text-slate-400">Time Taken</span>
+                              <span className="text-white">{broadcastStats.timeTaken}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="pt-2">
+                          <button 
+                            onClick={() => setSendStatus('idle')} 
+                            className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition-all duration-200"
+                          >
+                            Close Status Panel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -4972,7 +5353,7 @@ export default function AdminDashboard() {
                         selectedTicket.status === 'resolved' ? 'text-emerald-400' :
                         'text-red-400'
                       }`}>{selectedTicket.status === 'open' ? '🟡 Open' : 
-                          selectedTicket.status === 'in_progress' ? '🔵 In Progress' : 
+                          selectedTicket.status === 'in_progress' ? '🔵 Pending' : 
                           selectedTicket.status === 'replied' ? '💬 Replied' : 
                           selectedTicket.status === 'resolved' ? '🟢 Resolved' : '🔴 Closed'}
                       </p>
@@ -4999,6 +5380,30 @@ export default function AdminDashboard() {
                       <p className="font-medium text-white text-xs">{new Date(selectedTicket.createdAt).toLocaleDateString()}</p>
                     </div>
                   </div>
+
+                  {/* AI Copilot Diagnostics */}
+                  {selectedTicket.aiSummary && (
+                    <div className="bg-gradient-to-r from-violet-950/40 to-indigo-950/40 border border-violet-800/40 rounded-xl p-3.5 space-y-2.5 shadow-md">
+                      <h4 className="text-xs font-bold text-violet-300 uppercase tracking-wider flex items-center gap-1.5 border-b border-violet-800/20 pb-1.5">
+                        <span>🧠 AI Support Copilot Diagnostics</span>
+                      </h4>
+                      <div className="space-y-1.5">
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                          <strong className="text-violet-200">Summary:</strong> {selectedTicket.aiSummary}
+                        </p>
+                        {selectedTicket.aiSuggestedCause && (
+                          <p className="text-xs text-slate-300 leading-relaxed">
+                            <strong className="text-violet-200">Suggested Cause:</strong> {selectedTicket.aiSuggestedCause}
+                          </p>
+                        )}
+                        {selectedTicket.aiSuggestedSolution && (
+                          <p className="text-xs text-slate-300 leading-relaxed">
+                            <strong className="text-violet-200">Suggested Solution:</strong> {selectedTicket.aiSuggestedSolution}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Attachment Screenshot if present */}
                   {selectedTicket.screenshotUrl && (
@@ -5028,7 +5433,7 @@ export default function AdminDashboard() {
                         <span className="text-[11px] font-bold text-indigo-400">👤 User (Original Issue)</span>
                         <span className="text-[10px] text-slate-500">{new Date(selectedTicket.createdAt).toLocaleString()}</span>
                       </div>
-                      <p className="text-xs text-slate-300 whitespace-pre-wrap">{selectedTicket.message}</p>
+                      <p className="text-xs text-slate-300 whitespace-pre-wrap">{selectedTicket.message || selectedTicket.description}</p>
                     </div>
 
                     {/* Sequential message replies */}
@@ -5054,11 +5459,11 @@ export default function AdminDashboard() {
                       💬 Reply
                     </button>
                     
-                    {/* Status transition: In Progress */}
+                    {/* Status transition: Pending */}
                     {selectedTicket.status !== 'in_progress' && (
                       <button 
                         onClick={() => {
-                          if (confirm("Change status to In Progress?")) {
+                          if (confirm("Change status to Pending?")) {
                             setModalAction('change_status_ticket');
                             setModalInput('in_progress');
                             setTimeout(() => {
@@ -5069,7 +5474,7 @@ export default function AdminDashboard() {
                         }}
                         className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 rounded-lg text-xs transition"
                       >
-                        🔵 Progress
+                        🔵 Pending
                       </button>
                     )}
 

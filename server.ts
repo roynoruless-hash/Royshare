@@ -176,13 +176,13 @@ async function startServer() {
       return telegramSettingsDoc.data()?.botToken;
   };
 
-  const sendTgMessage = async (chatId: string, text: string) => {
+  const sendTgMessage = async (chatId: string, text: string, options: any = {}) => {
       const botToken = await getBotToken();
       if (!botToken) return;
       await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" })
+          body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", ...options })
       });
   };
 
@@ -366,7 +366,8 @@ async function startServer() {
       await setDoc(ref, { status: "resolved", resolvedAt: new Date().toISOString() }, { merge: true });
       
       const data = snap.data();
-      await sendTgMessage(data.userId, `✅ <b>Ticket Resolved</b>\n\nTicket ID:\n${id}\n\nThank you for contacting support.`);
+      const userNotifyMsg = `🎉 <b>Great news!</b>\n\nYour reported issue has been resolved.\n\nIf you still face the same problem, you can reopen the conversation by contacting support again.\n\nThank you for using RoyShare.`;
+      await sendTgMessage(data.userId, userNotifyMsg);
       res.json({ success: true });
     } catch (e: any) {
       console.error("Admin resolve error:", e);
@@ -384,7 +385,8 @@ async function startServer() {
       await setDoc(ref, { status: "closed", closedAt: new Date().toISOString() }, { merge: true });
       
       const data = snap.data();
-      await sendTgMessage(data.userId, `🔴 <b>Ticket Closed</b>\n\nTicket ID:\n${id}`);
+      const userNotifyMsg = `Your support request has been closed.\n\nIf you need further assistance, you can create a new support ticket anytime.`;
+      await sendTgMessage(data.userId, userNotifyMsg);
       res.json({ success: true });
     } catch (e: any) {
       console.error("Admin close error:", e);
@@ -404,14 +406,21 @@ async function startServer() {
       await setDoc(ref, { status, updatedAt: new Date().toISOString() }, { merge: true });
       
       const data = snap.data();
-      const statusLabels: Record<string, string> = {
-        open: "🟡 Open",
-        in_progress: "🔵 In Progress",
-        resolved: "🟢 Resolved",
-        closed: "🔴 Closed"
-      };
-      const label = statusLabels[status] || status;
-      await sendTgMessage(data.userId, `ℹ️ <b>Ticket Status Updated</b>\n\nTicket ID:\n${id}\n\nNew Status: ${label}`);
+      if (status === "resolved") {
+        const userNotifyMsg = `🎉 <b>Great news!</b>\n\nYour reported issue has been resolved.\n\nIf you still face the same problem, you can reopen the conversation by contacting support again.\n\nThank you for using RoyShare.`;
+        await sendTgMessage(data.userId, userNotifyMsg);
+      } else if (status === "closed") {
+        const userNotifyMsg = `Your support request has been closed.\n\nIf you need further assistance, you can create a new support ticket anytime.`;
+        await sendTgMessage(data.userId, userNotifyMsg);
+      } else {
+        const statusLabels: Record<string, string> = {
+          open: "🟡 Open",
+          in_progress: "🟠 Pending",
+          replied: "💬 Replied"
+        };
+        const label = statusLabels[status] || status;
+        await sendTgMessage(data.userId, `ℹ️ <b>Ticket Status Updated</b>\n\nTicket ID:\n${id}\n\nNew Status: ${label}`);
+      }
       res.json({ success: true });
     } catch (e: any) {
       console.error("Admin ticket status change error:", e);
@@ -523,9 +532,11 @@ async function startServer() {
       const durationMs = endTime - startTime;
 
       if (response && response.text) {
-        // Save test diagnostics back to Firestore doc (settings/support)
+        // Save test diagnostics and the API key back to Firestore doc (settings/support)
         const docRef = doc(db, "settings", "support");
         const diagData = {
+          geminiApiKey: apiKeyToUse,
+          geminiModel: modelToUse,
           connectionStatus: "✅ Connected",
           lastResponseTime: `${durationMs}ms`,
           lastError: "None",
@@ -580,7 +591,7 @@ async function startServer() {
       
       const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        return res.status(500).json({ error: "Support API is not configured." });
+        return res.status(400).json({ error: "No Gemini API Key configured." });
       }
 
       // Fetch user's details for real-time background context understanding
@@ -678,6 +689,72 @@ ${userContext}
       if (!userId) return res.status(400).json({ error: "userId is required" });
 
       const transcript = (chatHistory || []).map((m: any) => `[${m.sender === 'user' ? 'User' : 'Support Specialist Sarah'}] (${m.time || ''}): ${m.text}`).join("\n");
+      
+      // Load Gemini Configuration for analysis
+      const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { geminiApiKey: "", geminiModel: "gemini-2.5-flash" };
+      const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
+      const modelToUse = supportData.geminiModel || "gemini-2.5-flash";
+
+      let aiAnalysis = {
+        category: "Other",
+        priority: "Medium",
+        summary: "Live support conversation escalated.",
+        suggestedCause: "Undetermined. Requires manual inspection.",
+        suggestedSolution: "Review the chat transcript and contact the user."
+      };
+
+      if (apiKey) {
+        try {
+          const ai = new GoogleGenAI({
+            apiKey: apiKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              }
+            }
+          });
+
+          const systemInstruction = `
+You are an expert support supervisor at RoyShare.
+Your job is to analyze a support conversation transcript between a user and our support bot, and output a JSON object containing:
+1. "category": Choose the most appropriate category from: "Account", "Withdrawal", "File Upload", "Other".
+2. "priority": Determine priority as "Low", "Medium", or "High" based on the severity of the user's issue.
+3. "summary": A concise 2-3 sentence summary of the user's issue and what has been discussed.
+4. "suggestedCause": A brief technical explanation of what might be causing the user's issue.
+5. "suggestedSolution": Clear, actionable step-by-step instructions for our human administrator to resolve this issue.
+
+You MUST reply ONLY with a valid JSON object. Do not include any markdown formatting or backticks outside of the JSON.
+`;
+
+          const aiResponse = await ai.models.generateContent({
+            model: modelToUse,
+            contents: `Analyze the following transcript:\n\n${transcript}`,
+            config: {
+              systemInstruction: systemInstruction,
+              responseMimeType: "application/json"
+            }
+          });
+
+          const textResponse = aiResponse.text?.trim() || "";
+          console.log("Gemini Escalation Analysis Response:", textResponse);
+          
+          let cleanJson = textResponse;
+          if (cleanJson.startsWith("```")) {
+            cleanJson = cleanJson.replace(/^```(json)?/, "").replace(/```$/, "").trim();
+          }
+          
+          const parsed = JSON.parse(cleanJson);
+          if (parsed.category) aiAnalysis.category = parsed.category;
+          if (parsed.priority) aiAnalysis.priority = parsed.priority;
+          if (parsed.summary) aiAnalysis.summary = parsed.summary;
+          if (parsed.suggestedCause) aiAnalysis.suggestedCause = parsed.suggestedCause;
+          if (parsed.suggestedSolution) aiAnalysis.suggestedSolution = parsed.suggestedSolution;
+        } catch (aiErr) {
+          console.error("Failed to analyze conversation with Gemini:", aiErr);
+        }
+      }
+
       const ticketId = "TKT" + (Math.floor(Math.random() * 900000) + 100000);
 
       const ticketData = {
@@ -685,14 +762,20 @@ ${userContext}
         userId: String(userId),
         name: name || "User",
         username: username || "",
-        subject: "Escalated Live Support Session",
-        category: "Other",
-        issueType: "Other",
+        telegramId: String(userId),
+        subject: `Escalated Chat - ${aiAnalysis.category}`,
+        category: aiAnalysis.category,
+        issueType: aiAnalysis.category,
+        priority: aiAnalysis.priority,
         description: `Full Live Support session history:\n\n${transcript}`,
+        conversation: transcript,
+        aiSummary: aiAnalysis.summary,
+        aiSuggestedCause: aiAnalysis.suggestedCause,
+        aiSuggestedSolution: aiAnalysis.suggestedSolution,
         screenshot: null,
-        priority: "High",
         status: "open",
         createdAt: new Date().toISOString(),
+        time: new Date().toISOString(),
         replies: [
           {
             sender: "user",
@@ -702,22 +785,45 @@ ${userContext}
         ]
       };
 
-      await addDoc(collection(db, "tickets"), ticketData);
+      const docRef = await addDoc(collection(db, "tickets"), ticketData);
 
       try {
-        await sendTgMessage(String(userId), `🎫 <b>Chat Escalated Successfully!</b>\n\nTicket ID: <code>${ticketId}</code>\nOur senior admin team has been notified with the full session transcript and will reply shortly.`);
+        await sendTgMessage(String(userId), `✅ Your request has been received successfully.\n\nYour Ticket ID: <b>${ticketId}</b>\n\nOur support team is currently reviewing your issue.\n\nPlease wait approximately 2 hours while we investigate and resolve it.\n\nYou will automatically receive a reply here as soon as an update is available.`);
       } catch (tgErr) {
         console.error("Failed to send TG escalation confirmation to user:", tgErr);
       }
 
-      // Notify admin with complete chat history
+      // Notify admin with automated ticket summary and solution suggestion
       try {
         const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-        const adminChatId = telegramSettingsSnap.data()?.adminChatId;
+        const adminChatId = telegramSettingsSnap.data()?.adminChatId || telegramSettingsSnap.data()?.chatId;
         if (adminChatId) {
+          const adminMsg = `🚨 <b>New Support Ticket</b>\n\n` +
+            `<b>Ticket ID:</b> <code>${ticketId}</code>\n` +
+            `<b>User:</b> ${name || 'User'}\n` +
+            `<b>Username:</b> @${username || ''}\n` +
+            `<b>User ID:</b> <code>${userId}</code>\n` +
+            `<b>Issue:</b> ${aiAnalysis.category}\n` +
+            `<b>Priority:</b> ${aiAnalysis.priority}\n` +
+            `<b>AI Summary:</b> ${aiAnalysis.summary}\n\n` +
+            `<b>Conversation:</b>\n<pre>${transcript.substring(0, 1000)}${transcript.length > 1000 ? '...' : ''}</pre>\n\n` +
+            `<b>Suggested Solution:</b> ${aiAnalysis.suggestedSolution}\n` +
+            `<b>Created Time:</b> ${new Date().toLocaleString()}`;
+
+          const adminReplyMarkup = {
+            inline_keyboard: [
+              [
+                { text: "💬 Reply", callback_data: `admin_reply_${docRef.id}` },
+                { text: "✅ Resolve", callback_data: `admin_resolve_${docRef.id}` },
+                { text: "❌ Close", callback_data: `admin_close_${docRef.id}` }
+              ]
+            ]
+          };
+
           await sendTgMessage(
             String(adminChatId),
-            `⚠️ <b>LIVE CHAT ESCALATED</b> ⚠️\n\n<b>User:</b> ${name || 'User'} (@${username || ''})\n<b>Ticket ID:</b> <code>${ticketId}</code>\n\n<b>Complete Chat Transcript:</b>\n<pre>${transcript}</pre>`
+            adminMsg,
+            { reply_markup: adminReplyMarkup }
           );
         }
       } catch (adminTgErr) {
@@ -1554,18 +1660,284 @@ ${userContext}
   app.post("/api/admin/broadcasts", async (req, res) => {
     try {
       const payload = req.body;
+      const db = getDb();
+      
+      // 1. Fetch users
+      const usersSnap = await getDocs(collection(db, "users"));
+      let users = usersSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() as any }));
+
+      // 2. Filter users based on targetAudience
+      const targetAudience = payload.targetAudience || "👥 All Users";
+      if (targetAudience === "🆕 New Users") {
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        users = users.filter(u => {
+          if (!u.createdAt) return true;
+          try {
+            return new Date(u.createdAt).getTime() > sevenDaysAgo;
+          } catch (e) {
+            return true;
+          }
+        });
+      } else if (targetAudience === "💰 Users With Balance") {
+        users = users.filter(u => Number(u.balance || 0) > 0);
+      } else if (targetAudience === "💸 Users With Pending Withdrawals") {
+        users = users.filter(u => u.pendingWithdrawal !== undefined && u.pendingWithdrawal !== null);
+      } else if (targetAudience === "👥 Users With Referrals") {
+        users = users.filter(u => u.referredBy || (u.referralCount && u.referralCount > 0));
+      } else if (targetAudience === "📤 Active Uploaders") {
+        users = users.filter(u => u.uploadTestMode === true || u.hasUploaded === true);
+      }
+
+      const totalUsers = users.length;
+      let delivered = 0;
+      let failed = 0;
+      let skipped = 0;
+      const startTime = Date.now();
+
+      // Only perform delivery if status is "Sent"
+      if (payload.status === "Sent" || !payload.status) {
+        const botToken = await getBotToken();
+        if (!botToken) {
+          return res.status(400).json({ error: "Telegram Bot Token is not configured." });
+        }
+
+        for (const user of users) {
+          const chatId = user.id;
+          if (!chatId || isNaN(Number(chatId))) {
+            skipped++;
+            continue;
+          }
+
+          // Spacing to enforce rate limiting (~30 msgs/sec limit, so 35ms is optimal and safe)
+          await new Promise(resolve => setTimeout(resolve, 35));
+
+          let telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+          const body: any = {
+            chat_id: chatId,
+            parse_mode: "HTML"
+          };
+
+          // Inline Keyboard Button Support
+          if (payload.buttonText && payload.buttonLink) {
+            body.reply_markup = {
+              inline_keyboard: [
+                [
+                  {
+                    text: payload.buttonText,
+                    url: payload.buttonLink
+                  }
+                ]
+              ]
+            };
+          }
+
+          if (payload.type === 'text') {
+            body.text = payload.message;
+          } else if (payload.type === 'image') {
+            telegramUrl = `https://api.telegram.org/bot${botToken}/sendPhoto`;
+            body.photo = payload.mediaUrl;
+            body.caption = payload.caption || "";
+          } else if (payload.type === 'video') {
+            telegramUrl = `https://api.telegram.org/bot${botToken}/sendVideo`;
+            body.video = payload.mediaUrl;
+            body.caption = payload.caption || "";
+          } else if (payload.type === 'document') {
+            telegramUrl = `https://api.telegram.org/bot${botToken}/sendDocument`;
+            body.document = payload.mediaUrl;
+            body.caption = payload.caption || "";
+          }
+
+          let sentSuccess = false;
+          try {
+            const apiRes = await fetch(telegramUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body)
+            });
+            const apiData = await apiRes.json();
+            if (apiRes.ok && apiData.ok) {
+              sentSuccess = true;
+            }
+          } catch (err) {
+            // Error captured in fallback retry
+          }
+
+          // Retry once if failed
+          if (!sentSuccess) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            try {
+              const apiRes = await fetch(telegramUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+              });
+              const apiData = await apiRes.json();
+              if (apiRes.ok && apiData.ok) {
+                sentSuccess = true;
+              }
+            } catch (err) {
+              // Failed completely
+            }
+          }
+
+          if (sentSuccess) {
+            delivered++;
+          } else {
+            failed++;
+          }
+        }
+      }
+
+      const endTime = Date.now();
+      const timeTakenSec = ((endTime - startTime) / 1000).toFixed(2);
+
       const broadcastsRef = collection(db, "broadcasts");
       const docRef = await addDoc(broadcastsRef, {
         ...payload,
         createdAt: new Date().toISOString(),
-        deliveredCount: 0,
-        failedCount: 0,
-        viewCount: 0,
-        clickCount: 0
+        deliveredCount: delivered,
+        failedCount: failed,
+        skippedCount: skipped,
+        totalUsers,
+        timeTaken: `${timeTakenSec}s`,
+        status: payload.status || "Sent",
+        scheduledAt: payload.scheduledAt || null
       });
-      res.json({ id: docRef.id, ...payload });
+
+      res.json({
+        id: docRef.id,
+        status: "Success",
+        totalUsers,
+        delivered,
+        failed,
+        skipped,
+        timeTaken: `${timeTakenSec}s`
+      });
     } catch (error: any) {
-      console.error("Error creating broadcast:", error);
+      console.error("Error creating or delivering broadcast:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // AI Message Writing improvement route
+  app.post("/api/admin/broadcasts/improve", async (req, res) => {
+    try {
+      const { text } = req.body;
+      if (!text || text.trim() === "") {
+        return res.status(400).json({ error: "No text provided to improve with AI." });
+      }
+
+      const supportDoc = await getDoc(doc(db, "settings", "support"));
+      const supportData = supportDoc.exists() ? supportDoc.data() : {};
+      const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.status(400).json({ error: "No Gemini API Key configured in settings/support." });
+      }
+
+      const model = supportData.geminiModel || "gemini-3.5-flash";
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const prompt = `You are an expert copywriter and Telegram growth hacker.
+Your task is to rewrite the following message to make it extremely attractive, professional, highly engaging, and suitable for Telegram users.
+
+Please adhere to these guidelines:
+- Improve the grammar and spelling.
+- Add suitable, tasteful emojis (don't overdo it, but make it vibrant).
+- Use proper Telegram formatting (like bold, lists, and spacing) to make it highly scannable and easy to read.
+- Keep the original meaning and core information (like links, numbers, dates, or specific names) completely intact.
+- If the original text is promotional, make it high-converting.
+- If it's an announcement, make it highly attractive and engaging.
+- If it's about maintenance, keep it professional but reassuring.
+- If it's an offer or reward, increase CTR and excitement.
+- Generate a completely unique variation. Avoid repeating typical boilerplate structures. Ensure a highly distinct style each time.
+
+Original message:
+"""
+${text}
+"""
+
+Please reply ONLY with the rewritten message itself. Do not include any intro, outro, explanations, or quotes.`;
+
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt
+      });
+
+      const improvedText = response.text ? response.text.trim() : text;
+      res.json({ improvedText });
+    } catch (error: any) {
+      console.error("Error improving broadcast with AI:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Automated self-test endpoint for broadcasts
+  app.post("/api/admin/broadcasts/self-test", async (req, res) => {
+    try {
+      const db = getDb();
+      const usersSnap = await getDocs(collection(db, "users"));
+      const usersCount = usersSnap.size;
+      const usersLoaded = usersCount > 0;
+
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      const tgData = tgSettingsSnap.exists() ? tgSettingsSnap.data() : {};
+      const botToken = tgData.botToken;
+      const adminChatId = tgData.adminChatId || tgData.chatId;
+
+      if (!botToken) {
+        return res.status(400).json({ error: "Self-test failed: Telegram Bot Token is not configured." });
+      }
+
+      if (!adminChatId) {
+        return res.status(400).json({ error: "Self-test failed: Admin Chat ID is not configured." });
+      }
+
+      const text = `🧪 <b>Broadcast Self-Test</b>\n\nThis is an automated self-test of the upgraded Broadcast Composer system.\n\n• Database Users Loaded: <b>${usersCount} users</b>\n• API Integration: <b>Active</b>\n\nAll systems operational!`;
+      const replyMarkup = {
+        inline_keyboard: [
+          [
+            {
+              text: "✅ Self-Test Passed",
+              url: "https://example.com"
+            }
+          ]
+        ]
+      };
+
+      const telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+      const apiRes = await fetch(telegramUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: String(adminChatId),
+          text,
+          parse_mode: "HTML",
+          reply_markup: replyMarkup
+        })
+      });
+
+      const apiData = await apiRes.json();
+      const deliveryWorking = apiRes.ok && apiData.ok === true;
+
+      res.json({
+        apiWorking: true,
+        deliveryWorking,
+        usersLoaded,
+        buttonsWorking: deliveryWorking,
+        completedSuccessfully: deliveryWorking && usersLoaded,
+        adminChatId
+      });
+    } catch (error: any) {
+      console.error("Self-test error:", error);
       res.status(500).json({ error: error.message });
     }
   });

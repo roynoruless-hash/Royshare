@@ -127,6 +127,17 @@ export async function handleUpdate(botToken: string, update: any) {
         const user = msg.from;
         
         console.log("Message received:", msg.text, "from user:", user.id);
+
+        const db = getDb();
+        const userDocRef = doc(db, "users", String(user.id));
+        const userSnap = await getDoc(userDocRef);
+        const userData = userSnap.exists() ? userSnap.data() : null;
+
+        if (userData?.liveSupportActive === true) {
+            console.log("Routing directly to Live Support handler");
+            const consumed = await handleLiveSupportMessage(botToken, chatId, user, msg.text || msg.caption || "");
+            if (consumed) return;
+        }
         
         if (msg.text && msg.text.startsWith("/start")) {
              console.log("Matched /start command");
@@ -226,6 +237,9 @@ https://youtube.com`;
         } else if (msg.text === "👥 Refer & Earn") {
             console.log("User selected Refer & Earn");
             await processReferAndEarn(botToken, chatId, user);
+        } else if (msg.text && (msg.text.trim().startsWith("http://") || msg.text.trim().startsWith("https://"))) {
+            console.log("Direct URL detected. Processing independent shortening.");
+            await processShortenUrl(botToken, chatId, user, msg.text);
         } else if (msg.contact) {
             console.log("Matched contact share");
             await processContact(botToken, chatId, user, msg.contact);
@@ -350,6 +364,10 @@ ${msg.text}`;
                 const replyData = userData.pendingAdminReply;
                 await setDoc(doc(db, "users", String(user.id)), { pendingAdminReply: null }, { merge: true });
                 await handleAdminReplyTextInput(botToken, chatId, user, msg.text, replyData);
+            } else if (userData?.pendingUserTicketReply) {
+                const replyData = userData.pendingUserTicketReply;
+                await setDoc(doc(db, "users", String(user.id)), { pendingUserTicketReply: null }, { merge: true });
+                await handleUserReplyTextInput(botToken, chatId, user, msg.text, replyData);
             } else if (userData?.pendingSearchFile) {
                 await setDoc(doc(db, "users", String(user.id)), { pendingSearchFile: false }, { merge: true });
                 await handleSearchQuery(botToken, chatId, user, msg.text);
@@ -457,6 +475,62 @@ async function handleAdminReplyTextInput(botToken: string, adminChatId: number, 
 - Telegram API Response: ${JSON.stringify(responseData || {}, null, 2)}
 - Success / Failed: Failed`);
         await sendTelegramMessage(botToken, adminChatId, `❌ Failed to send reply to user: ${errorDetails}`);
+    }
+}
+
+async function handleUserReplyTextInput(botToken: string, chatId: number, user: any, replyMessage: string, replyData: { docId: string }) {
+    const db = getDb();
+    const docId = replyData.docId;
+    const ref = doc(db, "tickets", docId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+        await sendTelegramMessage(botToken, chatId, "⚠️ Ticket not found.");
+        return;
+    }
+
+    const ticketData = snap.data();
+    const replies = ticketData.replies || [];
+    replies.push({
+        sender: "user",
+        message: replyMessage,
+        createdAt: new Date().toISOString()
+    });
+
+    await setDoc(ref, {
+        status: "open",
+        lastReply: new Date().toISOString(),
+        replies
+    }, { merge: true });
+
+    await sendTelegramMessage(botToken, chatId, "✅ Your reply has been sent to our support team successfully.");
+
+    // Notify admin
+    try {
+        const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+        if (settingsDoc.exists()) {
+            const sData = settingsDoc.data();
+            const adminChatId = sData?.chatId || sData?.adminChatId;
+            if (adminChatId) {
+                const adminMsg = `📩 <b>User Replied to Support Ticket</b>\n\n` +
+                    `<b>Ticket ID:</b> <code>${ticketData.ticketId || docId}</code>\n` +
+                    `<b>User:</b> ${ticketData.name || 'User'} (@${ticketData.username || ''})\n\n` +
+                    `<b>Message:</b>\n${replyMessage}`;
+
+                const adminReplyMarkup = {
+                    inline_keyboard: [
+                        [
+                            { text: "💬 Reply", callback_data: `admin_reply_${docId}` },
+                            { text: "✅ Resolve", callback_data: `admin_resolve_${docId}` },
+                            { text: "❌ Close", callback_data: `admin_close_${docId}` }
+                        ]
+                    ]
+                };
+
+                await sendTelegramMessage(botToken, Number(adminChatId), adminMsg, { reply_markup: adminReplyMarkup, parse_mode: "HTML" });
+            }
+        }
+    } catch (adminErr) {
+        console.error("Error sending notification to admin:", adminErr);
     }
 }
 
@@ -2490,7 +2564,13 @@ async function startLiveSupportSession(botToken: string, chatId: number, user: a
     // Set active support state in database
     await setDoc(doc(db, "users", String(user.id)), {
         liveSupportActive: true,
-        liveSupportHistory: []
+        liveSupportHistory: [],
+        pendingShortenUrl: false,
+        pendingWithdrawal: null,
+        pendingSearchFile: false,
+        pendingSupportTicket: null,
+        pendingAdminReply: null,
+        pendingUserTicketReply: null
     }, { merge: true });
 
     const message = `💬 *Live Support*
@@ -2499,7 +2579,6 @@ Hello! My name is Sarah from RoyShare Support. How can I assist you today?`;
 
     const inlineKeyboard = {
         inline_keyboard: [
-            [{ text: "➕ Create Support Ticket", callback_data: "support_create" }],
             [{ text: "❌ Exit Live Support", callback_data: "support_live_exit" }]
         ]
     };
@@ -2510,20 +2589,6 @@ Hello! My name is Sarah from RoyShare Support. How can I assist you today?`;
 async function handleLiveSupportMessage(botToken: string, chatId: number, user: any, text: string): Promise<boolean> {
     if (!text) return false;
     
-    // Check if the text matches menu buttons or commands
-    const isReplyButton = [
-        "💰 Balance", "💰 Earn Rewards", "📢 Announcements", "🎁 Daily Bonus",
-        "🏆 Leaderboard", "⚙️ Settings", "👤 Account", "📤 Upload File",
-        "📁 My Content", "🔗 URL Shortener", "🔗 My Links", "📊 Dashboard",
-        "🎫 Support", "📜 Withdrawal History", "💸 Withdraw", "👥 Refer & Earn"
-    ].includes(text);
-
-    if (isReplyButton || text.startsWith("/")) {
-        const db = getDb();
-        await setDoc(doc(db, "users", String(user.id)), { liveSupportActive: false }, { merge: true });
-        return false; // Not consumed
-    }
-
     // Send "typing..." action
     try {
         await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
@@ -2543,35 +2608,46 @@ async function handleLiveSupportMessage(botToken: string, chatId: number, user: 
     const updatedHistory = [...history, userMsg];
     
     let reply = "";
-    try {
-        const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
-        const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
-        
-        const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-            reply = "I apologize, our support system is currently offline. Please feel free to create a support ticket using the button below.";
-        } else {
-            let userContext = "No authenticated user info available.";
-            try {
-                const ticketsSnap = await getDocs(query(collection(db, "tickets"), where("userId", "==", String(user.id))));
-                const userTickets = ticketsSnap.docs.map(d => ({
-                    ticketId: d.data().ticketId,
-                    subject: d.data().subject,
-                    status: d.data().status,
-                    createdAt: d.data().createdAt
-                }));
+    const cleanText = text.trim().toLowerCase();
 
-                const referralsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", String(user.id))));
-                const referralCount = referralsSnap.size;
+    // Check for exact flow greeting
+    if (history.length === 0 && (cleanText === "hello" || cleanText === "hi" || cleanText === "hey")) {
+        reply = `Hello 👋
+Welcome to RoyShare Support.
 
-                const withdrawalsSnap = await getDocs(query(collection(db, "withdrawals"), where("userId", "==", String(user.id))));
-                const userWithdrawals = withdrawalsSnap.docs.map(d => ({
-                    amount: d.data().amount,
-                    status: d.data().status,
-                    createdAt: d.data().createdAt
-                }));
+How can I help you today?
 
-                userContext = `
+Please describe your problem.`;
+    } else {
+        try {
+            const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
+            const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
+            
+            const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
+            if (!apiKey) {
+                reply = "Please wait a moment while I check your issue...";
+            } else {
+                let userContext = "No authenticated user info available.";
+                try {
+                    const ticketsSnap = await getDocs(query(collection(db, "tickets"), where("userId", "==", String(user.id))));
+                    const userTickets = ticketsSnap.docs.map(d => ({
+                        ticketId: d.data().ticketId,
+                        subject: d.data().subject,
+                        status: d.data().status,
+                        createdAt: d.data().createdAt
+                    }));
+
+                    const referralsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", String(user.id))));
+                    const referralCount = referralsSnap.size;
+
+                    const withdrawalsSnap = await getDocs(query(collection(db, "withdrawals"), where("userId", "==", String(user.id))));
+                    const userWithdrawals = withdrawalsSnap.docs.map(d => ({
+                        amount: d.data().amount,
+                        status: d.data().status,
+                        createdAt: d.data().createdAt
+                    }));
+
+                    userContext = `
 The user you are speaking with is authenticated in Telegram.
 - Name: ${user.first_name || 'User'}
 - Username: @${user.username || 'N/A'}
@@ -2583,56 +2659,94 @@ The user you are speaking with is authenticated in Telegram.
 - Active Tickets: ${JSON.stringify(userTickets)}
 - Withdrawal History: ${JSON.stringify(userWithdrawals)}
 `;
-            } catch (ctxErr) {
-                console.error("Failed to build user context for Telegram bot support:", ctxErr);
-            }
-
-            const ai = new GoogleGenAI({
-                apiKey: apiKey,
-                httpOptions: {
-                    headers: {
-                        'User-Agent': 'aistudio-build'
-                    }
+                } catch (ctxErr) {
+                    console.error("Failed to build user context for Telegram bot support:", ctxErr);
                 }
-            });
 
-            const selectedModel = supportData.geminiModel && supportData.geminiModel !== "gemini-2.5-flash" ? supportData.geminiModel : "gemini-3.5-flash";
+                const ai = new GoogleGenAI({
+                    apiKey: apiKey,
+                    httpOptions: {
+                        headers: {
+                            'User-Agent': 'aistudio-build'
+                        }
+                    }
+                });
 
-            const systemInstruction = `
+                const selectedModel = supportData.geminiModel && supportData.geminiModel !== "gemini-2.5-flash" ? supportData.geminiModel : "gemini-3.5-flash";
+
+                const systemInstruction = `
 You are Sarah, a highly professional, polite, and helpful human support representative at RoyShare.
 RoyShare is a secure Telegram-powered file sharing and URL shortener platform.
 
-CRITICAL DIRECTIVES:
-1. NEVER mention that you are an AI, chatbot, assistant, Gemini, automated agent, or machine. If the user asks if you are a bot, reply warmly that you are a human support specialist.
-2. Reply naturally, with empathy, and write as a professional human agent. Keep your replies concise, friendly, and human-like.
-3. You have access to the user's account context below. Use this information to answer their specific questions about their balance, withdrawals, referrals, or tickets. Do not copy paste the raw JSON; instead, formulate friendly natural responses (e.g., "I see you have an active withdrawal of $25 pending...").
-4. If you cannot fully resolve their issue or if they need manual senior review, invite them to create a formal support ticket by saying: "Please tap the '➕ Create Support Ticket' button below to open a formal ticket for our admin team."
-5. Do NOT output code or technical jargon.
+TONE & BEHAVIOR:
+- Speak naturally, with empathy, as a professional human agent. Keep replies concise, friendly, and human-like.
+- NEVER mention that you are an AI, chatbot, assistant, Gemini, automated agent, or machine. If asked, reply warmly that you are a human support specialist.
+- Use the user's account context below to answer specific questions about their balance, withdrawals, referrals, or tickets. Do not paste raw JSON; formulate friendly, natural responses.
+
+FLOW INSTRUCTIONS:
+1. If the user greets you with "Hello", "Hi", or similar initial greeting, respond exactly or very close to:
+"Hello 👋
+Welcome to RoyShare Support.
+
+How can I help you today?
+
+Please describe your problem."
+
+2. When the user explains their problem:
+- Understand the issue deeply.
+- Ask follow-up questions if required.
+- Provide clear, step-by-step troubleshooting.
+- Continue chatting naturally and remember previous messages.
+- NEVER suggest or show "Create Ticket" immediately. Try your best to troubleshoot first.
+
+3. ONLY if you determine the issue is complex, requires administrative/senior manual review, or cannot be solved through standard troubleshooting, append '[SHOW_TICKET_BUTTONS]' at the very end of your message. Never show this on initial contact or basic questions. Do not repeatedly append this. Only append it when troubleshooting is genuinely exhausted.
 
 User Account Context:
 ${userContext}
 `;
 
-            const chat = ai.chats.create({
-                model: selectedModel,
-                config: {
-                    systemInstruction: systemInstruction
-                },
-                history: updatedHistory.slice(0, -1).map((m: any) => ({
-                    role: m.sender === "user" ? "user" : "model",
-                    parts: [{ text: m.text }]
-                }))
-            });
+                const chat = ai.chats.create({
+                    model: selectedModel,
+                    config: {
+                        systemInstruction: systemInstruction
+                    },
+                    history: updatedHistory.slice(0, -1).map((m: any) => ({
+                        role: m.sender === "user" ? "user" : "model",
+                        parts: [{ text: m.text }]
+                    }))
+                });
 
-            const response = await chat.sendMessage({
-                message: text
-            });
+                // Silent retry mechanism
+                let retries = 2;
+                let success = false;
+                while (retries > 0 && !success) {
+                    try {
+                        const response = await chat.sendMessage({
+                            message: text
+                        });
+                        reply = response.text || "";
+                        if (reply) {
+                            success = true;
+                        } else {
+                            retries--;
+                        }
+                    } catch (apiErr) {
+                        console.error(`Gemini API attempt failed. Retries left: ${retries - 1}`, apiErr);
+                        retries--;
+                        if (retries > 0) {
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                        }
+                    }
+                }
 
-            reply = response.text || "I apologize, I'm experiencing a minor issue retrieving your information right now. Please feel free to raise a formal support ticket using the button below.";
+                if (!success) {
+                    reply = "Please wait a moment while I check your issue...";
+                }
+            }
+        } catch (err) {
+            console.error("Telegram bot live support Gemini error:", err);
+            reply = "Please wait a moment while I check your issue...";
         }
-    } catch (err) {
-        console.error("Telegram bot live support Gemini error:", err);
-        reply = "I apologize, I'm experiencing a minor issue retrieving your information right now. Please feel free to raise a formal support ticket using the button below.";
     }
 
     const agentMsg = { sender: "agent", text: reply, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
@@ -2640,14 +2754,30 @@ ${userContext}
     
     await setDoc(userDocRef, { liveSupportHistory: finalHistory }, { merge: true });
 
-    const inlineKeyboard = {
-        inline_keyboard: [
-            [{ text: "➕ Create Support Ticket", callback_data: "support_create" }],
-            [{ text: "❌ Exit Live Support", callback_data: "support_live_exit" }]
-        ]
-    };
+    // Determine if we show Create Ticket and Solved buttons
+    const showTicketButtons = reply.includes("[SHOW_TICKET_BUTTONS]");
+    const cleanReply = reply.replace("[SHOW_TICKET_BUTTONS]", "").trim();
 
-    await sendTelegramMessage(botToken, chatId, reply, { reply_markup: inlineKeyboard });
+    let inlineKeyboard;
+    if (showTicketButtons) {
+        inlineKeyboard = {
+            inline_keyboard: [
+                [
+                    { text: "🎫 Create Ticket", callback_data: "support_create_from_live" },
+                    { text: "✅ Solved", callback_data: "support_solved_from_live" }
+                ],
+                [{ text: "❌ Exit Live Support", callback_data: "support_live_exit" }]
+            ]
+        };
+    } else {
+        inlineKeyboard = {
+            inline_keyboard: [
+                [{ text: "❌ Exit Live Support", callback_data: "support_live_exit" }]
+            ]
+        };
+    }
+
+    await sendTelegramMessage(botToken, chatId, cleanReply, { reply_markup: inlineKeyboard });
     return true; // Consumed
 }
 
@@ -2773,6 +2903,7 @@ ${lastReply}`;
 
     const inlineKeyboard = {
         inline_keyboard: [
+            ...(t.status !== 'closed' && t.status !== '🔴 Closed' ? [[{ text: "💬 Reply", callback_data: `user_reply_ticket_${docId}` }]] : []),
             [{ text: "⬅️ Back to Tickets", callback_data: "support_list" }]
         ]
     };
@@ -4242,12 +4373,175 @@ async function processCallback(botToken: string, callbackQuery: any) {
                     body: JSON.stringify({ callback_query_id: callbackQuery.id })
                 });
             } catch (e) {}
-            await setDoc(doc(db, "users", String(userId)), { liveSupportActive: false }, { merge: true });
+            await setDoc(doc(db, "users", String(userId)), { liveSupportActive: false, liveSupportHistory: [] }, { merge: true });
             const exitMsg = `❌ *Live Support Closed*
 
 Thank you for chatting with us. Let us know if you need anything else!`;
             await sendTelegramMessage(botToken, chatId, exitMsg, { parse_mode: "Markdown" });
             await processSupport(botToken, chatId, callbackQuery.from);
+        } else if (data === "support_solved_from_live") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await setDoc(doc(db, "users", String(userId)), { liveSupportActive: false, liveSupportHistory: [] }, { merge: true });
+            const solvedMsg = `🎉 *Great!* We're glad your support issue has been resolved. Let us know if you need anything else!`;
+            await sendTelegramMessage(botToken, chatId, solvedMsg, { parse_mode: "Markdown" });
+            await processSupport(botToken, chatId, callbackQuery.from);
+        } else if (data === "support_create_from_live") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+
+            const uSnap = await getDoc(doc(db, "users", String(userId)));
+            const userData = uSnap.exists() ? uSnap.data() : {};
+            const history = userData?.liveSupportHistory || [];
+
+            const transcript = history.map((m: any) => `[${m.sender === 'user' ? 'User' : 'Sarah'}]: ${m.text}`).join("\n");
+            const ticketId = "TKT" + (Math.floor(Math.random() * 900000) + 100000);
+
+            // AI Analysis
+            let category = "Other Issue";
+            let priority = "Medium";
+            let summary = "Escalated Live Support Session";
+            let suggestedCause = "Under investigation";
+            let suggestedSolution = "Standard troubleshooting and account verification";
+
+            try {
+                const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
+                const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
+                const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
+
+                if (apiKey) {
+                    const ai = new GoogleGenAI({
+                        apiKey: apiKey,
+                        httpOptions: {
+                            headers: { 'User-Agent': 'aistudio-build' }
+                        }
+                    });
+                    const selectedModel = supportData.geminiModel && supportData.geminiModel !== "gemini-2.5-flash" ? supportData.geminiModel : "gemini-3.5-flash";
+
+                    const analysisPrompt = `
+You are an advanced support automation assistant for RoyShare.
+Analyze the following conversation between a user and Sarah (the support specialist).
+
+Conversation Transcript:
+${transcript || "No transcript available. Direct creation."}
+
+Based on this conversation, extract the following 5 fields:
+1. "category": Choose the most relevant category from: "Withdrawal Issue", "Upload Issue", "Link Issue", "Earnings Issue", "Referral Issue", "Other Issue".
+2. "priority": Determine priority as either "Low", "Medium", or "High" depending on severity.
+3. "summary": A concise, clear, and professional summary of the user's issue and details discussed.
+4. "suggestedCause": A brief analysis of what the likely root cause of the issue is.
+5. "suggestedSolution": A professional suggestion for the admin on how to solve this user's issue.
+
+Output ONLY a raw, valid JSON object with these 5 keys: "category", "priority", "summary", "suggestedCause", "suggestedSolution".
+Do NOT include markdown code block formatting (no \`\`\`json) or any other text before or after.
+`;
+
+                    const response = await ai.models.generateContent({
+                        model: selectedModel,
+                        contents: analysisPrompt
+                    });
+
+                    const rawText = response.text || "";
+                    const cleanText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+                    const parsed = JSON.parse(cleanText);
+                    if (parsed.category) category = parsed.category;
+                    if (parsed.priority) priority = parsed.priority;
+                    if (parsed.summary) summary = parsed.summary;
+                    if (parsed.suggestedCause) suggestedCause = parsed.suggestedCause;
+                    if (parsed.suggestedSolution) suggestedSolution = parsed.suggestedSolution;
+                }
+            } catch (aiErr) {
+                console.error("Failed to run Gemini analysis for escalation in Telegram Bot:", aiErr);
+            }
+
+            const ticketData = {
+                ticketId,
+                userId: String(userId),
+                name: (callbackQuery.from.first_name || "") + (callbackQuery.from.last_name ? " " + callbackQuery.from.last_name : ""),
+                username: callbackQuery.from.username || "None",
+                telegramId: String(userId),
+                subject: summary,
+                category,
+                issueType: category,
+                priority,
+                description: transcript || "No chat history. Immediate escalation.",
+                conversation: transcript,
+                aiSummary: summary,
+                aiSuggestedCause: suggestedCause,
+                aiSuggestedSolution: suggestedSolution,
+                screenshot: null,
+                status: "open",
+                createdAt: new Date().toISOString(),
+                time: new Date().toISOString(),
+                replies: [
+                    {
+                        sender: "user",
+                        message: `Escalated conversation transcript:\n\n${transcript || "None"}`,
+                        createdAt: new Date().toISOString()
+                    }
+                ]
+            };
+
+            const docRef = await addDoc(collection(db, "tickets"), ticketData);
+
+            // Clean up user support state
+            await setDoc(doc(db, "users", String(userId)), {
+                liveSupportActive: false,
+                liveSupportHistory: [],
+                pendingSupportTicket: null
+            }, { merge: true });
+
+            // Notify user
+            const userMsg = `✅ <b>Your request has been received successfully.</b>\n\nYour Ticket ID: <code>${ticketId}</code>\n\nOur support team is currently reviewing your issue.\n\nPlease wait approximately 2 hours while we investigate and resolve it.\n\nYou will automatically receive a reply here as soon as an update is available.`;
+            await sendTelegramMessage(botToken, chatId, userMsg, { parse_mode: "HTML" });
+
+            // Notify Admin via TG
+            try {
+                const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+                const adminChatId = telegramSettingsSnap.data()?.adminChatId || telegramSettingsSnap.data()?.chatId;
+                if (adminChatId) {
+                    let shortTranscript = transcript || "No history.";
+                    if (shortTranscript.length > 1500) {
+                        shortTranscript = shortTranscript.substring(0, 1500) + "\n\n... (truncated)";
+                    }
+
+                    const adminMsg = `🚨 <b>New Support Ticket</b>\n\n` +
+                        `<b>Ticket ID:</b> <code>${ticketId}</code>\n` +
+                        `<b>User:</b> ${ticketData.name}\n` +
+                        `<b>Username:</b> @${ticketData.username || ""}\n` +
+                        `<b>User ID:</b> <code>${userId}</code>\n` +
+                        `<b>Issue:</b> ${category}\n` +
+                        `<b>Priority:</b> ${priority}\n` +
+                        `<b>AI Summary:</b> ${summary}\n\n` +
+                        `<b>Conversation:</b>\n<pre>${shortTranscript}</pre>\n\n` +
+                        `<b>Suggested Solution:</b> ${suggestedSolution}\n` +
+                        `<b>Created Time:</b> ${new Date().toLocaleString()}`;
+
+                    const adminReplyMarkup = {
+                        inline_keyboard: [
+                            [
+                                { text: "💬 Reply", callback_data: `admin_reply_${docRef.id}` },
+                                { text: "✅ Resolve", callback_data: `admin_resolve_${docRef.id}` },
+                                { text: "❌ Close", callback_data: `admin_close_${docRef.id}` }
+                            ]
+                        ]
+                    };
+
+                    await sendTelegramMessage(botToken, Number(adminChatId), adminMsg, { parse_mode: "HTML", reply_markup: adminReplyMarkup });
+                }
+            } catch (adminTgErr) {
+                console.error("Failed to notify admin via TG in Bot escalation:", adminTgErr);
+            }
         } else if (data === "support_create") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
@@ -4330,6 +4624,27 @@ Thank you for chatting with us. Let us know if you need anything else!`;
             } catch (e) {}
             const ticketDocId = data.replace("ticket_details_", "");
             await processTicketDetails(botToken, chatId, ticketDocId);
+        } else if (data.startsWith("user_reply_ticket_")) {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const ticketDocId = data.replace("user_reply_ticket_", "");
+            const tSnap = await getDoc(doc(db, "tickets", ticketDocId));
+            if (tSnap.exists()) {
+                const tData = tSnap.data();
+                await setDoc(doc(db, "users", String(userId)), {
+                    pendingUserTicketReply: {
+                        docId: ticketDocId
+                    }
+                }, { merge: true });
+                await sendTelegramMessage(botToken, chatId, `📝 Please enter your reply for Ticket #${tData?.ticketId || ticketDocId}:`);
+            } else {
+                await sendTelegramMessage(botToken, chatId, "⚠️ Ticket not found.");
+            }
         } else if (data === "support_admin") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
@@ -4378,20 +4693,18 @@ Telegram:
             const tSnap = await getDoc(ticketRef);
             if (tSnap.exists()) {
                 const tData = tSnap.data();
-                await setDoc(ticketRef, { status: "🟢 Resolved" }, { merge: true });
+                await setDoc(ticketRef, { status: "resolved" }, { merge: true });
                 
                 await sendTelegramMessage(botToken, chatId, `✅ Ticket ${tData.ticketId} resolved successfully.`);
                 
                 // Notify user
                 const userChatId = tData.userId;
-                const userNotifyMsg = `✅ Ticket Resolved
-
-🎫 Ticket ID:
-${tData.ticketId}
-
-Thank you for contacting RoyShare Support.`;
+                const userNotifyMsg = `🎉 <b>Great news!</b>\n\n` +
+                    `Your reported issue has been resolved.\n\n` +
+                    `If you still face the same problem, you can reopen the conversation by contacting support again.\n\n` +
+                    `Thank you for using RoyShare.`;
                 try {
-                    await sendTelegramMessage(botToken, Number(userChatId), userNotifyMsg);
+                    await sendTelegramMessage(botToken, Number(userChatId), userNotifyMsg, { parse_mode: "HTML" });
                 } catch (err) {
                     console.error("Error notifying user of ticket resolve:", err);
                 }
@@ -4411,8 +4724,18 @@ Thank you for contacting RoyShare Support.`;
             const tSnap = await getDoc(ticketRef);
             if (tSnap.exists()) {
                 const tData = tSnap.data();
-                await setDoc(ticketRef, { status: "🔴 Closed" }, { merge: true });
+                await setDoc(ticketRef, { status: "closed" }, { merge: true });
                 await sendTelegramMessage(botToken, chatId, `🔴 Ticket ${tData.ticketId} closed successfully.`);
+                
+                // Notify user
+                const userChatId = tData.userId;
+                const userNotifyMsg = `Your support request has been closed.\n\n` +
+                    `If you need further assistance, you can create a new support ticket anytime.`;
+                try {
+                    await sendTelegramMessage(botToken, Number(userChatId), userNotifyMsg);
+                } catch (err) {
+                    console.error("Error notifying user of ticket close:", err);
+                }
             } else {
                 await sendTelegramMessage(botToken, chatId, "⚠️ Ticket not found.");
             }

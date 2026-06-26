@@ -13,8 +13,7 @@ import CTA from "./components/CTA";
 import Footer from "./components/Footer";
 import AdminLogin from "./components/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
-import DownloadMaintenancePage from "./components/DownloadMaintenancePage";
-import UrlMaintenancePage from "./components/UrlMaintenancePage";
+import MultiPageEngine from "./components/MultiPageEngine";
 import DailyBonusPage from "./pages/DailyBonusPage";
 import EarnRewardsPage from "./pages/EarnRewardsPage";
 import RewardTasksPage from "./pages/RewardTasksPage";
@@ -26,16 +25,12 @@ const ADMIN_AUTH_ENABLED = false;
 
 export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
 
   useEffect(() => {
     fetch("/api/system-settings")
       .then(res => res.json())
-      .then(data => {
-        if (data && data.maintenanceMode === "🔴 ON") {
-          setMaintenanceMode(true);
-        }
+      .then(() => {
         setLoadingConfig(false);
       })
       .catch(err => {
@@ -82,22 +77,10 @@ export default function App() {
     return <AdminDashboard />;
   }
 
-  if (maintenanceMode) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-900 border border-yellow-500/30 rounded-2xl p-8 text-center shadow-2xl">
-          <div className="text-6xl mb-6">⚠️</div>
-          <h1 className="text-3xl font-bold text-white mb-4">System Under Maintenance</h1>
-          <p className="text-slate-400">Please try again later. We are currently performing system updates to improve your experience.</p>
-        </div>
-      </div>
-    );
-  }
-
   const downloadMatch = window.location.pathname.match(/^\/download\/([a-zA-Z0-9_-]+)/);
   if (downloadMatch) {
     const fileId = downloadMatch[1];
-    return <DownloadMaintenancePage fileId={fileId} />;
+    return <MultiPageEngine type="download" id={fileId} />;
   }
 
   const linkMatch = window.location.pathname.match(/^\/lnk\/([a-zA-Z0-9_-]+)/) || 
@@ -105,7 +88,7 @@ export default function App() {
                     window.location.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)/);
   if (linkMatch) {
     const linkId = linkMatch[1];
-    return <UrlMaintenancePage linkId={linkId} />;
+    return <MultiPageEngine type="shortener" id={linkId} />;
   }
 
   if (window.location.pathname === "/daily-bonus") {
