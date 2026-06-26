@@ -62,6 +62,22 @@ export default function AdminDashboard() {
   const [ads, setAds] = useState<any[]>([]);
   const [adsLoading, setAdsLoading] = useState(false);
   const [adsError, setAdsError] = useState("");
+  const [smartLinks, setSmartLinks] = useState<any[]>([]);
+  const [smartLinksLoading, setSmartLinksLoading] = useState(false);
+  const [smartLinksError, setSmartLinksError] = useState("");
+  const [smartLinkSearch, setSmartLinkSearch] = useState("");
+  const [smartLinkForm, setSmartLinkForm] = useState({
+    destinationUrl: "",
+    customAlias: "",
+    autoGenerateAlias: true,
+    totalPages: 1,
+    autoRedirect: true,
+    finalRedirectDelay: 5,
+    instructions: "",
+    reward: 0,
+    status: "Enabled",
+    pagesConfig: [] as any[]
+  });
   const [adPlacements, setAdPlacements] = useState<any>({});
   const [adPlacementsLoading, setAdPlacementsLoading] = useState(false);
   const [showAdPreview, setShowAdPreview] = useState(false);
@@ -79,6 +95,14 @@ export default function AdminDashboard() {
     bonusSettings: {},
     notificationSettings: {},
     websiteSettings: {},
+    urlShortener: {
+      enabled: false,
+      provider: "GPLinks",
+      apiKey: "",
+      publisherId: "",
+      testStatus: "Not Tested",
+      testedAt: ""
+    },
     maintenanceMode: "🟢 OFF"
   });
   const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
@@ -92,6 +116,53 @@ export default function AdminDashboard() {
   });
   const [supportSettingsLoading, setSupportSettingsLoading] = useState(false);
   const [settingsTab, setSettingsTab] = useState('🤖 Bot Settings');
+
+  const [shortenerTestLoading, setShortenerTestLoading] = useState(false);
+  const [shortenerTestStatus, setShortenerTestStatus] = useState<string>("");
+  const [showShortenerKey, setShowShortenerKey] = useState(false);
+
+  const handleTestShortenerConnection = async () => {
+    setShortenerTestLoading(true);
+    setShortenerTestStatus("");
+    try {
+      const config = systemSettings?.urlShortener || {};
+      const res = await fetch("/api/admin/shortener/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: config.provider || "GPLinks",
+          apiKey: config.apiKey || "",
+          publisherId: config.publisherId || ""
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setShortenerTestStatus(`🟢 Success! Test shortened URL: ${data.shortenedUrl}`);
+        setSystemSettings({
+          ...systemSettings,
+          urlShortener: {
+            ...systemSettings.urlShortener,
+            testStatus: "🟢 Success",
+            testedAt: new Date().toISOString()
+          }
+        });
+      } else {
+        setShortenerTestStatus(`🔴 Failed: ${data.error || "Unknown error occurred"}`);
+        setSystemSettings({
+          ...systemSettings,
+          urlShortener: {
+            ...systemSettings.urlShortener,
+            testStatus: "🔴 Failed",
+            testedAt: new Date().toISOString()
+          }
+        });
+      }
+    } catch (err: any) {
+      setShortenerTestStatus(`🔴 Error: ${err.message || "Failed to make test request"}`);
+    } finally {
+      setShortenerTestLoading(false);
+    }
+  };
 
   const [showApiKey, setShowApiKey] = useState(false);
   const [testConnectionLoading, setTestConnectionLoading] = useState(false);
@@ -500,7 +571,18 @@ export default function AdminDashboard() {
       const res = await fetch("/api/admin/system-settings");
       if (res.ok) {
         const data = await res.json();
-        setSystemSettings(data);
+        const normalizedData = {
+          ...data,
+          urlShortener: data.urlShortener || {
+            enabled: false,
+            provider: "GPLinks",
+            apiKey: "",
+            publisherId: "",
+            testStatus: "Not Tested",
+            testedAt: ""
+          }
+        };
+        setSystemSettings(normalizedData);
       }
     } catch (err) {
       console.error(err);
@@ -794,9 +876,29 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchSmartLinks = async () => {
+    setSmartLinksLoading(true);
+    setSmartLinksError("");
+    try {
+      const res = await fetch("/api/admin/smart-links");
+      if (res.ok) {
+        const data = await res.json();
+        setSmartLinks(data || []);
+      } else {
+        setSmartLinksError("Failed to fetch smart links.");
+      }
+    } catch (e: any) {
+      setSmartLinksError(e.message || "Error fetching smart links.");
+    } finally {
+      setSmartLinksLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'Overview') {
       fetchDashboardData();
+    } else if (activeTab === '🔗 Smart URL Shortener') {
+      fetchSmartLinks();
     } else if (activeTab === '💸 Withdrawals') {
       fetchWithdrawals();
     } else if (activeTab === '🎫 Support') {
@@ -881,6 +983,29 @@ export default function AdminDashboard() {
         endpoint = `/api/admin/announcements/${(announcementForm as any).id}`;
         method = 'PUT';
         body = announcementForm;
+      } else if (modalAction === 'create_smart_link') {
+        if (!smartLinkForm.destinationUrl?.trim()) {
+          alert("Destination URL is required.");
+          setModalLoading(false);
+          return;
+        }
+        endpoint = '/api/admin/smart-links';
+        body = {
+          ...smartLinkForm,
+          customAlias: smartLinkForm.autoGenerateAlias ? "" : smartLinkForm.customAlias
+        };
+      } else if (modalAction === 'edit_smart_link') {
+        if (!smartLinkForm.destinationUrl?.trim()) {
+          alert("Destination URL is required.");
+          setModalLoading(false);
+          return;
+        }
+        endpoint = `/api/admin/smart-links/${(smartLinkForm as any).id}`;
+        method = 'PUT';
+        body = {
+          ...smartLinkForm,
+          customAlias: smartLinkForm.autoGenerateAlias ? "" : smartLinkForm.customAlias
+        };
       } else if (modalAction === 'create_task') {
         endpoint = `/api/admin/tasks`;
         body = taskForm;
@@ -938,6 +1063,9 @@ export default function AdminDashboard() {
         fetchTickets();
       } else if (modalAction.endsWith('_announcement')) {
         fetchAnnouncements();
+      } else if (modalAction.endsWith('_smart_link')) {
+        fetchSmartLinks();
+        alert("Smart Link saved successfully!");
       } else if (modalAction.endsWith('_task')) {
         fetchTasks();
       } else if (modalAction.endsWith('_ad')) {
@@ -1003,7 +1131,7 @@ export default function AdminDashboard() {
         <div className="space-y-8 max-w-7xl mx-auto">
           {/* Navigation Buttons */}
           <div className="flex flex-wrap gap-3">
-            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "📈 Analytics", "📢 Broadcast", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "⚙️ System Settings"].map((btn) => (
+            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "🔗 Smart URL Shortener", "📈 Analytics", "📢 Broadcast", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "⚙️ System Settings"].map((btn) => (
               <button 
                 key={btn} 
                 onClick={() => setActiveTab(btn)}
@@ -2269,6 +2397,198 @@ export default function AdminDashboard() {
               )}
             </div>
           )}
+
+          {activeTab === '🔗 Smart URL Shortener' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  🔗 Self-Hosted Smart URL Shortener
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button onClick={() => {
+                    setSmartLinkForm({
+                      destinationUrl: "",
+                      customAlias: "",
+                      autoGenerateAlias: true,
+                      totalPages: 1,
+                      autoRedirect: true,
+                      finalRedirectDelay: 5,
+                      instructions: "",
+                      reward: 0,
+                      status: "Enabled",
+                      pagesConfig: []
+                    });
+                    setModalAction('create_smart_link');
+                  }} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20 cursor-pointer">
+                    ➕ Create Smart Link
+                  </button>
+                  <button onClick={() => fetchSmartLinks()} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700 cursor-pointer">
+                    🔄 Refresh
+                  </button>
+                </div>
+              </div>
+
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">🔗 Total Links</h3>
+                  <p className="text-2xl font-bold text-white">{smartLinks.length}</p>
+                </div>
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">👀 Total Views</h3>
+                  <p className="text-2xl font-bold text-blue-300">{smartLinks.reduce((acc, l) => acc + Number(l.views || 0), 0)}</p>
+                </div>
+                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">🚀 Completed Redirects</h3>
+                  <p className="text-2xl font-bold text-emerald-300">{smartLinks.reduce((acc, l) => acc + Number(l.completedRedirects || 0), 0)}</p>
+                </div>
+                <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-1">📈 Average Conversion</h3>
+                  <p className="text-2xl font-bold text-purple-300">
+                    {(() => {
+                      const v = smartLinks.reduce((acc, l) => acc + Number(l.views || 0), 0);
+                      const r = smartLinks.reduce((acc, l) => acc + Number(l.completedRedirects || 0), 0);
+                      return v > 0 ? ((r / v) * 100).toFixed(2) + '%' : '0.00%';
+                    })()}
+                  </p>
+                </div>
+              </div>
+
+              {/* Links Table */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row gap-4 items-center justify-between">
+                  <h3 className="font-bold text-white text-sm">Monetized Link Records</h3>
+                  <input
+                    type="text"
+                    placeholder="Search links by alias or destination..."
+                    value={smartLinkSearch}
+                    onChange={(e) => setSmartLinkSearch(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 w-full sm:w-64"
+                  />
+                </div>
+
+                {smartLinksLoading ? (
+                  <div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+                ) : smartLinksError ? (
+                  <p className="text-center py-8 text-rose-400 text-sm font-semibold">{smartLinksError}</p>
+                ) : smartLinks.length === 0 ? (
+                  <p className="text-center py-12 text-slate-500 text-sm">No self-hosted smart links found. Create your first monetized link above!</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-800">
+                        <tr>
+                          <th className="p-4">Short URL</th>
+                          <th className="p-4">Destination URL</th>
+                          <th className="p-4 text-center">Pages</th>
+                          <th className="p-4 text-center">Views / Unique</th>
+                          <th className="p-4 text-center">Redirects / CR</th>
+                          <th className="p-4">Created At</th>
+                          <th className="p-4">Status</th>
+                          <th className="p-4 text-center">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-850">
+                        {smartLinks
+                          .filter(l => 
+                            (l.alias || '').toLowerCase().includes(smartLinkSearch.toLowerCase()) || 
+                            (l.destinationUrl || '').toLowerCase().includes(smartLinkSearch.toLowerCase()) ||
+                            (l.shortUrl || '').toLowerCase().includes(smartLinkSearch.toLowerCase())
+                          )
+                          .map((link) => (
+                            <tr key={link.id} className="hover:bg-slate-850/30 transition-colors">
+                              <td className="p-4 font-mono">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-indigo-400 font-semibold">{link.shortUrl}</span>
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(link.shortUrl);
+                                      alert("Short Link Copied!");
+                                    }}
+                                    className="text-slate-400 hover:text-white bg-slate-800 p-1 rounded transition cursor-pointer"
+                                    title="Copy Link"
+                                  >
+                                    📋
+                                  </button>
+                                  <a
+                                    href={link.shortUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-slate-400 hover:text-white bg-slate-800 p-1 rounded transition cursor-pointer"
+                                    title="Visit Link"
+                                  >
+                                    🌐
+                                  </a>
+                                </div>
+                              </td>
+                              <td className="p-4 max-w-xs truncate" title={link.destinationUrl}>
+                                <span className="text-slate-300 font-medium">{link.destinationUrl}</span>
+                              </td>
+                              <td className="p-4 text-center font-bold text-white">{link.totalPages}</td>
+                              <td className="p-4 text-center font-mono">
+                                <span className="text-slate-300 font-bold">{link.views || 0}</span>
+                                <span className="text-slate-500 mx-1">/</span>
+                                <span className="text-slate-400">{link.uniqueViews || 0}</span>
+                              </td>
+                              <td className="p-4 text-center font-mono">
+                                <span className="text-emerald-400 font-bold">{link.completedRedirects || 0}</span>
+                                <span className="text-slate-500 mx-1">/</span>
+                                <span className="text-purple-400 font-semibold">{link.conversionRate || 0}%</span>
+                              </td>
+                              <td className="p-4 text-slate-400 font-mono">
+                                {link.createdAt ? new Date(link.createdAt).toLocaleDateString() : "N/A"}
+                              </td>
+                              <td className="p-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${link.status === "Enabled" ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/15 text-rose-400 border border-rose-500/20"}`}>
+                                  {link.status}
+                                </span>
+                              </td>
+                              <td className="p-4 text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setSmartLinkForm({
+                                        ...link,
+                                        autoGenerateAlias: !link.customAlias && link.alias ? false : true
+                                      });
+                                      setModalAction('edit_smart_link');
+                                    }}
+                                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium transition cursor-pointer"
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      if (confirm("Are you sure you want to delete this smart link?")) {
+                                        try {
+                                          const res = await fetch(`/api/admin/smart-links/${link.id}`, { method: 'DELETE' });
+                                          if (res.ok) {
+                                            fetchSmartLinks();
+                                            alert("Smart Link Deleted");
+                                          } else {
+                                            alert("Failed to delete link.");
+                                          }
+                                        } catch (err: any) {
+                                          alert(err.message);
+                                        }
+                                      }
+                                    }}
+                                    className="px-2 py-1 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 rounded font-medium transition cursor-pointer"
+                                  >
+                                    🗑 Delete
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === '📈 Analytics' && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
@@ -3095,7 +3415,7 @@ export default function AdminDashboard() {
               ) : (
                 <div className="flex flex-col md:flex-row gap-6">
                   <div className="w-full md:w-64 space-y-1">
-                    {['🤖 Bot Settings', '💰 Earnings Settings', '💸 Withdrawal Settings', '👥 Referral Settings', '🎁 Bonus Settings', '📢 Notification Settings', '🌐 Website Settings', '🎫 Support Settings', '🤖 AI Settings', '🔄 Maintenance Mode'].map(tab => (
+                    {['🤖 Bot Settings', '💰 Earnings Settings', '💸 Withdrawal Settings', '👥 Referral Settings', '🎁 Bonus Settings', '📢 Notification Settings', '🌐 Website Settings', '🎫 Support Settings', '🤖 AI Settings', '🔗 URL Shortener', '🔄 Maintenance Mode'].map(tab => (
                       <button key={tab} onClick={() => setSettingsTab(tab)} className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-colors ${settingsTab === tab ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>{tab}</button>
                     ))}
                   </div>
@@ -3754,6 +4074,177 @@ export default function AdminDashboard() {
                       </div>
                     )}
 
+                    {settingsTab === '🔗 URL Shortener' && (
+                      <div className="space-y-6 max-w-lg">
+                        <div className="bg-indigo-500/10 border border-indigo-500/20 p-4 rounded-xl flex items-center justify-between">
+                          <div>
+                            <h4 className="text-white font-bold text-sm">🔗 URL Shortener Configuration</h4>
+                            <p className="text-slate-400 text-xs mt-0.5">Configure system-wide link shortener and monetization providers.</p>
+                          </div>
+                          <button
+                            onClick={() => saveSystemSettings(systemSettings)}
+                            disabled={systemSettingsLoading}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-lg shadow-emerald-900/20"
+                          >
+                            {systemSettingsLoading ? "Saving..." : "💾 Save Settings"}
+                          </button>
+                        </div>
+
+                        {/* Config Form */}
+                        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 shadow-xl">
+                          <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Enable URL Shortener</label>
+                            <div className="flex gap-4">
+                              <label className="flex items-center gap-2 text-white font-medium text-sm cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="shortenerEnabled"
+                                  checked={systemSettings?.urlShortener?.enabled === true}
+                                  onChange={() => setSystemSettings({
+                                    ...systemSettings,
+                                    urlShortener: { ...(systemSettings.urlShortener || {}), enabled: true }
+                                  })}
+                                  className="w-4 h-4 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                🟢 Enabled
+                              </label>
+                              <label className="flex items-center gap-2 text-white font-medium text-sm cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="shortenerEnabled"
+                                  checked={systemSettings?.urlShortener?.enabled === false}
+                                  onChange={() => setSystemSettings({
+                                    ...systemSettings,
+                                    urlShortener: { ...(systemSettings.urlShortener || {}), enabled: false }
+                                  })}
+                                  className="w-4 h-4 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                🔴 Disabled
+                              </label>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Provider Selection</label>
+                            <select
+                              value={systemSettings?.urlShortener?.provider || "GPLinks"}
+                              onChange={(e) => setSystemSettings({
+                                ...systemSettings,
+                                urlShortener: { ...(systemSettings.urlShortener || {}), provider: e.target.value }
+                              })}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                            >
+                              <option value="GPLinks">GPLinks (gplinks.in)</option>
+                              <option value="ShrinkMe">ShrinkMe (shrinkme.io)</option>
+                              <option value="Droplink">Droplink (droplink.co)</option>
+                              <option value="ShrinkEarn">ShrinkEarn (shrinkearn.com)</option>
+                              <option value="Ouo.io">Ouo.io (ouo.io)</option>
+                              <option value="Shorte.st">Shorte.st (shorte.st)</option>
+                              <option value="AdFly">AdFly (adf.ly)</option>
+                              <option value="Custom">Custom / Generic API</option>
+                            </select>
+                            <p className="text-slate-500 text-xs mt-1.5 leading-relaxed">
+                              {systemSettings?.urlShortener?.provider === "Custom" 
+                                ? "For Custom, use a URL containing {URL} placeholder in the API Key field, e.g., https://my-shortener.com/api?key=123&url={URL}" 
+                                : `Direct API integration for ${systemSettings?.urlShortener?.provider || "GPLinks"}.`}
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                              {systemSettings?.urlShortener?.provider === "Custom" ? "API Request URL Template" : "API Key / Token"}
+                            </label>
+                            <div className="relative">
+                              <input
+                                type={showShortenerKey ? "text" : "password"}
+                                value={systemSettings?.urlShortener?.apiKey || ""}
+                                onChange={(e) => setSystemSettings({
+                                  ...systemSettings,
+                                  urlShortener: { ...(systemSettings.urlShortener || {}), apiKey: e.target.value }
+                                })}
+                                placeholder={systemSettings?.urlShortener?.provider === "Custom" ? "https://example.com/api?key=mykey&url={URL}" : "Enter your provider API credentials"}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-4 pr-12 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowShortenerKey(!showShortenerKey)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                              >
+                                {showShortenerKey ? "👁️" : "🙈"}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Publisher ID / User ID (Optional)</label>
+                            <input
+                              type="text"
+                              value={systemSettings?.urlShortener?.publisherId || ""}
+                              onChange={(e) => setSystemSettings({
+                                ...systemSettings,
+                                urlShortener: { ...(systemSettings.urlShortener || {}), publisherId: e.target.value }
+                              })}
+                              placeholder="Enter your account publisher ID if required"
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                            />
+                            <p className="text-slate-500 text-xs mt-1">Required only for AdFly or specific custom shortener platforms.</p>
+                          </div>
+
+                          {/* Connection Diagnostic */}
+                          <div className="pt-2 border-t border-slate-800">
+                            <button
+                              type="button"
+                              onClick={handleTestShortenerConnection}
+                              disabled={shortenerTestLoading || !systemSettings?.urlShortener?.apiKey}
+                              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 text-white font-semibold rounded-xl text-xs transition border border-slate-700 flex items-center justify-center gap-2"
+                            >
+                              {shortenerTestLoading ? (
+                                <>
+                                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                  Testing Connection...
+                                </>
+                              ) : (
+                                "📡 Test Provider Connection"
+                              )}
+                            </button>
+
+                            {shortenerTestStatus && (
+                              <div className="mt-3 p-3 bg-slate-900 rounded-xl border border-slate-800 text-xs break-all text-slate-300 font-mono whitespace-pre-wrap">
+                                {shortenerTestStatus}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Status Diagnostics Card */}
+                        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-3 shadow-xl">
+                          <h4 className="text-white font-bold text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">📡 API Connection Status</h4>
+                          <div className="space-y-2 text-xs">
+                            <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
+                              <span className="text-slate-400 font-medium">Provider Status</span>
+                              <span className={`font-bold px-2 py-1 rounded ${systemSettings?.urlShortener?.enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                {systemSettings?.urlShortener?.enabled ? "Enabled" : "Disabled"}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
+                              <span className="text-slate-400 font-medium">Connection Test</span>
+                              <span className="font-bold text-white">{systemSettings?.urlShortener?.testStatus || "Not Tested"}</span>
+                            </div>
+                            <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
+                              <span className="text-slate-400 font-medium">Active Provider</span>
+                              <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{systemSettings?.urlShortener?.provider || "GPLinks"}</span>
+                            </div>
+                            {systemSettings?.urlShortener?.testedAt && (
+                              <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
+                                <span className="text-slate-400 font-medium">Last Tested At</span>
+                                <span className="font-bold text-slate-300 font-mono text-[10px]">{new Date(systemSettings.urlShortener.testedAt).toLocaleString()}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {settingsTab === '🔄 Maintenance Mode' && (
                       <div className="space-y-6 max-w-lg">
                         <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl">
@@ -3776,9 +4267,9 @@ export default function AdminDashboard() {
         </div>
       ) : null}
 
-      {modalAction !== 'none' && (selectedWithdrawal || selectedTicket || selectedUser || modalAction.includes('announcement') || modalAction.includes('task') || modalAction.includes('ad') || modalAction === 'preview_ad') && (
+      {modalAction !== 'none' && (selectedWithdrawal || selectedTicket || selectedUser || modalAction.includes('announcement') || modalAction.includes('task') || modalAction.includes('ad') || modalAction === 'preview_ad' || modalAction.includes('smart_link')) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
+          <div className={`bg-slate-900 border border-slate-700 rounded-2xl w-full ${modalAction.includes('smart_link') ? 'max-w-2xl' : 'max-w-md'} overflow-hidden shadow-2xl flex flex-col`}>
             <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 {modalAction === 'view_withdrawal' && '👁 Withdrawal Details'}
@@ -3803,6 +4294,8 @@ export default function AdminDashboard() {
                 {modalAction === 'ban_user' && '🚫 Ban User'}
                 {modalAction === 'message_user' && '📨 Send Message'}
                 {modalAction === 'preview_ad' && '👁 Ad Preview'}
+                {modalAction === 'create_smart_link' && '🔗 Create Smart Link'}
+                {modalAction === 'edit_smart_link' && '✏️ Edit Smart Link'}
               </h3>
               <button 
                 onClick={() => setModalAction('none')}
@@ -4166,6 +4659,207 @@ export default function AdminDashboard() {
                 <div className="space-y-4">
                   <p className="text-slate-300">Close ticket <strong className="font-mono text-white">{selectedTicket?.id.substring(0,8)}</strong>?</p>
                   <p className="text-sm text-slate-400">This will permanently close the ticket.</p>
+                </div>
+              ) : (modalAction === 'create_smart_link' || modalAction === 'edit_smart_link') ? (
+                <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2 text-slate-300">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">🔗 Destination URL</label>
+                    <input 
+                      type="text" 
+                      value={smartLinkForm.destinationUrl}
+                      onChange={(e) => setSmartLinkForm({...smartLinkForm, destinationUrl: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-indigo-500 text-xs"
+                      placeholder="e.g. https://google.com"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex items-center">
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-400 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={smartLinkForm.autoGenerateAlias}
+                          onChange={(e) => setSmartLinkForm({...smartLinkForm, autoGenerateAlias: e.target.checked})}
+                          className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                        />
+                        Auto-Alias
+                      </label>
+                    </div>
+                    {!smartLinkForm.autoGenerateAlias && (
+                      <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">✍️ Custom Alias</label>
+                        <input 
+                          type="text" 
+                          value={smartLinkForm.customAlias}
+                          onChange={(e) => setSmartLinkForm({...smartLinkForm, customAlias: e.target.value})}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-1.5 text-white focus:outline-none focus:border-indigo-500 text-xs"
+                          placeholder="e.g. my-custom-link"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">📄 Total Pages</label>
+                      <input 
+                        type="number" 
+                        min="1"
+                        max="20"
+                        value={smartLinkForm.totalPages}
+                        onChange={(e) => {
+                          const pagesVal = Number(e.target.value) || 1;
+                          let updated = [...smartLinkForm.pagesConfig];
+                          if (updated.length < pagesVal) {
+                            for (let p = updated.length + 1; p <= pagesVal; p++) {
+                              updated.push({ pageNumber: p, timerDuration: 5, humanVerification: true, selectedAdIds: [] });
+                            }
+                          } else if (updated.length > pagesVal) {
+                            updated = updated.slice(0, pagesVal);
+                          }
+                          setSmartLinkForm({...smartLinkForm, totalPages: pagesVal, pagesConfig: updated});
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-1.5 text-white focus:outline-none focus:border-indigo-500 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">⏱ Final Delay (s)</label>
+                      <input 
+                        type="number" 
+                        min="0"
+                        max="60"
+                        value={smartLinkForm.finalRedirectDelay}
+                        onChange={(e) => setSmartLinkForm({...smartLinkForm, finalRedirectDelay: Number(e.target.value)})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-1.5 text-white focus:outline-none focus:border-indigo-500 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex items-center">
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-400 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={smartLinkForm.autoRedirect}
+                          onChange={(e) => setSmartLinkForm({...smartLinkForm, autoRedirect: e.target.checked})}
+                          className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                        />
+                        Auto Redirect
+                      </label>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">🟢 Status</label>
+                      <select
+                        value={smartLinkForm.status}
+                        onChange={(e) => setSmartLinkForm({...smartLinkForm, status: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-indigo-500 text-xs"
+                      >
+                        <option value="Enabled">Enabled</option>
+                        <option value="Disabled">Disabled</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">📝 Instructions (Optional)</label>
+                    <textarea 
+                      value={smartLinkForm.instructions || ""}
+                      onChange={(e) => setSmartLinkForm({...smartLinkForm, instructions: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-indigo-500 text-xs h-16 resize-none"
+                      placeholder="Instructions shown to visitors on the landing page..."
+                    />
+                  </div>
+
+                  {smartLinkForm.totalPages > 0 && (
+                    <div className="space-y-4 border-t border-slate-800 pt-4 mt-4">
+                      <h4 className="text-xs font-bold text-slate-300">⚙️ Multi-Page Monetization Configurations</h4>
+                      <div className="space-y-4 max-h-[220px] overflow-y-auto pr-2">
+                        {Array.from({ length: smartLinkForm.totalPages }).map((_, index) => {
+                          const pageNum = index + 1;
+                          let pConfig = smartLinkForm.pagesConfig.find(p => p.pageNumber === pageNum);
+                          if (!pConfig) {
+                            pConfig = { pageNumber: pageNum, timerDuration: 5, humanVerification: true, selectedAdIds: [] };
+                          }
+                          return (
+                            <div key={pageNum} className="bg-slate-950 p-3 rounded-xl border border-slate-850 space-y-3">
+                              <div className="flex justify-between items-center">
+                                <span className="font-bold text-xs text-indigo-400">Page {pageNum} Settings</span>
+                                <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={pConfig.humanVerification}
+                                    onChange={(e) => {
+                                      const updated = [...smartLinkForm.pagesConfig];
+                                      const idx = updated.findIndex(p => p.pageNumber === pageNum);
+                                      const config = idx >= 0 ? updated[idx] : { pageNumber: pageNum, timerDuration: 5, humanVerification: true, selectedAdIds: [] };
+                                      config.humanVerification = e.target.checked;
+                                      if (idx >= 0) updated[idx] = config; else updated.push(config);
+                                      setSmartLinkForm({ ...smartLinkForm, pagesConfig: updated });
+                                    }}
+                                    className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500"
+                                  />
+                                  Human Captcha
+                                </label>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div>
+                                  <label className="block text-slate-400 mb-1">Timer (Seconds)</label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="300"
+                                    value={pConfig.timerDuration}
+                                    onChange={(e) => {
+                                      const updated = [...smartLinkForm.pagesConfig];
+                                      const idx = updated.findIndex(p => p.pageNumber === pageNum);
+                                      const config = idx >= 0 ? updated[idx] : { pageNumber: pageNum, timerDuration: 5, humanVerification: true, selectedAdIds: [] };
+                                      config.timerDuration = Number(e.target.value);
+                                      if (idx >= 0) updated[idx] = config; else updated.push(config);
+                                      setSmartLinkForm({ ...smartLinkForm, pagesConfig: updated });
+                                    }}
+                                    className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white text-xs"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-slate-400 mb-1">Active Ads ({ads.length})</label>
+                                  <div className="max-h-[80px] overflow-y-auto bg-slate-900 border border-slate-800 rounded p-1 space-y-1">
+                                    {ads.map((ad) => {
+                                      const isSelected = (pConfig?.selectedAdIds || []).includes(ad.id);
+                                      return (
+                                        <label key={ad.id} className="flex items-center gap-1 text-[10px] text-slate-300 truncate cursor-pointer hover:bg-slate-800 p-0.5 rounded">
+                                          <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={(e) => {
+                                              const updated = [...smartLinkForm.pagesConfig];
+                                              const idx = updated.findIndex(p => p.pageNumber === pageNum);
+                                              const config = idx >= 0 ? updated[idx] : { pageNumber: pageNum, timerDuration: 5, humanVerification: true, selectedAdIds: [] };
+                                              if (e.target.checked) {
+                                                if (!config.selectedAdIds) config.selectedAdIds = [];
+                                                if (!config.selectedAdIds.includes(ad.id)) {
+                                                  config.selectedAdIds.push(ad.id);
+                                                }
+                                              } else {
+                                                config.selectedAdIds = (config.selectedAdIds || []).filter(id => id !== ad.id);
+                                              }
+                                              if (idx >= 0) updated[idx] = config; else updated.push(config);
+                                              setSmartLinkForm({ ...smartLinkForm, pagesConfig: updated });
+                                            }}
+                                            className="w-3 h-3 rounded text-indigo-600 focus:ring-indigo-500"
+                                          />
+                                          {ad.adName}
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (modalAction === 'create_announcement' || modalAction === 'edit_announcement') ? (
                 <div className="space-y-4">
@@ -4948,6 +5642,15 @@ export default function AdminDashboard() {
                   className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
                 >
                   {modalLoading ? 'Closing...' : '✅ Confirm'}
+                </button>
+              )}
+               {(modalAction === 'create_smart_link' || modalAction === 'edit_smart_link') && (
+                <button 
+                  onClick={handleActionSubmit}
+                  disabled={modalLoading || !smartLinkForm.destinationUrl.trim()}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {modalLoading ? 'Saving...' : '💾 Save Smart Link'}
                 </button>
               )}
               {(modalAction === 'create_announcement' || modalAction === 'edit_announcement') && (

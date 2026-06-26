@@ -280,8 +280,75 @@ async function startServer() {
         replies
       }, { merge: true });
       
-      const data = snap.data();
-      await sendTgMessage(data.userId, `💬 <b>Support Reply</b>\n\nTicket ID:\n${id}\n\nMessage:\n${replyMessage}`);
+      const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
+      const botToken = telegramSettingsDoc.data()?.botToken;
+      
+      const userId = ticketData.userId;
+      const rawStatus = "replied";
+      const statusText = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase();
+      
+      const text = `📩 <b>Support Reply</b>\n\n🎫 <b>Ticket ID:</b> ${ticketData.ticketId || id}\n\n💬 <b>Reply:</b>\n${replyMessage}\n\n<b>Status:</b> ${statusText}`;
+      
+      const requestPayload = {
+        chat_id: String(userId),
+        text: text,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "🔄 Refresh Ticket", callback_data: `ticket_details_${id}` },
+              { text: "📂 View Ticket", callback_data: `ticket_details_${id}` }
+            ]
+          ]
+        }
+      };
+      
+      console.log(`[DEBUG] Support Reply (Web) - Attempting to send message:
+- Ticket ID: ${ticketData.ticketId || id}
+- User ID: ${userId}
+- Bot Token Used: ${botToken ? `${botToken.substring(0, 8)}...` : "NONE"}
+- sendMessage Request: ${JSON.stringify(requestPayload, null, 2)}`);
+      
+      let responseData: any = null;
+      let success = false;
+      let errorDetails: string | null = null;
+      
+      if (!botToken) {
+        errorDetails = "Bot Token is missing in Firestore settings/telegram.";
+        console.error(`[DEBUG] Support Reply (Web) - Failed:
+- Error details: ${errorDetails}
+- Success / Failed: Failed`);
+      } else {
+        try {
+          const apiRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestPayload)
+          });
+          
+          responseData = await apiRes.json();
+          success = !!(responseData && responseData.ok);
+          
+          if (success) {
+            console.log(`[DEBUG] Support Reply (Web) - Success:
+- Telegram API Response: ${JSON.stringify(responseData, null, 2)}
+- Success / Failed: Success`);
+          } else {
+            errorDetails = responseData?.description || "Unknown Telegram API Error";
+            console.error(`[DEBUG] Support Reply (Web) - Failed:
+- Error details: ${errorDetails}
+- Telegram API Response: ${JSON.stringify(responseData, null, 2)}
+- Success / Failed: Failed`);
+          }
+        } catch (fetchErr: any) {
+          errorDetails = fetchErr.message || "Network Error";
+          console.error(`[DEBUG] Support Reply (Web) - Failed:
+- Error details: ${errorDetails}
+- Telegram API Response: ${JSON.stringify(responseData || {}, null, 2)}
+- Success / Failed: Failed`);
+        }
+      }
+      
       res.json({ success: true });
     } catch (e: any) {
       console.error("Admin reply error:", e);
@@ -1062,10 +1129,29 @@ async function startServer() {
           bonusSettings: {},
           notificationSettings: {},
           websiteSettings: {},
+          urlShortener: {
+            enabled: false,
+            provider: "GPLinks",
+            apiKey: "",
+            publisherId: "",
+            testStatus: "Not Tested",
+            testedAt: ""
+          },
           maintenanceMode: "🟢 OFF"
         });
       } else {
-        res.json(docSnap.data());
+        const data = docSnap.data();
+        if (!data.urlShortener) {
+          data.urlShortener = {
+            enabled: false,
+            provider: "GPLinks",
+            apiKey: "",
+            publisherId: "",
+            testStatus: "Not Tested",
+            testedAt: ""
+          };
+        }
+        res.json(data);
       }
     } catch (e: any) {
       console.error("Admin system settings fetch error:", e);
@@ -1082,6 +1168,151 @@ async function startServer() {
     } catch (e: any) {
       console.error("Admin system settings update error:", e);
       res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Helper function for URL shorteners
+  async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string): Promise<string> {
+    let endpoint = "";
+    let responseText = "";
+    
+    const cleanProvider = (provider || "").trim().toLowerCase();
+    
+    if (cleanProvider === "gplinks") {
+      endpoint = `https://gplinks.in/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "shrinkme") {
+      endpoint = `https://shrinkme.io/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "droplink") {
+      endpoint = `https://droplink.co/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "shrinkearn") {
+      endpoint = `https://shrinkearn.com/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "ouo.io") {
+      endpoint = `https://ouo.io/api/${apiKey}?s=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "shorte.st" || cleanProvider === "shortest") {
+      endpoint = `https://api.shorte.st/stxt?k=${apiKey}&s=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "adfly") {
+      endpoint = `https://api.adf.ly/v1/shorten?_user_id=${publisherId || ""}&_api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+    } else {
+      // Custom/Generic template
+      if (apiKey.includes("{URL}") || apiKey.includes("{url}")) {
+        endpoint = apiKey.replace(/{URL}/g, encodeURIComponent(url)).replace(/{url}/g, encodeURIComponent(url));
+      } else {
+        // default fallback
+        endpoint = `https://gplinks.in/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
+      }
+    }
+
+    const res = await fetch(endpoint, {
+      method: "GET",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json, text/plain, */*"
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error(`HTTP Error: ${res.status} ${res.statusText}`);
+    }
+
+    responseText = await res.text();
+    
+    try {
+      const data = JSON.parse(responseText);
+      if (data.status === "success" && data.shortenedUrl) {
+        return data.shortenedUrl;
+      }
+      if (data.shortenedUrl) {
+        return data.shortenedUrl;
+      }
+      if (data.short_url) {
+        return data.short_url;
+      }
+      if (data.url) {
+        return data.url;
+      }
+      if (data.status === "error" && data.message) {
+        throw new Error(data.message);
+      }
+    } catch (jsonErr) {
+      const trimmed = responseText.trim();
+      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        return trimmed;
+      }
+      throw new Error(`Invalid response format: ${responseText.substring(0, 100)}`);
+    }
+
+    throw new Error(`Could not extract short URL: ${responseText.substring(0, 100)}`);
+  }
+
+  // Admin endpoint to test connection for URL shorteners
+  app.post("/api/admin/shortener/test-connection", async (req, res) => {
+    try {
+      const { provider, apiKey, publisherId } = req.body;
+      if (!apiKey) {
+        return res.status(400).json({ error: "API Key / URL Template is required." });
+      }
+      
+      const testUrl = "https://google.com";
+      const shortenedUrl = await shortenWithProvider(provider, apiKey, testUrl, publisherId);
+      res.json({ success: true, shortenedUrl });
+    } catch (err: any) {
+      console.error("Shortener test connection error:", err);
+      res.status(500).json({ error: err.message || "Failed to shorten URL using configured provider." });
+    }
+  });
+
+  // Log link click and credit earnings to the owner of the link!
+  app.post("/api/links/:linkId/visit", async (req, res) => {
+    try {
+      const { linkId } = req.params;
+      const linkRef = doc(db, "links", linkId);
+      const linkSnap = await getDoc(linkRef);
+      if (!linkSnap.exists()) {
+        return res.status(404).json({ error: "Link not found" });
+      }
+
+      const linkData = linkSnap.data();
+      const userId = linkData.userId;
+
+      // Update link views
+      const currentViews = linkData.views || 0;
+      await setDoc(linkRef, {
+        views: currentViews + 1
+      }, { merge: true });
+
+      // Get earning settings from system config to determine CPM
+      const sysRef = doc(db, "settings", "system");
+      const sysSnap = await getDoc(sysRef);
+      let cpm = 5.0; // Default CPM of $5.0 per 1000 views ($0.005 per click)
+      if (sysSnap.exists()) {
+        const earningSettings = sysSnap.data().earningSettings || {};
+        cpm = parseFloat(earningSettings.linkCpm || "5.0") || 5.0;
+      }
+
+      const clickReward = cpm / 1000;
+
+      // Credit earnings to owner's balance in Firestore
+      if (userId) {
+        const userRef = doc(db, "users", String(userId));
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const userData = userSnap.data();
+          const currentLinkEarnings = userData.linkEarnings || 0;
+          const currentBalance = userData.balance || 0;
+          const currentTotalEarned = userData.totalEarned || 0;
+
+          await setDoc(userRef, {
+            linkEarnings: currentLinkEarnings + clickReward,
+            balance: currentBalance + clickReward,
+            totalEarned: currentTotalEarned + clickReward
+          }, { merge: true });
+        }
+      }
+
+      res.json({ success: true, originalUrl: linkData.originalUrl });
+    } catch (err: any) {
+      console.error("Error logging link visit:", err);
+      res.status(500).json({ error: "Failed to record link visit" });
     }
   });
 
@@ -1176,9 +1407,13 @@ async function startServer() {
       const docRef = doc(db, "settings", "system");
       const docSnap = await getDoc(docRef);
       if (!docSnap.exists()) {
-        res.json({ maintenanceMode: "🟢 OFF" });
+        res.json({ maintenanceMode: "🟢 OFF", urlShortenerEnabled: false });
       } else {
-        res.json({ maintenanceMode: docSnap.data().maintenanceMode });
+        const data = docSnap.data();
+        res.json({
+          maintenanceMode: data.maintenanceMode,
+          urlShortenerEnabled: data.urlShortener?.enabled === true
+        });
       }
     } catch (e: any) {
       console.error("System settings fetch error:", e);
@@ -2797,6 +3032,493 @@ Bonus added successfully.`;
     } catch (e: any) {
       console.error("Error in /api/withdrawal/verify:", e);
       res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  // ==========================================
+  // SMART URL SHORTENER PUBLIC & ADMIN APIs
+  // ==========================================
+
+  app.post("/api/smart-links/session/init", async (req, res) => {
+    try {
+      const { type, id, browser, device, country } = req.body;
+      if (!type || !id) return res.status(400).json({ success: false, message: "Missing required parameters" });
+
+      const ip = req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown";
+
+      let itemData: any = null;
+      let docRef: any = null;
+      let col = type === "shortener" ? "smart_links" : "uploads";
+
+      if (type === "shortener") {
+        // Find the smart link. Note: id can be the alias or the id itself!
+        const q = query(collection(db, "smart_links"), where("alias", "==", id));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          docRef = qSnap.docs[0].ref;
+          itemData = qSnap.docs[0].data();
+        } else {
+          const directRef = doc(db, "smart_links", id);
+          const directSnap = await getDoc(directRef);
+          if (directSnap.exists()) {
+            docRef = directRef;
+            itemData = directSnap.data();
+          }
+        }
+      } else {
+        const directRef = doc(db, "uploads", id);
+        const directSnap = await getDoc(directRef);
+        if (directSnap.exists()) {
+          docRef = directRef;
+          itemData = directSnap.data();
+        }
+      }
+
+      if (!itemData || itemData.status === "deleted" || itemData.status === "Disabled") {
+        return res.status(404).json({ success: false, message: `${type === "shortener" ? "Smart link" : "File"} not found or disabled.` });
+      }
+
+      // Security checking
+      const ua = req.headers["user-agent"] || "";
+      const isBot = /bot|spider|crawl|slurp|lighthouse|chrome-lighthouse|headless/i.test(ua);
+      if (isBot) {
+        return res.json({ success: false, securityBlocked: true, securityReason: "🤖 Automated agent request blocked by RoyShare Integrity Sentinel." });
+      }
+
+      // Initialize session ID
+      const sessionId = "SESS_" + Math.random().toString(36).substring(2, 15).toUpperCase();
+      
+      // Page configuration logic
+      let totalPages = itemData.totalPages ? Number(itemData.totalPages) : 1;
+      let pagesConfig = itemData.pagesConfig || [];
+
+      if (type === "download" && pagesConfig.length === 0) {
+        // Default download pages configuration
+        totalPages = 1;
+        pagesConfig = [{
+          pageNumber: 1,
+          timerDuration: 5,
+          humanVerification: true,
+          selectedAdIds: []
+        }];
+      }
+
+      // Setup session document in Firestore
+      await setDoc(doc(db, "shortener_sessions", sessionId), {
+        id: sessionId,
+        linkId: itemData.id || id,
+        type,
+        currentPage: 1,
+        completedPages: [],
+        createdAt: new Date().toISOString(),
+        ip: String(ip),
+        isVerified: false
+      });
+
+      // Track views
+      const currentViews = Number(itemData.views || 0);
+      const ipList = itemData.ipList || [];
+      const isUnique = !ipList.includes(ip);
+      const currentUniqueViews = Number(itemData.uniqueViews || 0) + (isUnique ? 1 : 0);
+
+      const updatePayload: any = { views: currentViews + 1 };
+      if (isUnique) {
+        updatePayload.uniqueViews = currentUniqueViews;
+        updatePayload.ipList = [...ipList, ip].slice(-500); // Prevent document bloat
+      }
+      
+      // Recalculate conversion rate
+      const redirects = Number(itemData.completedRedirects || itemData.downloads || 0);
+      const newViews = currentViews + 1;
+      updatePayload.conversionRate = Number(((redirects / newViews) * 100).toFixed(2));
+
+      await updateDoc(docRef, updatePayload);
+
+      // Save analytics records
+      await addDoc(collection(db, "shortener_analytics"), {
+        linkId: itemData.id || id,
+        type: "view",
+        ip: String(ip),
+        country,
+        device,
+        browser,
+        createdAt: new Date().toISOString()
+      });
+
+      if (isUnique) {
+        await addDoc(collection(db, "shortener_analytics"), {
+          linkId: itemData.id || id,
+          type: "unique_view",
+          ip: String(ip),
+          country,
+          device,
+          browser,
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      // Scrub confidential fields from public return
+      const publicItemData = { ...itemData };
+      delete publicItemData.destinationUrl; // SECURITY: Never leak destination URL at session init!
+      delete publicItemData.ipList;
+
+      res.json({
+        success: true,
+        sessionId,
+        totalPages,
+        pagesConfig,
+        data: publicItemData
+      });
+
+    } catch (err: any) {
+      console.error("Error initiating smart link session:", err);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/smart-links/session/page-complete", async (req, res) => {
+    try {
+      const { sessionId, pageNumber } = req.body;
+      if (!sessionId || !pageNumber) return res.status(400).json({ success: false, message: "Missing session ID or page number" });
+
+      const sessionRef = doc(db, "shortener_sessions", sessionId);
+      const sessionSnap = await getDoc(sessionRef);
+
+      if (!sessionSnap.exists()) {
+        return res.status(404).json({ success: false, message: "Session expired or invalid." });
+      }
+
+      const sessionData = sessionSnap.data();
+      if (sessionData.currentPage !== pageNumber) {
+        return res.status(400).json({ success: false, message: "Session page mismatch. Anti-skip triggered." });
+      }
+
+      const completed = sessionData.completedPages || [];
+      if (!completed.includes(pageNumber)) {
+        completed.push(pageNumber);
+      }
+
+      await updateDoc(sessionRef, {
+        completedPages: completed,
+        currentPage: pageNumber + 1
+      });
+
+      // Save page_complete analytics
+      await addDoc(collection(db, "shortener_analytics"), {
+        linkId: sessionData.linkId,
+        type: "page_complete",
+        pageNumber,
+        ip: sessionData.ip,
+        createdAt: new Date().toISOString()
+      });
+
+      res.json({ success: true, nextPage: pageNumber + 1 });
+    } catch (err: any) {
+      console.error("Error in page-complete:", err);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  app.post("/api/smart-links/session/claim", async (req, res) => {
+    try {
+      const { sessionId } = req.body;
+      if (!sessionId) return res.status(400).json({ success: false, message: "Missing session ID" });
+
+      const sessionRef = doc(db, "shortener_sessions", sessionId);
+      const sessionSnap = await getDoc(sessionRef);
+
+      if (!sessionSnap.exists()) {
+        return res.status(404).json({ success: false, message: "Session invalid or expired." });
+      }
+
+      const sessionData = sessionSnap.data();
+      const { linkId, type, completedPages, ip } = sessionData;
+
+      let itemData: any = null;
+      let docRef: any = null;
+
+      if (type === "shortener") {
+        const q = query(collection(db, "smart_links"), where("alias", "==", linkId));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          docRef = qSnap.docs[0].ref;
+          itemData = qSnap.docs[0].data();
+        } else {
+          const directRef = doc(db, "smart_links", linkId);
+          const directSnap = await getDoc(directRef);
+          if (directSnap.exists()) {
+            docRef = directRef;
+            itemData = directSnap.data();
+          }
+        }
+      } else {
+        const directRef = doc(db, "uploads", linkId);
+        const directSnap = await getDoc(directRef);
+        if (directSnap.exists()) {
+          docRef = directRef;
+          itemData = directSnap.data();
+        }
+      }
+
+      if (!itemData) {
+        return res.status(404).json({ success: false, message: "Target entity not found." });
+      }
+
+      // Verify all pages completed
+      let totalPages = itemData.totalPages ? Number(itemData.totalPages) : 1;
+      if (type === "download" && !itemData.totalPages) {
+        totalPages = 1;
+      }
+
+      for (let p = 1; p <= totalPages; p++) {
+        if (!completedPages.includes(p)) {
+          return res.status(400).json({ success: false, message: `Page ${p} verification missing. Skip blocked.` });
+        }
+      }
+
+      // Mark session verified
+      await updateDoc(sessionRef, { isVerified: true });
+
+      // Save analytics redirect log
+      await addDoc(collection(db, "shortener_analytics"), {
+        linkId,
+        type: "redirect",
+        ip: String(ip),
+        createdAt: new Date().toISOString()
+      });
+
+      // Increment completed Redirects / Downloads
+      if (type === "shortener") {
+        const currentRedirects = Number(itemData.completedRedirects || 0) + 1;
+        const views = Number(itemData.views || 1);
+        const conversionRate = Number(((currentRedirects / views) * 100).toFixed(2));
+        
+        await updateDoc(docRef, {
+          completedRedirects: currentRedirects,
+          conversionRate
+        });
+
+        res.json({
+          success: true,
+          destinationUrl: itemData.destinationUrl
+        });
+      } else {
+        const currentDownloads = Number(itemData.downloads || 0) + 1;
+        const views = Number(itemData.views || 1);
+        const conversionRate = Number(((currentDownloads / views) * 100).toFixed(2));
+
+        // Fetch system earnings per download
+        const settingsSnap = await getDoc(doc(db, "settings", "earnings"));
+        const earningsPerDownload = settingsSnap.exists() ? (Number(settingsSnap.data()?.earningsPerDownload) || 0.1) : 0.1;
+        const currentEarnings = Number(itemData.earnings || 0) + earningsPerDownload;
+
+        await updateDoc(docRef, {
+          downloads: currentDownloads,
+          earnings: currentEarnings,
+          conversionRate
+        });
+
+        // Credit the uploader user's wallet
+        if (itemData.userId) {
+          try {
+            const userRef = doc(db, "users", String(itemData.userId));
+            const userSnap = await getDoc(userRef);
+            if (userSnap.exists()) {
+              const currentBalance = Number(userSnap.data().balance || 0);
+              const currentTotalEarnings = Number(userSnap.data().totalEarnings || 0);
+              await updateDoc(userRef, {
+                balance: currentBalance + earningsPerDownload,
+                totalEarnings: currentTotalEarnings + earningsPerDownload
+              });
+              
+              await addDoc(collection(db, "transactions"), {
+                userId: String(itemData.userId),
+                type: "Credit",
+                amount: earningsPerDownload,
+                description: `Earnings from download of file: ${itemData.fileName || "N/A"}`,
+                createdAt: new Date().toISOString(),
+                status: "Completed"
+              });
+            }
+          } catch (e) {
+            console.error("Error crediting uploader wallet:", e);
+          }
+        }
+
+        // Get original download URL from Telegram
+        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
+        
+        let downloadUrl = "";
+        if (botToken && itemData.storageChannelId && itemData.telegramMessageId && itemData.telegramMessageId !== "NOT_SET") {
+          downloadUrl = `https://t.me/c/${itemData.storageChannelId.toString().replace("-100", "")}/${itemData.telegramMessageId}`;
+        } else {
+          downloadUrl = itemData.generatedLink || "";
+        }
+
+        res.json({
+          success: true,
+          downloadUrl
+        });
+      }
+    } catch (err: any) {
+      console.error("Error in claim target:", err);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  // Admin CRUD for self-hosted Smart Shortener Links
+  app.get("/api/admin/smart-links", async (req, res) => {
+    try {
+      const q = query(collection(db, "smart_links"), orderBy("createdAt", "desc"));
+      const snap = await getDocs(q);
+      const links = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      res.json(links);
+    } catch (e: any) {
+      console.error("Error fetching smart links:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/smart-links", async (req, res) => {
+    try {
+      const {
+        destinationUrl,
+        customAlias,
+        totalPages,
+        autoRedirect,
+        finalRedirectDelay,
+        instructions,
+        reward,
+        status,
+        pagesConfig
+      } = req.body;
+
+      if (!destinationUrl) {
+        return res.status(400).json({ error: "Destination URL is required" });
+      }
+
+      let alias = customAlias ? customAlias.trim() : "";
+      if (alias) {
+        const q = query(collection(db, "smart_links"), where("alias", "==", alias));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          return res.status(400).json({ error: "Custom alias is already in use." });
+        }
+      } else {
+        let isUnique = false;
+        let attempts = 0;
+        while (!isUnique && attempts < 10) {
+          alias = Math.random().toString(36).substring(2, 8).toUpperCase();
+          const q = query(collection(db, "smart_links"), where("alias", "==", alias));
+          const qSnap = await getDocs(q);
+          if (qSnap.empty) {
+            isUnique = true;
+          }
+          attempts++;
+        }
+      }
+
+      const newLinkId = "LNK_" + Math.random().toString(36).substring(2, 10).toUpperCase();
+      const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+      const baseDomain = appUrl.replace(/\/$/, "");
+      const shortUrl = `${baseDomain}/s/${alias}`;
+
+      const newLinkDoc = {
+        id: newLinkId,
+        destinationUrl,
+        alias,
+        shortUrl,
+        totalPages: Number(totalPages) || 1,
+        autoRedirect: autoRedirect !== false,
+        finalRedirectDelay: Number(finalRedirectDelay) || 0,
+        instructions: instructions || "",
+        reward: Number(reward) || 0,
+        status: status || "Enabled",
+        pagesConfig: pagesConfig || [],
+        createdAt: new Date().toISOString(),
+        views: 0,
+        uniqueViews: 0,
+        completedRedirects: 0,
+        conversionRate: 0,
+        ipList: []
+      };
+
+      await setDoc(doc(db, "smart_links", newLinkId), newLinkDoc);
+      res.json(newLinkDoc);
+    } catch (e: any) {
+      console.error("Error creating smart link:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/admin/smart-links/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const {
+        destinationUrl,
+        customAlias,
+        totalPages,
+        autoRedirect,
+        finalRedirectDelay,
+        instructions,
+        reward,
+        status,
+        pagesConfig
+      } = req.body;
+
+      const linkRef = doc(db, "smart_links", id);
+      const linkSnap = await getDoc(linkRef);
+
+      if (!linkSnap.exists()) {
+        return res.status(404).json({ error: "Smart link not found." });
+      }
+
+      const existingData = linkSnap.data();
+      let alias = customAlias ? customAlias.trim() : existingData.alias;
+
+      if (alias !== existingData.alias) {
+        const q = query(collection(db, "smart_links"), where("alias", "==", alias));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          return res.status(400).json({ error: "Custom alias is already in use." });
+        }
+      }
+
+      const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+      const baseDomain = appUrl.replace(/\/$/, "");
+      const shortUrl = `${baseDomain}/s/${alias}`;
+
+      const updatedDoc = {
+        ...existingData,
+        destinationUrl,
+        alias,
+        shortUrl,
+        totalPages: Number(totalPages) || 1,
+        autoRedirect: autoRedirect !== false,
+        finalRedirectDelay: Number(finalRedirectDelay) || 0,
+        instructions: instructions || "",
+        reward: Number(reward) || 0,
+        status: status || "Enabled",
+        pagesConfig: pagesConfig || []
+      };
+
+      await setDoc(linkRef, updatedDoc);
+      res.json(updatedDoc);
+    } catch (e: any) {
+      console.error("Error updating smart link:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/admin/smart-links/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      await deleteDoc(doc(db, "smart_links", id));
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Error deleting smart link:", e);
+      res.status(500).json({ error: e.message });
     }
   });
 

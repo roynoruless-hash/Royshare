@@ -100,7 +100,9 @@ export default function App() {
     return <DownloadMaintenancePage fileId={fileId} />;
   }
 
-  const linkMatch = window.location.pathname.match(/^\/lnk\/([a-zA-Z0-9_-]+)/) || window.location.pathname.match(/^\/link\/([a-zA-Z0-9_-]+)/);
+  const linkMatch = window.location.pathname.match(/^\/lnk\/([a-zA-Z0-9_-]+)/) || 
+                    window.location.pathname.match(/^\/link\/([a-zA-Z0-9_-]+)/) ||
+                    window.location.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)/);
   if (linkMatch) {
     const linkId = linkMatch[1];
     return <UrlMaintenancePage linkId={linkId} />;

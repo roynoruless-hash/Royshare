@@ -11,6 +11,76 @@ function formatCurrency(amount: number, currency: string = "INR", includeSymbol:
     }
 }
 
+async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string): Promise<string> {
+    let endpoint = "";
+    let responseText = "";
+    
+    const cleanProvider = (provider || "").trim().toLowerCase();
+    
+    if (cleanProvider === "gplinks") {
+        endpoint = `https://gplinks.in/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "shrinkme") {
+        endpoint = `https://shrinkme.io/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "droplink") {
+        endpoint = `https://droplink.co/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "shrinkearn") {
+        endpoint = `https://shrinkearn.com/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "ouo.io") {
+        endpoint = `https://ouo.io/api/${apiKey}?s=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "shorte.st" || cleanProvider === "shortest") {
+        endpoint = `https://api.shorte.st/stxt?k=${apiKey}&s=${encodeURIComponent(url)}`;
+    } else if (cleanProvider === "adfly") {
+        endpoint = `https://api.adf.ly/v1/shorten?_user_id=${publisherId || ""}&_api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+    } else {
+        if (apiKey.includes("{URL}") || apiKey.includes("{url}")) {
+            endpoint = apiKey.replace(/{URL}/g, encodeURIComponent(url)).replace(/{url}/g, encodeURIComponent(url));
+        } else {
+            endpoint = `https://gplinks.in/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
+        }
+    }
+
+    const res = await fetch(endpoint, {
+        method: "GET",
+        headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*"
+        }
+    });
+
+    if (!res.ok) {
+        throw new Error(`HTTP Error: ${res.status} ${res.statusText}`);
+    }
+
+    responseText = await res.text();
+    
+    try {
+        const data = JSON.parse(responseText);
+        if (data.status === "success" && data.shortenedUrl) {
+            return data.shortenedUrl;
+        }
+        if (data.shortenedUrl) {
+            return data.shortenedUrl;
+        }
+        if (data.short_url) {
+            return data.short_url;
+        }
+        if (data.url) {
+            return data.url;
+        }
+        if (data.status === "error" && data.message) {
+            throw new Error(data.message);
+        }
+    } catch (jsonErr) {
+        const trimmed = responseText.trim();
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            return trimmed;
+        }
+        throw new Error(`Invalid response format: ${responseText.substring(0, 100)}`);
+    }
+
+    throw new Error(`Could not extract short URL: ${responseText.substring(0, 100)}`);
+}
+
 export async function handleUpdate(botToken: string, update: any) {
     if (!update.message && !update.callback_query) return;
     
@@ -111,6 +181,20 @@ Maximum File Size:
         } else if (msg.text === "🔗 URL Shortener") {
             console.log("User selected URL Shortener");
             const db = getDb();
+            
+            let enabled = true;
+            try {
+                const sysDoc = await getDoc(doc(db, "settings", "system"));
+                if (sysDoc.exists() && sysDoc.data().urlShortener) {
+                    enabled = sysDoc.data().urlShortener.enabled !== false;
+                }
+            } catch (err) {}
+            
+            if (!enabled) {
+                await sendTelegramMessage(botToken, chatId, "⚠️ The URL Shortener feature is currently disabled by the administrator.");
+                return;
+            }
+
             await setDoc(doc(db, "users", String(user.id)), { 
                 pendingShortenUrl: true,
                 pendingWithdrawal: null,
@@ -255,6 +339,10 @@ ${msg.text}`;
                 } catch (adminErr) {
                     console.error("Error sending notification to admin:", adminErr);
                 }
+            } else if (userData?.pendingAdminReply) {
+                const replyData = userData.pendingAdminReply;
+                await setDoc(doc(db, "users", String(user.id)), { pendingAdminReply: null }, { merge: true });
+                await handleAdminReplyTextInput(botToken, chatId, user, msg.text, replyData);
             } else if (userData?.pendingSearchFile) {
                 await setDoc(doc(db, "users", String(user.id)), { pendingSearchFile: false }, { merge: true });
                 await handleSearchQuery(botToken, chatId, user, msg.text);
@@ -270,6 +358,98 @@ ${msg.text}`;
     } else if (update.callback_query) {
         console.log("Callback query received");
         await processCallback(botToken, update.callback_query);
+    }
+}
+
+async function handleAdminReplyTextInput(botToken: string, adminChatId: number, adminUser: any, replyMessage: string, replyData: { docId: string, ticketId: string }) {
+    const db = getDb();
+    const docId = replyData.docId;
+    const ref = doc(db, "tickets", docId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+        await sendTelegramMessage(botToken, adminChatId, "⚠️ Ticket not found in Firestore.");
+        return;
+    }
+
+    const ticketData = snap.data();
+    const replies = ticketData.replies || [];
+    replies.push({
+        sender: "admin",
+        message: replyMessage,
+        createdAt: new Date().toISOString()
+    });
+
+    await setDoc(ref, {
+        status: "replied",
+        adminReply: replyMessage,
+        lastReply: new Date().toISOString(),
+        replies
+    }, { merge: true });
+
+    // Fetch the USER BOT token from settings/telegram
+    const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
+    const userBotToken = telegramSettingsDoc.data()?.botToken || botToken;
+
+    const originalUserId = ticketData.userId;
+    const rawStatus = "replied";
+    const statusText = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase();
+
+    const text = `📩 <b>Support Reply</b>\n\n🎫 <b>Ticket ID:</b> ${ticketData.ticketId || docId}\n\n💬 <b>Reply:</b>\n${replyMessage}\n\n<b>Status:</b> ${statusText}`;
+
+    const requestPayload = {
+        chat_id: String(originalUserId),
+        text: text,
+        parse_mode: "HTML",
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { text: "🔄 Refresh Ticket", callback_data: `ticket_details_${docId}` },
+                    { text: "📂 View Ticket", callback_data: `ticket_details_${docId}` }
+                ]
+            ]
+        }
+    };
+
+    console.log(`[DEBUG] Support Reply (Bot) - Attempting to send message:
+- Ticket ID: ${ticketData.ticketId || docId}
+- User ID: ${originalUserId}
+- Bot Token Used: ${userBotToken ? `${userBotToken.substring(0, 8)}...` : "NONE"}
+- sendMessage Request: ${JSON.stringify(requestPayload, null, 2)}`);
+
+    let responseData: any = null;
+    let success = false;
+    let errorDetails: string | null = null;
+
+    try {
+        const apiRes = await fetch(`https://api.telegram.org/bot${userBotToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestPayload)
+        });
+
+        responseData = await apiRes.json();
+        success = !!(responseData && responseData.ok);
+
+        if (success) {
+            console.log(`[DEBUG] Support Reply (Bot) - Success:
+- Telegram API Response: ${JSON.stringify(responseData, null, 2)}
+- Success / Failed: Success`);
+            await sendTelegramMessage(botToken, adminChatId, `✅ Reply sent to user for Ticket ${ticketData.ticketId}.`);
+        } else {
+            errorDetails = responseData?.description || "Unknown Telegram API Error";
+            console.error(`[DEBUG] Support Reply (Bot) - Failed:
+- Error details: ${errorDetails}
+- Telegram API Response: ${JSON.stringify(responseData, null, 2)}
+- Success / Failed: Failed`);
+            await sendTelegramMessage(botToken, adminChatId, `❌ Failed to send reply to user: ${errorDetails}`);
+        }
+    } catch (fetchErr: any) {
+        errorDetails = fetchErr.message || "Network Error";
+        console.error(`[DEBUG] Support Reply (Bot) - Failed:
+- Error details: ${errorDetails}
+- Telegram API Response: ${JSON.stringify(responseData || {}, null, 2)}
+- Success / Failed: Failed`);
+        await sendTelegramMessage(botToken, adminChatId, `❌ Failed to send reply to user: ${errorDetails}`);
     }
 }
 
@@ -569,7 +749,34 @@ async function processShortenUrl(botToken: string, chatId: number, user: any, ur
     const linkId = "LN" + Math.random().toString(36).substring(2, 10).toUpperCase();
     const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
     const baseDomain = appUrl.replace(/\/$/, "");
-    const shortLink = `${baseDomain}/lnk/${linkId}`;
+    const localShortLink = `${baseDomain}/lnk/${linkId}`;
+    
+    let finalShortLink = localShortLink;
+    let providerName = "";
+    
+    try {
+        const sysDoc = await getDoc(doc(db, "settings", "system"));
+        if (sysDoc.exists()) {
+            const sysData = sysDoc.data();
+            const shortener = sysData.urlShortener;
+            if (shortener && shortener.enabled && shortener.apiKey) {
+                providerName = shortener.provider || "GPLinks";
+                try {
+                    finalShortLink = await shortenWithProvider(
+                        shortener.provider,
+                        shortener.apiKey,
+                        localShortLink,
+                        shortener.publisherId
+                    );
+                } catch (e: any) {
+                    console.error("Failed to shorten link with provider:", e);
+                    finalShortLink = localShortLink;
+                }
+            }
+        }
+    } catch (err) {
+        console.error("Error reading system settings for shortener:", err);
+    }
     
     const formattedDate = new Date().toLocaleDateString('en-GB', {
         day: 'numeric',
@@ -581,7 +788,8 @@ async function processShortenUrl(botToken: string, chatId: number, user: any, ur
         linkId,
         userId: String(user.id),
         originalUrl: urlText.trim(),
-        shortUrl: shortLink,
+        shortUrl: finalShortLink,
+        localShortUrl: localShortLink,
         createdAt: formattedDate,
         status: "active"
     });
@@ -602,7 +810,7 @@ async function processShortenUrl(botToken: string, chatId: number, user: any, ur
     await syncReferralsForUser(db, botToken, String(user.id));
     
     const message = `✅ URL Shortened Successfully
-
+${providerName ? `📡 <b>Provider:</b> ${providerName}\n` : ""}
 🔗 Original URL:
 ${urlText.trim()}
 
@@ -610,7 +818,7 @@ ${urlText.trim()}
 ${linkId}
 
 🔗 Short Link:
-${shortLink}`;
+${finalShortLink}`;
 
     const inlineKeyboard = {
         inline_keyboard: [
@@ -1658,12 +1866,13 @@ function getMainMenuKeyboard() {
         keyboard: [
             [{ text: "💰 Earn Rewards" }],
             [{ text: "👤 Account" }, { text: "💰 Balance" }],
-            [{ text: "📤 Upload File" }, { text: "📁 My Content" }],
-            [{ text: "🔗 My Links" }, { text: "📊 Dashboard" }],
-            [{ text: "👥 Refer & Earn" }, { text: "💸 Withdraw" }],
-            [{ text: "📜 Withdrawal History" }, { text: "🎫 Support" }],
-            [{ text: "📢 Announcements" }, { text: "🏆 Leaderboard" }],
-            [{ text: "🎁 Daily Bonus" }, { text: "⚙️ Settings" }]
+            [{ text: "📤 Upload File" }, { text: "🔗 URL Shortener" }],
+            [{ text: "📁 My Content" }, { text: "🔗 My Links" }],
+            [{ text: "📊 Dashboard" }, { text: "👥 Refer & Earn" }],
+            [{ text: "💸 Withdraw" }, { text: "📜 Withdrawal History" }],
+            [{ text: "🎫 Support" }, { text: "📢 Announcements" }],
+            [{ text: "🏆 Leaderboard" }, { text: "🎁 Daily Bonus" }],
+            [{ text: "⚙️ Settings" }]
         ],
         resize_keyboard: true
     };
@@ -4190,6 +4399,19 @@ Maximum File Size:
         } else if (data === "shortlink_mylinks") {
             await processMyLinks(botToken, chatId, callbackQuery.from);
         } else if (data === "shortlink_another") {
+            let enabled = true;
+            try {
+                const sysDoc = await getDoc(doc(db, "settings", "system"));
+                if (sysDoc.exists() && sysDoc.data().urlShortener) {
+                    enabled = sysDoc.data().urlShortener.enabled !== false;
+                }
+            } catch (err) {}
+            
+            if (!enabled) {
+                await sendTelegramMessage(botToken, chatId, "⚠️ The URL Shortener feature is currently disabled by the administrator.");
+                return;
+            }
+
             await setDoc(doc(db, "users", String(userId)), { 
                 pendingShortenUrl: true,
                 pendingWithdrawal: null,
