@@ -1,6 +1,7 @@
 import { getDb } from "./lib/firebase";
 import { REWARD_TASKS } from "./lib/tasks";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, deleteDoc, limit } from "firebase/firestore";
+import { GoogleGenAI } from "@google/genai";
 
 function formatCurrency(amount: number, currency: string = "INR", includeSymbol: boolean = true): string {
     if (currency === "USD") {
@@ -238,6 +239,12 @@ https://youtube.com`;
             const db = getDb();
             const userDoc = await getDoc(doc(db, "users", String(user.id)));
             const userData = userDoc.data();
+
+            if (userData?.liveSupportActive) {
+                const consumed = await handleLiveSupportMessage(botToken, chatId, user, msg.text);
+                if (consumed) return;
+            }
+
             const pendingAnnouncement = userData?.pendingAnnouncement;
             const pendingTicket = userData?.pendingSupportTicket;
 
@@ -2468,12 +2475,180 @@ How can we help you?`;
 
     const inlineKeyboard = {
         inline_keyboard: [
+            [{ text: "💬 Live Support", callback_data: "support_live" }],
             [{ text: "➕ Create Ticket", callback_data: "support_create" }],
             [{ text: "📋 My Tickets", callback_data: "support_list" }],
             [{ text: "📞 Contact Admin", callback_data: "support_admin" }]
         ]
     };
     await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function startLiveSupportSession(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    
+    // Set active support state in database
+    await setDoc(doc(db, "users", String(user.id)), {
+        liveSupportActive: true,
+        liveSupportHistory: []
+    }, { merge: true });
+
+    const message = `💬 *Live Support*
+
+Hello! My name is Sarah from RoyShare Support. How can I assist you today?`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "➕ Create Support Ticket", callback_data: "support_create" }],
+            [{ text: "❌ Exit Live Support", callback_data: "support_live_exit" }]
+        ]
+    };
+
+    await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+}
+
+async function handleLiveSupportMessage(botToken: string, chatId: number, user: any, text: string): Promise<boolean> {
+    if (!text) return false;
+    
+    // Check if the text matches menu buttons or commands
+    const isReplyButton = [
+        "💰 Balance", "💰 Earn Rewards", "📢 Announcements", "🎁 Daily Bonus",
+        "🏆 Leaderboard", "⚙️ Settings", "👤 Account", "📤 Upload File",
+        "📁 My Content", "🔗 URL Shortener", "🔗 My Links", "📊 Dashboard",
+        "🎫 Support", "📜 Withdrawal History", "💸 Withdraw", "👥 Refer & Earn"
+    ].includes(text);
+
+    if (isReplyButton || text.startsWith("/")) {
+        const db = getDb();
+        await setDoc(doc(db, "users", String(user.id)), { liveSupportActive: false }, { merge: true });
+        return false; // Not consumed
+    }
+
+    // Send "typing..." action
+    try {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, action: "typing" })
+        });
+    } catch (e) {}
+
+    const db = getDb();
+    const userDocRef = doc(db, "users", String(user.id));
+    const userSnap = await getDoc(userDocRef);
+    const userData = userSnap.exists() ? userSnap.data() : {};
+    
+    const history = userData.liveSupportHistory || [];
+    const userMsg = { sender: "user", text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+    const updatedHistory = [...history, userMsg];
+    
+    let reply = "";
+    try {
+        const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
+        const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
+        
+        const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            reply = "I apologize, our support system is currently offline. Please feel free to create a support ticket using the button below.";
+        } else {
+            let userContext = "No authenticated user info available.";
+            try {
+                const ticketsSnap = await getDocs(query(collection(db, "tickets"), where("userId", "==", String(user.id))));
+                const userTickets = ticketsSnap.docs.map(d => ({
+                    ticketId: d.data().ticketId,
+                    subject: d.data().subject,
+                    status: d.data().status,
+                    createdAt: d.data().createdAt
+                }));
+
+                const referralsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", String(user.id))));
+                const referralCount = referralsSnap.size;
+
+                const withdrawalsSnap = await getDocs(query(collection(db, "withdrawals"), where("userId", "==", String(user.id))));
+                const userWithdrawals = withdrawalsSnap.docs.map(d => ({
+                    amount: d.data().amount,
+                    status: d.data().status,
+                    createdAt: d.data().createdAt
+                }));
+
+                userContext = `
+The user you are speaking with is authenticated in Telegram.
+- Name: ${user.first_name || 'User'}
+- Username: @${user.username || 'N/A'}
+- Balance: $${userData.balance || 0}
+- Total Earnings: $${(userData.fileEarnings || 0) + (userData.linkEarnings || 0) + (userData.referralEarnings || 0)}
+- Withdrawn Amount: $${userData.withdrawnAmount || 0}
+- Pending Withdrawals: $${userData.pendingWithdrawal || 0}
+- Referrals Count: ${referralCount}
+- Active Tickets: ${JSON.stringify(userTickets)}
+- Withdrawal History: ${JSON.stringify(userWithdrawals)}
+`;
+            } catch (ctxErr) {
+                console.error("Failed to build user context for Telegram bot support:", ctxErr);
+            }
+
+            const ai = new GoogleGenAI({
+                apiKey: apiKey,
+                httpOptions: {
+                    headers: {
+                        'User-Agent': 'aistudio-build'
+                    }
+                }
+            });
+
+            const selectedModel = supportData.geminiModel && supportData.geminiModel !== "gemini-2.5-flash" ? supportData.geminiModel : "gemini-3.5-flash";
+
+            const systemInstruction = `
+You are Sarah, a highly professional, polite, and helpful human support representative at RoyShare.
+RoyShare is a secure Telegram-powered file sharing and URL shortener platform.
+
+CRITICAL DIRECTIVES:
+1. NEVER mention that you are an AI, chatbot, assistant, Gemini, automated agent, or machine. If the user asks if you are a bot, reply warmly that you are a human support specialist.
+2. Reply naturally, with empathy, and write as a professional human agent. Keep your replies concise, friendly, and human-like.
+3. You have access to the user's account context below. Use this information to answer their specific questions about their balance, withdrawals, referrals, or tickets. Do not copy paste the raw JSON; instead, formulate friendly natural responses (e.g., "I see you have an active withdrawal of $25 pending...").
+4. If you cannot fully resolve their issue or if they need manual senior review, invite them to create a formal support ticket by saying: "Please tap the '➕ Create Support Ticket' button below to open a formal ticket for our admin team."
+5. Do NOT output code or technical jargon.
+
+User Account Context:
+${userContext}
+`;
+
+            const chat = ai.chats.create({
+                model: selectedModel,
+                config: {
+                    systemInstruction: systemInstruction
+                },
+                history: updatedHistory.slice(0, -1).map((m: any) => ({
+                    role: m.sender === "user" ? "user" : "model",
+                    parts: [{ text: m.text }]
+                }))
+            });
+
+            const response = await chat.sendMessage({
+                message: text
+            });
+
+            reply = response.text || "I apologize, I'm experiencing a minor issue retrieving your information right now. Please feel free to raise a formal support ticket using the button below.";
+        }
+    } catch (err) {
+        console.error("Telegram bot live support Gemini error:", err);
+        reply = "I apologize, I'm experiencing a minor issue retrieving your information right now. Please feel free to raise a formal support ticket using the button below.";
+    }
+
+    const agentMsg = { sender: "agent", text: reply, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+    const finalHistory = [...updatedHistory, agentMsg];
+    
+    await setDoc(userDocRef, { liveSupportHistory: finalHistory }, { merge: true });
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "➕ Create Support Ticket", callback_data: "support_create" }],
+            [{ text: "❌ Exit Live Support", callback_data: "support_live_exit" }]
+        ]
+    };
+
+    await sendTelegramMessage(botToken, chatId, reply, { reply_markup: inlineKeyboard });
+    return true; // Consumed
 }
 
 async function processMyTickets(botToken: string, chatId: number, user: any, page: number = 1, messageIdToEdit?: number) {
@@ -4050,6 +4225,29 @@ async function processCallback(botToken: string, callbackQuery: any) {
             });
             await setDoc(doc(db, "users", String(userId)), { pendingAnnouncement: null }, { merge: true });
             await sendTelegramMessage(botToken, chatId, `✅ Announcement Published: ${pending.title}`);
+        } else if (data === "support_live") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await startLiveSupportSession(botToken, chatId, callbackQuery.from);
+        } else if (data === "support_live_exit") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await setDoc(doc(db, "users", String(userId)), { liveSupportActive: false }, { merge: true });
+            const exitMsg = `❌ *Live Support Closed*
+
+Thank you for chatting with us. Let us know if you need anything else!`;
+            await sendTelegramMessage(botToken, chatId, exitMsg, { parse_mode: "Markdown" });
+            await processSupport(botToken, chatId, callbackQuery.from);
         } else if (data === "support_create") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
