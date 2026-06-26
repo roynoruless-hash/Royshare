@@ -979,6 +979,7 @@ export default function AdminDashboard() {
     } else if (activeTab === '🔗 Smart URL Shortener') {
       fetchSmartLinks();
       fetchUserShortenerSettings();
+      fetchAds();
     } else if (activeTab === '💸 Withdrawals') {
       fetchWithdrawals();
     } else if (activeTab === '🎫 Support') {
@@ -2961,59 +2962,79 @@ export default function AdminDashboard() {
                               <div className="space-y-3">
                                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                                   <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Select Ads for Step {activePageTab}</label>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs text-slate-400 font-mono">Ads Limit on Page:</span>
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      max="10"
-                                      value={pageConf.numberOfAds || 3}
-                                      onChange={(e) => updatePageConfField("numberOfAds", Number(e.target.value))}
-                                      className="w-16 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white text-center focus:outline-none focus:border-indigo-500 font-bold"
-                                    />
-                                  </div>
                                 </div>
 
-                                {ads.length === 0 ? (
-                                  <p className="text-xs text-slate-500 bg-slate-900 p-3 rounded-lg border border-slate-800 text-center">No Ads in Ads Manager. Please configure some active ads under the Ads Manager tab first!</p>
-                                ) : (
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto bg-slate-900 p-3 rounded-xl border border-slate-800">
-                                    {ads.map((ad: any) => {
-                                      const isChecked = (pageConf.selectedAdIds || []).includes(ad.id);
-                                      return (
-                                        <div
-                                          key={ad.id}
-                                          onClick={() => {
-                                            const currentSelected = pageConf.selectedAdIds || [];
-                                            const nextSelected = isChecked
-                                              ? currentSelected.filter((id: string) => id !== ad.id)
-                                              : [...currentSelected, ad.id];
-                                            updatePageConfField("selectedAdIds", nextSelected);
-                                          }}
-                                          className={`p-2.5 rounded-lg border transition-all cursor-pointer flex items-start gap-3 select-none ${
-                                            isChecked
-                                              ? "bg-indigo-600/10 border-indigo-500/50 text-white"
-                                              : "bg-slate-950 border-slate-850 text-slate-400 hover:border-slate-750"
-                                          }`}
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            checked={isChecked}
-                                            readOnly
-                                            className="mt-1 accent-indigo-500 animate-none"
-                                          />
-                                          <div className="space-y-0.5">
-                                            <p className="text-xs font-bold text-slate-200">{ad.adName}</p>
-                                            <div className="flex flex-wrap gap-1 text-[10px] font-semibold text-slate-500 font-mono">
-                                              <span className="bg-slate-950 px-1 py-0.5 rounded text-teal-400">{ad.adSource}</span>
-                                              <span className="bg-slate-950 px-1 py-0.5 rounded text-indigo-400">{ad.adType}</span>
-                                            </div>
+                                {(() => {
+                                  const activeAds = ads.filter(ad => ad.status === '🟢 Active' || String(ad.status).includes('Active') || String(ad.status).includes('🟢'));
+                                  if (activeAds.length === 0) {
+                                    return <p className="text-xs text-slate-500 bg-slate-900 p-3 rounded-lg border border-slate-800 text-center font-semibold">No Active Ads in Ads Manager. Please configure some active ads under the Ads Manager tab first!</p>;
+                                  }
+
+                                  // Group ads by network (adSource)
+                                  const groupedAds: { [network: string]: any[] } = {};
+                                  activeAds.forEach(ad => {
+                                    const network = ad.adSource || "Unknown Network";
+                                    if (!groupedAds[network]) {
+                                      groupedAds[network] = [];
+                                    }
+                                    groupedAds[network].push(ad);
+                                  });
+
+                                  // Sort networks alphabetically
+                                  const sortedNetworks = Object.keys(groupedAds).sort();
+
+                                  // Within each network, sort ads by adType then adName so they are grouped by adType
+                                  sortedNetworks.forEach(network => {
+                                    groupedAds[network].sort((a, b) => {
+                                      const typeCompare = (a.adType || "").localeCompare(b.adType || "");
+                                      if (typeCompare !== 0) return typeCompare;
+                                      return (a.adName || "").localeCompare(b.adName || "");
+                                    });
+                                  });
+
+                                  return (
+                                    <div className="space-y-4 max-h-72 overflow-y-auto bg-slate-900 p-4 rounded-xl border border-slate-800">
+                                      {sortedNetworks.map(network => (
+                                        <div key={network} className="space-y-2 border-b border-slate-800/60 pb-3 last:border-b-0 last:pb-0">
+                                          <h5 className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">{network}</h5>
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                                            {groupedAds[network].map((ad: any) => {
+                                              const isChecked = (pageConf.selectedAdIds || []).includes(ad.id);
+                                              return (
+                                                <div
+                                                  key={ad.id}
+                                                  onClick={() => {
+                                                    const currentSelected = pageConf.selectedAdIds || [];
+                                                    const nextSelected = isChecked
+                                                      ? currentSelected.filter((id: string) => id !== ad.id)
+                                                      : [...currentSelected, ad.id];
+                                                    updatePageConfField("selectedAdIds", nextSelected);
+                                                  }}
+                                                  className={`p-2.5 rounded-lg border transition-all cursor-pointer flex items-center gap-3 select-none text-left ${
+                                                    isChecked
+                                                      ? "bg-indigo-600/10 border-indigo-500/50 text-white font-medium"
+                                                      : "bg-slate-950 border-slate-850 text-slate-400 hover:border-slate-750 hover:text-slate-200"
+                                                  }`}
+                                                >
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => {}} // handled by parent onClick
+                                                    className="accent-indigo-500 rounded cursor-pointer w-4 h-4"
+                                                  />
+                                                  <div className="min-w-0 flex-1">
+                                                    <p className="text-xs font-bold text-slate-200 truncate">{ad.adName}</p>
+                                                    <p className="text-[10px] text-indigo-400 font-semibold font-mono uppercase truncate mt-0.5">{ad.adType}</p>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
                                           </div>
                                         </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                           );
@@ -5238,9 +5259,9 @@ export default function AdminDashboard() {
                                   Human Captcha
                                 </label>
                               </div>
-                              <div className="grid grid-cols-2 gap-3 text-xs">
+                              <div className="space-y-3 text-xs">
                                 <div>
-                                  <label className="block text-slate-400 mb-1">Timer (Seconds)</label>
+                                  <label className="block text-slate-400 mb-1 font-semibold">Timer (Seconds)</label>
                                   <input
                                     type="number"
                                     min="0"
@@ -5254,41 +5275,89 @@ export default function AdminDashboard() {
                                       if (idx >= 0) updated[idx] = config; else updated.push(config);
                                       setSmartLinkForm({ ...smartLinkForm, pagesConfig: updated });
                                     }}
-                                    className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white text-xs"
+                                    className="w-24 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white text-xs"
                                   />
                                 </div>
-                                <div>
-                                  <label className="block text-slate-400 mb-1">Active Ads ({ads.length})</label>
-                                  <div className="max-h-[80px] overflow-y-auto bg-slate-900 border border-slate-800 rounded p-1 space-y-1">
-                                    {ads.map((ad) => {
-                                      const isSelected = (pConfig?.selectedAdIds || []).includes(ad.id);
-                                      return (
-                                        <label key={ad.id} className="flex items-center gap-1 text-[10px] text-slate-300 truncate cursor-pointer hover:bg-slate-800 p-0.5 rounded">
-                                          <input
-                                            type="checkbox"
-                                            checked={isSelected}
-                                            onChange={(e) => {
-                                              const updated = [...smartLinkForm.pagesConfig];
-                                              const idx = updated.findIndex(p => p.pageNumber === pageNum);
-                                              const config = idx >= 0 ? updated[idx] : { pageNumber: pageNum, timerDuration: 5, humanVerification: true, selectedAdIds: [] };
-                                              if (e.target.checked) {
-                                                if (!config.selectedAdIds) config.selectedAdIds = [];
-                                                if (!config.selectedAdIds.includes(ad.id)) {
-                                                  config.selectedAdIds.push(ad.id);
-                                                }
-                                              } else {
-                                                config.selectedAdIds = (config.selectedAdIds || []).filter(id => id !== ad.id);
-                                              }
-                                              if (idx >= 0) updated[idx] = config; else updated.push(config);
-                                              setSmartLinkForm({ ...smartLinkForm, pagesConfig: updated });
-                                            }}
-                                            className="w-3 h-3 rounded text-indigo-600 focus:ring-indigo-500"
-                                          />
-                                          {ad.adName}
-                                        </label>
-                                      );
-                                    })}
-                                  </div>
+                                <div className="pt-1">
+                                  <label className="block text-slate-400 mb-1.5 font-semibold">Active Ads (Grouped by Network)</label>
+                                  {(() => {
+                                    const activeAds = ads.filter(ad => ad.status === '🟢 Active' || String(ad.status).includes('Active') || String(ad.status).includes('🟢'));
+                                    if (activeAds.length === 0) {
+                                      return <p className="text-[10px] text-slate-500 bg-slate-900 p-2 rounded border border-slate-800 text-center">No Active Ads in Ads Manager.</p>;
+                                    }
+
+                                    // Group ads by network (adSource)
+                                    const groupedAds: { [network: string]: any[] } = {};
+                                    activeAds.forEach(ad => {
+                                      const network = ad.adSource || "Unknown Network";
+                                      if (!groupedAds[network]) {
+                                        groupedAds[network] = [];
+                                      }
+                                      groupedAds[network].push(ad);
+                                    });
+
+                                    // Sort networks alphabetically
+                                    const sortedNetworks = Object.keys(groupedAds).sort();
+
+                                    // Within each network, sort ads by adType then adName so they are grouped by adType
+                                    sortedNetworks.forEach(network => {
+                                      groupedAds[network].sort((a, b) => {
+                                        const typeCompare = (a.adType || "").localeCompare(b.adType || "");
+                                        if (typeCompare !== 0) return typeCompare;
+                                        return (a.adName || "").localeCompare(b.adName || "");
+                                      });
+                                    });
+
+                                    return (
+                                      <div className="max-h-[140px] overflow-y-auto bg-slate-900 border border-slate-800 rounded p-2.5 space-y-3">
+                                        {sortedNetworks.map(network => (
+                                          <div key={network} className="space-y-1">
+                                            <h5 className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">{network}</h5>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                              {groupedAds[network].map((ad: any) => {
+                                                const isSelected = (pConfig?.selectedAdIds || []).includes(ad.id);
+                                                return (
+                                                  <label
+                                                    key={ad.id}
+                                                    className={`flex items-center gap-2 p-1.5 rounded border transition-all cursor-pointer text-[10px] select-none ${
+                                                      isSelected
+                                                        ? "bg-indigo-600/10 border-indigo-500/35 text-white font-medium"
+                                                        : "bg-slate-950 border-slate-850 text-slate-400 hover:border-slate-750"
+                                                    }`}
+                                                  >
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={isSelected}
+                                                      onChange={(e) => {
+                                                        const updated = [...smartLinkForm.pagesConfig];
+                                                        const idx = updated.findIndex(p => p.pageNumber === pageNum);
+                                                        const config = idx >= 0 ? updated[idx] : { pageNumber: pageNum, timerDuration: 5, humanVerification: true, selectedAdIds: [] };
+                                                        if (e.target.checked) {
+                                                          if (!config.selectedAdIds) config.selectedAdIds = [];
+                                                          if (!config.selectedAdIds.includes(ad.id)) {
+                                                            config.selectedAdIds.push(ad.id);
+                                                          }
+                                                        } else {
+                                                          config.selectedAdIds = (config.selectedAdIds || []).filter(id => id !== ad.id);
+                                                        }
+                                                        if (idx >= 0) updated[idx] = config; else updated.push(config);
+                                                        setSmartLinkForm({ ...smartLinkForm, pagesConfig: updated });
+                                                      }}
+                                                      className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500"
+                                                    />
+                                                    <div className="min-w-0 flex-1 truncate">
+                                                      <span className="font-bold text-slate-200">{ad.adName}</span>
+                                                      <span className="text-[9px] text-indigo-400 ml-1.5 uppercase font-mono">({ad.adType})</span>
+                                                    </div>
+                                                  </label>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                             </div>

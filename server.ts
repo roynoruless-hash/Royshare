@@ -565,22 +565,64 @@ async function startServer() {
     }
   });
 
-  // Gemini AI Chat Proxy
+  // Live Support Chat (powered by Gemini in the background with zero AI references)
   app.post("/api/support/ai-chat", async (req, res) => {
     try {
-      const { messages, newMessage } = req.body;
+      const { messages, newMessage, userId } = req.body;
       
       const supportSettingsRef = doc(db, "settings", "support");
       const supportSettingsSnap = await getDoc(supportSettingsRef);
-      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-2.5-flash" };
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
       
       if (supportData.aiEnabled === false) {
-        return res.status(403).json({ error: "AI Support is currently unavailable." });
+        return res.status(403).json({ error: "Support is currently offline." });
       }
       
       const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        return res.status(500).json({ error: "Gemini API Key is not configured." });
+        return res.status(500).json({ error: "Support API is not configured." });
+      }
+
+      // Fetch user's details for real-time background context understanding
+      let userContext = "No authenticated user info available.";
+      if (userId) {
+        try {
+          const userSnap = await getDoc(doc(db, "users", String(userId)));
+          const userData = userSnap.exists() ? userSnap.data() : null;
+          
+          const ticketsSnap = await getDocs(query(collection(db, "tickets"), where("userId", "==", String(userId))));
+          const userTickets = ticketsSnap.docs.map(d => ({
+            ticketId: d.data().ticketId,
+            subject: d.data().subject,
+            status: d.data().status,
+            createdAt: d.data().createdAt
+          }));
+
+          const referralsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", String(userId))));
+          const referralCount = referralsSnap.size;
+
+          const withdrawalsSnap = await getDocs(query(collection(db, "withdrawals"), where("userId", "==", String(userId))));
+          const userWithdrawals = withdrawalsSnap.docs.map(d => ({
+            amount: d.data().amount,
+            status: d.data().status,
+            createdAt: d.data().createdAt
+          }));
+
+          userContext = `
+The user you are speaking with is authenticated.
+- Name: ${userData?.name || userData?.firstName || 'User'}
+- Username: @${userData?.username || 'N/A'}
+- Balance: $${userData?.balance || 0}
+- Total Earnings: $${(userData?.fileEarnings || 0) + (userData?.linkEarnings || 0) + (userData?.referralEarnings || 0)}
+- Withdrawn Amount: $${userData?.withdrawnAmount || 0}
+- Pending Withdrawals: $${userData?.pendingWithdrawal || 0}
+- Referrals Count: ${referralCount}
+- Active Tickets: ${JSON.stringify(userTickets)}
+- Withdrawal History: ${JSON.stringify(userWithdrawals)}
+`;
+        } catch (ctxErr) {
+          console.error("Failed to compile user context for support chatbot:", ctxErr);
+        }
       }
       
       const ai = new GoogleGenAI({
@@ -592,12 +634,28 @@ async function startServer() {
         }
       });
       
-      const selectedModel = supportData.geminiModel || "gemini-2.5-flash";
+      // Prefer modern gemini-3.5-flash for text tasks per system instructions
+      const selectedModel = supportData.geminiModel && supportData.geminiModel !== "gemini-2.5-flash" ? supportData.geminiModel : "gemini-3.5-flash";
       
+      const systemInstruction = `
+You are Sarah, a highly professional, polite, and helpful human support representative at RoyShare.
+RoyShare is a secure Telegram-powered file sharing and URL shortener platform.
+
+CRITICAL DIRECTIVES:
+1. NEVER mention that you are an AI, chatbot, assistant, Gemini, automated agent, or machine. If the user asks if you are a bot, reply warmly that you are a human support specialist.
+2. Reply naturally, with empathy, and write as a professional human agent. Keep your replies concise, friendly, and human-like.
+3. You have access to the user's account context below. Use this information to answer their specific questions about their balance, withdrawals, referrals, or tickets. Do not copy paste the raw JSON; instead, formulate friendly natural responses (e.g., "I see you have an active withdrawal of $25 pending...").
+4. If you cannot fully resolve their issue or if the user requests escalation/manual review, invite them to escalate the conversation by saying: "Please click the 'Escalate to Support Team' button above to send our full chat to our administrators."
+5. Do NOT output code or technical jargon.
+
+User Account Context:
+${userContext}
+`;
+
       const chat = ai.chats.create({
         model: selectedModel,
         config: {
-          systemInstruction: "You are an automated support assistant for RoyShare, a secure Telegram-powered file sharing & URL shortener platform. Assist the user with issues related to Account, Rewards, Withdrawal, Tasks, Telegram Bot, or Technical Issues. Keep answers helpful, empathetic, concise, and professional. If you cannot answer or fully resolve the user's issue, you must output exactly: 'I couldn't fully resolve your issue. Please create a support ticket.'"
+          systemInstruction: systemInstruction
         },
         history: (messages || []).map((m: any) => ({
           role: m.sender === "user" ? "user" : "model",
@@ -609,8 +667,67 @@ async function startServer() {
       res.json({ reply: response.text });
     } catch (e: any) {
       console.error("AI chat error:", e);
-      // Return the fallback response as requested when AI cannot answer
-      res.json({ reply: "I couldn't fully resolve your issue. Please create a support ticket." });
+      res.json({ reply: "I apologize, I'm experiencing a minor issue retrieving your information right now. Please feel free to escalate this conversation to our senior admin team by clicking 'Escalate to Support Team' above." });
+    }
+  });
+
+  // Escalate Live Chat to Support Ticket and notify admin via Telegram
+  app.post("/api/support/tickets/escalate", async (req, res) => {
+    try {
+      const { userId, name, username, chatHistory } = req.body;
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+
+      const transcript = (chatHistory || []).map((m: any) => `[${m.sender === 'user' ? 'User' : 'Support Specialist Sarah'}] (${m.time || ''}): ${m.text}`).join("\n");
+      const ticketId = "TKT" + (Math.floor(Math.random() * 900000) + 100000);
+
+      const ticketData = {
+        ticketId,
+        userId: String(userId),
+        name: name || "User",
+        username: username || "",
+        subject: "Escalated Live Support Session",
+        category: "Other",
+        issueType: "Other",
+        description: `Full Live Support session history:\n\n${transcript}`,
+        screenshot: null,
+        priority: "High",
+        status: "open",
+        createdAt: new Date().toISOString(),
+        replies: [
+          {
+            sender: "user",
+            message: `Escalated conversation transcript:\n\n${transcript}`,
+            createdAt: new Date().toISOString()
+          }
+        ]
+      };
+
+      await addDoc(collection(db, "tickets"), ticketData);
+
+      try {
+        await sendTgMessage(String(userId), `🎫 <b>Chat Escalated Successfully!</b>\n\nTicket ID: <code>${ticketId}</code>\nOur senior admin team has been notified with the full session transcript and will reply shortly.`);
+      } catch (tgErr) {
+        console.error("Failed to send TG escalation confirmation to user:", tgErr);
+      }
+
+      // Notify admin with complete chat history
+      try {
+        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        const adminChatId = telegramSettingsSnap.data()?.adminChatId;
+        if (adminChatId) {
+          await sendTgMessage(
+            String(adminChatId),
+            `⚠️ <b>LIVE CHAT ESCALATED</b> ⚠️\n\n<b>User:</b> ${name || 'User'} (@${username || ''})\n<b>Ticket ID:</b> <code>${ticketId}</code>\n\n<b>Complete Chat Transcript:</b>\n<pre>${transcript}</pre>`
+          );
+        }
+      } catch (adminTgErr) {
+        console.error("Failed to notify admin via TG:", adminTgErr);
+      }
+
+      res.json({ success: true, ticketId });
+    } catch (e: any) {
+      console.error("Escalation endpoint error:", e);
+      res.status(500).json({ error: "Failed to escalate chat conversation" });
     }
   });
 

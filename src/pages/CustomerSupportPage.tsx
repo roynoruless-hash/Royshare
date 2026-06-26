@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   ArrowLeft, MessageSquare, Bot, AlertCircle, FileText, Send, 
   Upload, CheckCircle, RefreshCw, Trash2, Mail, ExternalLink,
-  ChevronRight, Sparkles, X, AlertTriangle, ShieldCheck
+  ChevronRight, Sparkles, X, AlertTriangle, ShieldCheck, FolderOpen
 } from "lucide-react";
 
 interface TicketReply {
@@ -55,7 +55,7 @@ export default function CustomerSupportPage() {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
   // Active view modals
-  const [activeModal, setActiveModal] = useState<"none" | "ai" | "ticket_form" | "live" | "ticket_detail">("none");
+  const [activeModal, setActiveModal] = useState<"none" | "live_support" | "ticket_form" | "tickets_list" | "ticket_detail">("none");
 
   // Form states for raising a ticket
   const [subject, setSubject] = useState("");
@@ -67,24 +67,20 @@ export default function CustomerSupportPage() {
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [generatedTicketId, setGeneratedTicketId] = useState("");
 
-  // Gemini AI Chat states
-  const [aiMessages, setAiMessages] = useState<{ sender: "user" | "ai"; text: string; time: string }[]>([
-    { sender: "ai", text: "Hello! I am your automated RoyShare AI assistant. How can I help you today?", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
-  ]);
-  const [aiInput, setAiInput] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-
-  // Live Chat states
+  // Live Support states (powered by Gemini in the background)
   const [liveMessages, setLiveMessages] = useState<{ sender: "user" | "agent"; text: string; time: string }[]>([
-    { sender: "agent", text: "Welcome to Live Support! How can we assist you today?", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+    { sender: "agent", text: "Hello! My name is Sarah from RoyShare Support. How can I assist you today?", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
   ]);
   const [liveInput, setLiveInput] = useState("");
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [escalating, setEscalating] = useState(false);
+  const [escalated, setEscalated] = useState(false);
+  const [escalatedTicketId, setEscalatedTicketId] = useState("");
 
   // Ticket reply input
   const [replyInput, setReplyInput] = useState("");
   const [replyLoading, setReplyLoading] = useState(false);
 
-  const aiChatEndRef = useRef<HTMLDivElement>(null);
   const liveChatEndRef = useRef<HTMLDivElement>(null);
   const ticketChatEndRef = useRef<HTMLDivElement>(null);
 
@@ -141,11 +137,7 @@ export default function CustomerSupportPage() {
   }, [activeModal, selectedTicket, userId]);
 
   useEffect(() => {
-    if (activeModal === "ai") aiChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [aiMessages, activeModal]);
-
-  useEffect(() => {
-    if (activeModal === "live") liveChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (activeModal === "live_support") liveChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [liveMessages, activeModal]);
 
   useEffect(() => {
@@ -218,59 +210,72 @@ export default function CustomerSupportPage() {
     }
   };
 
-  const handleSendAiMessage = async (e: React.FormEvent) => {
+  const handleSendLiveMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!aiInput.trim() || aiLoading) return;
+    if (!liveInput.trim() || liveLoading) return;
 
-    const userMsgText = aiInput;
-    setAiInput("");
-    setAiMessages(prev => [...prev, { sender: "user", text: userMsgText, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
-    setAiLoading(true);
+    const userMsgText = liveInput;
+    setLiveInput("");
+    
+    const updatedMessages = [
+      ...liveMessages,
+      { sender: "user" as const, text: userMsgText, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+    ];
+    setLiveMessages(updatedMessages);
+    setLiveLoading(true);
 
     try {
-      const chatHistory = aiMessages.map(m => ({
-        sender: m.sender,
-        text: m.text
-      }));
-
       const res = await fetch("/api/support/ai-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: chatHistory,
-          newMessage: userMsgText
+          messages: updatedMessages.map(m => ({ sender: m.sender, text: m.text })),
+          newMessage: userMsgText,
+          userId
         })
       });
       const data = await res.json();
 
       if (res.ok && data.reply) {
-        setAiMessages(prev => [...prev, { sender: "ai", text: data.reply, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+        setLiveMessages(prev => [...prev, { sender: "agent" as const, text: data.reply, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
       } else {
-        setAiMessages(prev => [...prev, { sender: "ai", text: "I couldn't fully resolve your issue. Please create a support ticket.", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+        setLiveMessages(prev => [...prev, { sender: "agent" as const, text: "I apologize, I'm experiencing a minor issue retrieving your information right now. Please feel free to escalate this conversation to our senior admin team by clicking 'Escalate to Support Team' above.", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
       }
     } catch (err) {
       console.error(err);
-      setAiMessages(prev => [...prev, { sender: "ai", text: "I couldn't fully resolve your issue. Please create a support ticket.", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+      setLiveMessages(prev => [...prev, { sender: "agent" as const, text: "I apologize, I'm experiencing a minor issue retrieving your information right now. Please feel free to escalate this conversation to our senior admin team by clicking 'Escalate to Support Team' above.", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
     } finally {
-      setAiLoading(false);
+      setLiveLoading(false);
     }
   };
 
-  const handleSendLiveMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!liveInput.trim()) return;
-
-    setLiveMessages(prev => [...prev, { sender: "user", text: liveInput, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
-    setLiveInput("");
-
-    // Simulate Agent response shortly after
-    setTimeout(() => {
-      setLiveMessages(prev => [...prev, {
-        sender: "agent",
-        text: "Thank you for message! An agent is reviewing your account details. One moment please.",
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      }]);
-    }, 2000);
+  const handleEscalate = async () => {
+    setEscalating(true);
+    try {
+      const res = await fetch("/api/support/tickets/escalate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          name: firstName,
+          username,
+          chatHistory: liveMessages
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setEscalated(true);
+        setEscalatedTicketId(data.ticketId);
+        loadTickets();
+      } else {
+        alert("Failed to escalate chat. Please try creating a ticket directly via 'Create Ticket'.");
+      }
+    } catch (err) {
+      console.error("Escalation error:", err);
+      alert("Error escalating conversation. Please submit a support ticket.");
+    } finally {
+      setEscalating(false);
+    }
   };
 
   const handleSendTicketReply = async (e: React.FormEvent) => {
@@ -375,37 +380,31 @@ export default function CustomerSupportPage() {
           <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">How can we assist you today?</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             
-            {/* 🤖 AI Support */}
+            {/* 💬 Live Support */}
             <button
               onClick={() => {
-                if (settings.aiEnabled) {
-                  setActiveModal("ai");
-                } else {
-                  alert("AI Support is currently unavailable.");
-                }
+                setActiveModal("live_support");
               }}
-              className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-blue-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"
+              className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-emerald-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"
             >
-              <div className="absolute top-0 right-0 p-3 text-blue-500/20 group-hover:text-blue-500/30 transition-all">
-                <Bot className="w-16 h-16" />
+              <div className="absolute top-0 right-0 p-3 text-emerald-500/20 group-hover:text-emerald-500/30 transition-all">
+                <MessageSquare className="w-16 h-16" />
               </div>
-              <div className="p-2.5 bg-blue-600/10 text-blue-400 rounded-xl w-fit border border-blue-500/20">
-                <Bot className="w-6 h-6" />
+              <div className="p-2.5 bg-emerald-600/10 text-emerald-400 rounded-xl w-fit border border-emerald-500/20">
+                <MessageSquare className="w-6 h-6" />
               </div>
               <div>
                 <h3 className="font-bold text-white flex items-center gap-1.5 text-base">
-                  🤖 AI Support
-                  {settings.aiEnabled ? (
-                    <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                  ) : null}
+                  💬 Live Support
+                  <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  {settings.aiEnabled ? "Get instant automated assistance." : "AI Support is currently unavailable."}
+                  Chat with our support staff.
                 </p>
               </div>
             </button>
 
-            {/* 🎫 Raise Ticket */}
+            {/* 🎫 Create Ticket */}
             <button
               onClick={() => {
                 setSubmitSuccess(false);
@@ -420,44 +419,35 @@ export default function CustomerSupportPage() {
                 <FileText className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-bold text-white text-base">🎫 Raise Ticket</h3>
+                <h3 className="font-bold text-white text-base">🎫 Create Ticket</h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                   Submit a query to our agents.
                 </p>
               </div>
             </button>
 
-            {/* 💬 Live Chat */}
+            {/* 📂 My Tickets */}
             <button
               onClick={() => {
-                if (settings.liveChatEnabled) {
-                  setActiveModal("live");
-                } else {
-                  alert("Live Chat is currently offline.");
-                }
+                setActiveModal("tickets_list");
               }}
-              className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-emerald-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"
+              className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-blue-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"
             >
-              <div className="absolute top-0 right-0 p-3 text-emerald-500/20 group-hover:text-emerald-500/30 transition-all">
-                <MessageSquare className="w-16 h-16" />
+              <div className="absolute top-0 right-0 p-3 text-blue-500/20 group-hover:text-blue-500/30 transition-all">
+                <FolderOpen className="w-16 h-16" />
               </div>
-              <div className="p-2.5 bg-emerald-600/10 text-emerald-400 rounded-xl w-fit border border-emerald-500/20">
-                <MessageSquare className="w-6 h-6" />
+              <div className="p-2.5 bg-blue-600/10 text-blue-400 rounded-xl w-fit border border-blue-500/20">
+                <FolderOpen className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-bold text-white flex items-center gap-1.5 text-base">
-                  💬 Live Chat
-                  {settings.liveChatEnabled ? (
-                    <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                  ) : null}
-                </h3>
+                <h3 className="font-bold text-white text-base">📂 My Tickets</h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  {settings.liveChatEnabled ? "Chat with our support staff." : "Live Chat is currently offline."}
+                  Track your active support tickets.
                 </p>
               </div>
             </button>
 
-            {/* 📩 Contact Support */}
+            {/* 📞 Contact Admin */}
             <a
               href={settings.supportTelegram ? (settings.supportTelegram.startsWith("@") ? `https://t.me/${settings.supportTelegram.replace("@", "")}` : settings.supportTelegram) : `mailto:${settings.supportEmail}`}
               target="_blank"
@@ -472,7 +462,7 @@ export default function CustomerSupportPage() {
               </div>
               <div>
                 <h3 className="font-bold text-white flex items-center gap-1 text-base">
-                  📩 Contact Support <ExternalLink className="w-3.5 h-3.5 text-slate-500 group-hover:text-amber-400 transition" />
+                  📞 Contact Admin <ExternalLink className="w-3.5 h-3.5 text-slate-500 group-hover:text-amber-400 transition" />
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                   {settings.supportTelegram ? `Telegram: ${settings.supportTelegram}` : `Email: ${settings.supportEmail}`}
@@ -562,8 +552,8 @@ export default function CustomerSupportPage() {
       {/* MODALS */}
       <AnimatePresence>
         
-        {/* 1. AI SUPPORT MODAL */}
-        {activeModal === "ai" && (
+        {/* 1. LIVE SUPPORT MODAL */}
+        {activeModal === "live_support" && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -579,68 +569,132 @@ export default function CustomerSupportPage() {
               {/* Modal Header */}
               <div className="p-4 border-b border-slate-800 bg-slate-950/60 flex justify-between items-center">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-1.5 bg-blue-600/10 text-blue-400 rounded-lg border border-blue-500/20">
-                    <Bot className="w-5 h-5" />
+                  <div className="p-1.5 bg-emerald-600/10 text-emerald-400 rounded-lg border border-emerald-500/20">
+                    <MessageSquare className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-white text-sm">🤖 RoyShare Support Assistant</h3>
-                    <p className="text-[10px] text-slate-500">Powered by Gemini AI</p>
+                    <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
+                      💬 Live Support Agent
+                      <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                    </h3>
+                    <p className="text-[10px] text-slate-500">Fast & Secure Support Specialist</p>
                   </div>
                 </div>
                 <button 
-                  onClick={() => setActiveModal("none")}
+                  onClick={() => {
+                    setActiveModal("none");
+                    setEscalated(false);
+                  }}
                   className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Chat messages list */}
-              <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-950/20">
-                {aiMessages.map((msg, idx) => (
-                  <div 
-                    key={idx}
-                    className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+              {escalated ? (
+                /* Escalated Success Screen */
+                <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 drop-shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                    <CheckCircle className="w-8 h-8" />
+                  </div>
+                  <h4 className="text-lg font-bold text-emerald-400">Conversation Escalated!</h4>
+                  <p className="text-sm text-slate-300 max-w-xs leading-relaxed">
+                    Your full conversation transcript has been compiled and escalated. A support ticket has been created automatically:
+                  </p>
+                  <div className="bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 font-mono text-white text-sm">
+                    {escalatedTicketId}
+                  </div>
+                  <p className="text-xs text-slate-500 max-w-xs leading-relaxed">
+                    Our senior administrators have been notified on Telegram and will reply in your ticket dashboard or via Telegram soon.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setActiveModal("none");
+                      setEscalated(false);
+                      // Reset conversation
+                      setLiveMessages([
+                        { sender: "agent", text: "Hello! My name is Sarah from RoyShare Support. How can I assist you today?", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+                      ]);
+                    }}
+                    className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition"
                   >
-                    <div className={`max-w-[85%] rounded-2xl p-3.5 text-sm ${
-                      msg.sender === 'user' 
-                        ? 'bg-blue-600 text-white rounded-br-none' 
-                        : 'bg-slate-800 border border-slate-700/50 text-slate-200 rounded-bl-none'
-                    }`}>
-                      <p className="whitespace-pre-wrap">{msg.text}</p>
-                      <span className="block text-[9px] text-slate-400/80 text-right mt-1 font-mono">{msg.time}</span>
-                    </div>
+                    Return to Support
+                  </button>
+                </div>
+              ) : (
+                /* Chat Thread */
+                <>
+                  {/* Chat messages list */}
+                  <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-950/20">
+                    {liveMessages.map((msg, idx) => (
+                      <div 
+                        key={idx}
+                        className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div className={`max-w-[85%] rounded-2xl p-3.5 text-sm ${
+                          msg.sender === 'user' 
+                            ? 'bg-emerald-600 text-white rounded-br-none' 
+                            : 'bg-slate-800 border border-slate-700/50 text-slate-200 rounded-bl-none'
+                        }`}>
+                          <p className="whitespace-pre-wrap">{msg.text}</p>
+                          <span className="block text-[9px] text-slate-400/80 text-right mt-1 font-mono">{msg.time}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {liveLoading && (
+                      <div className="flex justify-start">
+                        <div className="bg-slate-800 border border-slate-700/50 rounded-2xl rounded-bl-none p-4 text-sm text-slate-400 flex items-center gap-2">
+                          <RefreshCw className="w-4 h-4 animate-spin text-emerald-500" />
+                          <span>Support Agent is typing...</span>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={liveChatEndRef} />
                   </div>
-                ))}
-                {aiLoading && (
-                  <div className="flex justify-start">
-                    <div className="bg-slate-800 border border-slate-700/50 rounded-2xl rounded-bl-none p-4 text-sm text-slate-400 flex items-center gap-2">
-                      <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />
-                      <span>Assistant is typing...</span>
-                    </div>
-                  </div>
-                )}
-                <div ref={aiChatEndRef} />
-              </div>
 
-              {/* Chat Input form */}
-              <form onSubmit={handleSendAiMessage} className="p-4 border-t border-slate-800 bg-slate-900 flex gap-2">
-                <input 
-                  type="text" 
-                  value={aiInput}
-                  onChange={e => setAiInput(e.target.value)}
-                  placeholder="Type your question here..."
-                  disabled={aiLoading}
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                />
-                <button 
-                  type="submit"
-                  disabled={!aiInput.trim() || aiLoading}
-                  className="p-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition disabled:opacity-50 shrink-0"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </form>
+                  {/* Escalation Button - Show when conversation has active exchanges */}
+                  {liveMessages.length >= 3 && (
+                    <div className="px-4 py-2 bg-slate-950/40 border-t border-slate-800/60 flex justify-center">
+                      <button
+                        onClick={handleEscalate}
+                        disabled={escalating}
+                        className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50"
+                      >
+                        {escalating ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Escalating Chat...</span>
+                          </>
+                        ) : (
+                          <>
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>🎫 Escalate to Support Team</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Chat Input form */}
+                  <form onSubmit={handleSendLiveMessage} className="p-4 border-t border-slate-800 bg-slate-900 flex gap-2">
+                    <input 
+                      type="text" 
+                      value={liveInput}
+                      onChange={e => setLiveInput(e.target.value)}
+                      placeholder="Type your message here..."
+                      disabled={liveLoading}
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+                    />
+                    <button 
+                      type="submit"
+                      disabled={!liveInput.trim() || liveLoading}
+                      className="p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition disabled:opacity-50 shrink-0"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </form>
+                </>
+              )}
             </motion.div>
           </motion.div>
         )}
@@ -796,8 +850,8 @@ export default function CustomerSupportPage() {
           </motion.div>
         )}
 
-        {/* 3. LIVE CHAT MODAL */}
-        {activeModal === "live" && (
+        {/* 3. MY TICKETS LIST MODAL */}
+        {activeModal === "tickets_list" && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -808,20 +862,17 @@ export default function CustomerSupportPage() {
               initial={{ scale: 0.95 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.95 }}
-              className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg h-[550px] overflow-hidden flex flex-col shadow-2xl"
+              className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl h-[550px] overflow-hidden flex flex-col shadow-2xl"
             >
               {/* Modal Header */}
               <div className="p-4 border-b border-slate-800 bg-slate-950/60 flex justify-between items-center">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-1.5 bg-emerald-600/10 text-emerald-400 rounded-lg border border-emerald-500/20">
-                    <MessageSquare className="w-5 h-5" />
+                  <div className="p-1.5 bg-blue-600/10 text-blue-400 rounded-lg border border-blue-500/20">
+                    <FolderOpen className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
-                      💬 Live Support Agent
-                      <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                    </h3>
-                    <p className="text-[10px] text-slate-500">Typical response under 2 mins</p>
+                    <h3 className="font-bold text-white text-sm">📂 My Support Tickets</h3>
+                    <p className="text-[10px] text-slate-500">Track and reply to your tickets</p>
                   </div>
                 </div>
                 <button 
@@ -832,43 +883,61 @@ export default function CustomerSupportPage() {
                 </button>
               </div>
 
-              {/* Chat messages list */}
-              <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-950/20">
-                {liveMessages.map((msg, idx) => (
-                  <div 
-                    key={idx}
-                    className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div className={`max-w-[85%] rounded-2xl p-3.5 text-sm ${
-                      msg.sender === 'user' 
-                        ? 'bg-emerald-600 text-white rounded-br-none' 
-                        : 'bg-slate-800 border border-slate-700/50 text-slate-200 rounded-bl-none'
-                    }`}>
-                      <p className="whitespace-pre-wrap">{msg.text}</p>
-                      <span className="block text-[9px] text-slate-400/80 text-right mt-1 font-mono">{msg.time}</span>
+              {/* Tickets List */}
+              <div className="flex-1 p-5 overflow-y-auto space-y-3 bg-slate-950/20">
+                {ticketsLoading ? (
+                  <div className="flex flex-col items-center justify-center py-20 space-y-3 text-slate-400">
+                    <RefreshCw className="w-8 h-8 animate-spin text-blue-500" />
+                    <span className="text-sm">Loading your tickets...</span>
+                  </div>
+                ) : tickets.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center space-y-4">
+                    <div className="p-4 bg-slate-950 rounded-full border border-slate-850">
+                      <FileText className="w-10 h-10 text-slate-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-300">No active support tickets</h4>
+                      <p className="text-xs text-slate-500 max-w-xs mt-1">
+                        If you need custom assistance, create a ticket using the "Create Ticket" card.
+                      </p>
                     </div>
                   </div>
-                ))}
-                <div ref={liveChatEndRef} />
+                ) : (
+                  tickets.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        setSelectedTicket(t);
+                        setActiveModal("ticket_detail");
+                      }}
+                      className="w-full p-4 bg-slate-900/60 border border-slate-800 hover:border-blue-500/50 hover:bg-slate-900/80 rounded-xl text-left transition flex justify-between items-center group animate-fade-in"
+                    >
+                      <div className="space-y-1.5 pr-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] font-semibold text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800/80">
+                            {t.ticketId || t.id.substring(0, 8).toUpperCase()}
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            t.priority === 'High' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                            t.priority === 'Medium' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                            'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                          }`}>
+                            {t.priority}
+                          </span>
+                          {getStatusBadge(t.status)}
+                        </div>
+                        <h4 className="font-semibold text-white text-sm line-clamp-1 group-hover:text-blue-400 transition">
+                          {t.subject}
+                        </h4>
+                        <p className="text-xs text-slate-400 line-clamp-1">
+                          {t.description}
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-white transition shrink-0" />
+                    </button>
+                  ))
+                )}
               </div>
-
-              {/* Chat Input form */}
-              <form onSubmit={handleSendLiveMessage} className="p-4 border-t border-slate-800 bg-slate-900 flex gap-2">
-                <input 
-                  type="text" 
-                  value={liveInput}
-                  onChange={e => setLiveInput(e.target.value)}
-                  placeholder="Type your message to support staff..."
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
-                />
-                <button 
-                  type="submit"
-                  disabled={!liveInput.trim()}
-                  className="p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition disabled:opacity-50 shrink-0"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </form>
             </motion.div>
           </motion.div>
         )}
