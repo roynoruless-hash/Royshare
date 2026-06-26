@@ -78,6 +78,23 @@ export default function AdminDashboard() {
     status: "Enabled",
     pagesConfig: [] as any[]
   });
+  const [shortenerSubTab, setShortenerSubTab] = useState<'self' | 'user'>('self');
+  const [activePageTab, setActivePageTab] = useState(1);
+  const [userShortenerSettings, setUserShortenerSettings] = useState<any>({
+    totalPages: 2,
+    instructions: "Follow the steps below to reach your destination.",
+    autoScroll: true,
+    autoRedirect: true,
+    continueButtonText: "Proceed",
+    verifyButtonText: "Verify This Step",
+    humanVerification: true,
+    vpnDetection: false,
+    botDetection: true,
+    pagesConfig: []
+  });
+  const [userShortenerSettingsLoading, setUserShortenerSettingsLoading] = useState(false);
+  const [userShortenerSettingsSaving, setUserShortenerSettingsSaving] = useState(false);
+
   const [adPlacements, setAdPlacements] = useState<any>({});
   const [adPlacementsLoading, setAdPlacementsLoading] = useState(false);
   const [showAdPreview, setShowAdPreview] = useState(false);
@@ -894,11 +911,74 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchUserShortenerSettings = async () => {
+    setUserShortenerSettingsLoading(true);
+    try {
+      const res = await fetch("/api/admin/user-shortener-settings");
+      if (res.ok) {
+        const data = await res.json();
+        setUserShortenerSettings(data);
+      }
+    } catch (e) {
+      console.error("Error fetching user shortener settings:", e);
+    } finally {
+      setUserShortenerSettingsLoading(false);
+    }
+  };
+
+  const saveUserShortenerSettings = async (updatedConfig?: any) => {
+    setUserShortenerSettingsSaving(true);
+    try {
+      const configToSave = updatedConfig || userShortenerSettings;
+      const res = await fetch("/api/admin/user-shortener-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(configToSave)
+      });
+      if (res.ok) {
+        alert("User Mode Shortener settings updated successfully!");
+      } else {
+        alert("Failed to save User Mode Shortener settings.");
+      }
+    } catch (e: any) {
+      alert("Error saving User Mode Shortener settings: " + e.message);
+    } finally {
+      setUserShortenerSettingsSaving(false);
+    }
+  };
+
+  const handleUserTotalPagesChange = (num: number) => {
+    const val = Math.max(1, Math.min(20, num));
+    setUserShortenerSettings((prev: any) => {
+      const prevPages = prev.pagesConfig || [];
+      const newPages = [];
+      for (let i = 1; i <= val; i++) {
+        const existing = prevPages.find((p: any) => p.pageNumber === i);
+        newPages.push(existing || {
+          pageNumber: i,
+          timerDuration: 10,
+          instructions: `Complete step ${i} verification.`,
+          selectedAdIds: [],
+          numberOfAds: 3,
+          humanVerification: true,
+          verifyBtnText: `Verify Step ${i}`,
+          continueBtnText: `Proceed`
+        });
+      }
+      return {
+        ...prev,
+        totalPages: val,
+        pagesConfig: newPages
+      };
+    });
+  };
+
   useEffect(() => {
     if (activeTab === 'Overview') {
       fetchDashboardData();
     } else if (activeTab === '🔗 Smart URL Shortener') {
       fetchSmartLinks();
+      fetchUserShortenerSettings();
     } else if (activeTab === '💸 Withdrawals') {
       fetchWithdrawals();
     } else if (activeTab === '🎫 Support') {
@@ -2400,192 +2480,549 @@ export default function AdminDashboard() {
 
           {activeTab === '🔗 Smart URL Shortener' && (
             <div className="space-y-6">
-              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
-                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                  🔗 Self-Hosted Smart URL Shortener
-                </h2>
-                <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <button onClick={() => {
-                    setSmartLinkForm({
-                      destinationUrl: "",
-                      customAlias: "",
-                      autoGenerateAlias: true,
-                      totalPages: 1,
-                      autoRedirect: true,
-                      finalRedirectDelay: 5,
-                      instructions: "",
-                      reward: 0,
-                      status: "Enabled",
-                      pagesConfig: []
-                    });
-                    setModalAction('create_smart_link');
-                  }} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20 cursor-pointer">
-                    ➕ Create Smart Link
-                  </button>
-                  <button onClick={() => fetchSmartLinks()} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700 cursor-pointer">
-                    🔄 Refresh
-                  </button>
-                </div>
+              {/* Dual Mode Switcher */}
+              <div className="flex border-b border-slate-800">
+                <button
+                  id="self-mode-tab"
+                  onClick={() => setShortenerSubTab('self')}
+                  className={`px-6 py-3 font-semibold text-sm transition-all border-b-2 ${
+                    shortenerSubTab === 'self'
+                      ? "border-indigo-500 text-white bg-slate-800/20"
+                      : "border-transparent text-slate-400 hover:text-white"
+                  }`}
+                >
+                  💼 SELF MODE (Admin Links)
+                </button>
+                <button
+                  id="user-mode-tab"
+                  onClick={() => {
+                    setShortenerSubTab('user');
+                    fetchUserShortenerSettings();
+                  }}
+                  className={`px-6 py-3 font-semibold text-sm transition-all border-b-2 ${
+                    shortenerSubTab === 'user'
+                      ? "border-indigo-500 text-white bg-slate-800/20"
+                      : "border-transparent text-slate-400 hover:text-white"
+                  }`}
+                >
+                  👥 USER MODE (User Created Links)
+                </button>
               </div>
 
-              {/* Summary Cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
-                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">🔗 Total Links</h3>
-                  <p className="text-2xl font-bold text-white">{smartLinks.length}</p>
-                </div>
-                <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
-                  <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">👀 Total Views</h3>
-                  <p className="text-2xl font-bold text-blue-300">{smartLinks.reduce((acc, l) => acc + Number(l.views || 0), 0)}</p>
-                </div>
-                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
-                  <h3 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">🚀 Completed Redirects</h3>
-                  <p className="text-2xl font-bold text-emerald-300">{smartLinks.reduce((acc, l) => acc + Number(l.completedRedirects || 0), 0)}</p>
-                </div>
-                <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
-                  <h3 className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-1">📈 Average Conversion</h3>
-                  <p className="text-2xl font-bold text-purple-300">
-                    {(() => {
-                      const v = smartLinks.reduce((acc, l) => acc + Number(l.views || 0), 0);
-                      const r = smartLinks.reduce((acc, l) => acc + Number(l.completedRedirects || 0), 0);
-                      return v > 0 ? ((r / v) * 100).toFixed(2) + '%' : '0.00%';
-                    })()}
-                  </p>
-                </div>
-              </div>
-
-              {/* Links Table */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-                <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row gap-4 items-center justify-between">
-                  <h3 className="font-bold text-white text-sm">Monetized Link Records</h3>
-                  <input
-                    type="text"
-                    placeholder="Search links by alias or destination..."
-                    value={smartLinkSearch}
-                    onChange={(e) => setSmartLinkSearch(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 w-full sm:w-64"
-                  />
-                </div>
-
-                {smartLinksLoading ? (
-                  <div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
-                ) : smartLinksError ? (
-                  <p className="text-center py-8 text-rose-400 text-sm font-semibold">{smartLinksError}</p>
-                ) : smartLinks.length === 0 ? (
-                  <p className="text-center py-12 text-slate-500 text-sm">No self-hosted smart links found. Create your first monetized link above!</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-800">
-                        <tr>
-                          <th className="p-4">Short URL</th>
-                          <th className="p-4">Destination URL</th>
-                          <th className="p-4 text-center">Pages</th>
-                          <th className="p-4 text-center">Views / Unique</th>
-                          <th className="p-4 text-center">Redirects / CR</th>
-                          <th className="p-4">Created At</th>
-                          <th className="p-4">Status</th>
-                          <th className="p-4 text-center">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-850">
-                        {smartLinks
-                          .filter(l => 
-                            (l.alias || '').toLowerCase().includes(smartLinkSearch.toLowerCase()) || 
-                            (l.destinationUrl || '').toLowerCase().includes(smartLinkSearch.toLowerCase()) ||
-                            (l.shortUrl || '').toLowerCase().includes(smartLinkSearch.toLowerCase())
-                          )
-                          .map((link) => (
-                            <tr key={link.id} className="hover:bg-slate-850/30 transition-colors">
-                              <td className="p-4 font-mono">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-indigo-400 font-semibold">{link.shortUrl}</span>
-                                  <button
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(link.shortUrl);
-                                      alert("Short Link Copied!");
-                                    }}
-                                    className="text-slate-400 hover:text-white bg-slate-800 p-1 rounded transition cursor-pointer"
-                                    title="Copy Link"
-                                  >
-                                    📋
-                                  </button>
-                                  <a
-                                    href={link.shortUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-slate-400 hover:text-white bg-slate-800 p-1 rounded transition cursor-pointer"
-                                    title="Visit Link"
-                                  >
-                                    🌐
-                                  </a>
-                                </div>
-                              </td>
-                              <td className="p-4 max-w-xs truncate" title={link.destinationUrl}>
-                                <span className="text-slate-300 font-medium">{link.destinationUrl}</span>
-                              </td>
-                              <td className="p-4 text-center font-bold text-white">{link.totalPages}</td>
-                              <td className="p-4 text-center font-mono">
-                                <span className="text-slate-300 font-bold">{link.views || 0}</span>
-                                <span className="text-slate-500 mx-1">/</span>
-                                <span className="text-slate-400">{link.uniqueViews || 0}</span>
-                              </td>
-                              <td className="p-4 text-center font-mono">
-                                <span className="text-emerald-400 font-bold">{link.completedRedirects || 0}</span>
-                                <span className="text-slate-500 mx-1">/</span>
-                                <span className="text-purple-400 font-semibold">{link.conversionRate || 0}%</span>
-                              </td>
-                              <td className="p-4 text-slate-400 font-mono">
-                                {link.createdAt ? new Date(link.createdAt).toLocaleDateString() : "N/A"}
-                              </td>
-                              <td className="p-4">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${link.status === "Enabled" ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/15 text-rose-400 border border-rose-500/20"}`}>
-                                  {link.status}
-                                </span>
-                              </td>
-                              <td className="p-4 text-center">
-                                <div className="flex items-center justify-center gap-2">
-                                  <button
-                                    onClick={() => {
-                                      setSmartLinkForm({
-                                        ...link,
-                                        autoGenerateAlias: !link.customAlias && link.alias ? false : true
-                                      });
-                                      setModalAction('edit_smart_link');
-                                    }}
-                                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium transition cursor-pointer"
-                                  >
-                                    ✏️ Edit
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      if (confirm("Are you sure you want to delete this smart link?")) {
-                                        try {
-                                          const res = await fetch(`/api/admin/smart-links/${link.id}`, { method: 'DELETE' });
-                                          if (res.ok) {
-                                            fetchSmartLinks();
-                                            alert("Smart Link Deleted");
-                                          } else {
-                                            alert("Failed to delete link.");
-                                          }
-                                        } catch (err: any) {
-                                          alert(err.message);
-                                        }
-                                      }
-                                    }}
-                                    className="px-2 py-1 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 rounded font-medium transition cursor-pointer"
-                                  >
-                                    🗑 Delete
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
+              {shortenerSubTab === 'self' ? (
+                <div className="space-y-6">
+                  <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                    <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                      🔗 Self-Hosted Smart URL Shortener (SELF MODE)
+                    </h2>
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                      <button onClick={() => {
+                        setSmartLinkForm({
+                          destinationUrl: "",
+                          customAlias: "",
+                          autoGenerateAlias: true,
+                          totalPages: 1,
+                          autoRedirect: true,
+                          finalRedirectDelay: 5,
+                          instructions: "",
+                          reward: 0,
+                          status: "Enabled",
+                          pagesConfig: []
+                        });
+                        setModalAction('create_smart_link');
+                      }} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20 cursor-pointer">
+                        ➕ Create Smart Link
+                      </button>
+                      <button onClick={() => fetchSmartLinks()} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700 cursor-pointer">
+                        🔄 Refresh
+                      </button>
+                    </div>
                   </div>
-                )}
-              </div>
+
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">🔗 Total Links</h3>
+                      <p className="text-2xl font-bold text-white">{smartLinks.length}</p>
+                    </div>
+                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">👀 Total Views</h3>
+                      <p className="text-2xl font-bold text-blue-300">{smartLinks.reduce((acc, l) => acc + Number(l.views || 0), 0)}</p>
+                    </div>
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">🚀 Completed Redirects</h3>
+                      <p className="text-2xl font-bold text-emerald-300">{smartLinks.reduce((acc, l) => acc + Number(l.completedRedirects || 0), 0)}</p>
+                    </div>
+                    <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-1">📈 Average Conversion</h3>
+                      <p className="text-2xl font-bold text-purple-300">
+                        {(() => {
+                          const v = smartLinks.reduce((acc, l) => acc + Number(l.views || 0), 0);
+                          const r = smartLinks.reduce((acc, l) => acc + Number(l.completedRedirects || 0), 0);
+                          return v > 0 ? ((r / v) * 100).toFixed(2) + '%' : '0.00%';
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Links Table */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                    <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row gap-4 items-center justify-between">
+                      <h3 className="font-bold text-white text-sm">Monetized Link Records</h3>
+                      <input
+                        type="text"
+                        placeholder="Search links by alias or destination..."
+                        value={smartLinkSearch}
+                        onChange={(e) => setSmartLinkSearch(e.target.value)}
+                        className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 w-full sm:w-64"
+                      />
+                    </div>
+
+                    {smartLinksLoading ? (
+                      <div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+                    ) : smartLinksError ? (
+                      <p className="text-center py-8 text-rose-400 text-sm font-semibold">{smartLinksError}</p>
+                    ) : smartLinks.length === 0 ? (
+                      <p className="text-center py-12 text-slate-500 text-sm">No self-hosted smart links found. Create your first monetized link above!</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-800">
+                            <tr>
+                              <th className="p-4">Short URL</th>
+                              <th className="p-4">Destination URL</th>
+                              <th className="p-4 text-center">Pages</th>
+                              <th className="p-4 text-center">Views / Unique</th>
+                              <th className="p-4 text-center">Redirects / CR</th>
+                              <th className="p-4">Created At</th>
+                              <th className="p-4">Status</th>
+                              <th className="p-4 text-center">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-850">
+                            {smartLinks
+                              .filter(l => 
+                                (l.alias || '').toLowerCase().includes(smartLinkSearch.toLowerCase()) || 
+                                (l.destinationUrl || '').toLowerCase().includes(smartLinkSearch.toLowerCase()) ||
+                                (l.shortUrl || '').toLowerCase().includes(smartLinkSearch.toLowerCase())
+                              )
+                              .map((link) => (
+                                <tr key={link.id} className="hover:bg-slate-850/30 transition-colors">
+                                  <td className="p-4 font-mono">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-indigo-400 font-semibold">{link.shortUrl}</span>
+                                      <button
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(link.shortUrl);
+                                          alert("Short Link Copied!");
+                                        }}
+                                        className="text-slate-400 hover:text-white bg-slate-800 p-1 rounded transition cursor-pointer"
+                                        title="Copy Link"
+                                      >
+                                        📋
+                                      </button>
+                                      <a
+                                        href={link.shortUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-slate-400 hover:text-white bg-slate-800 p-1 rounded transition cursor-pointer"
+                                        title="Visit Link"
+                                      >
+                                        🌐
+                                      </a>
+                                    </div>
+                                  </td>
+                                  <td className="p-4 max-w-xs truncate" title={link.destinationUrl}>
+                                    <span className="text-slate-300 font-medium">{link.destinationUrl}</span>
+                                  </td>
+                                  <td className="p-4 text-center font-bold text-white">{link.totalPages}</td>
+                                  <td className="p-4 text-center font-mono">
+                                    <span className="text-slate-300 font-bold">{link.views || 0}</span>
+                                    <span className="text-slate-500 mx-1">/</span>
+                                    <span className="text-slate-400">{link.uniqueViews || 0}</span>
+                                  </td>
+                                  <td className="p-4 text-center font-mono">
+                                    <span className="text-emerald-400 font-bold">{link.completedRedirects || 0}</span>
+                                    <span className="text-slate-500 mx-1">/</span>
+                                    <span className="text-purple-400 font-semibold">{link.conversionRate || 0}%</span>
+                                  </td>
+                                  <td className="p-4 text-slate-400 font-mono">
+                                    {link.createdAt ? new Date(link.createdAt).toLocaleDateString() : "N/A"}
+                                  </td>
+                                  <td className="p-4">
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${link.status === "Enabled" ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/15 text-rose-400 border border-rose-500/20"}`}>
+                                      {link.status}
+                                    </span>
+                                  </td>
+                                  <td className="p-4 text-center">
+                                    <div className="flex items-center justify-center gap-2">
+                                      <button
+                                        onClick={() => {
+                                          setSmartLinkForm({
+                                            ...link,
+                                            autoGenerateAlias: !link.customAlias && link.alias ? false : true
+                                          });
+                                          setModalAction('edit_smart_link');
+                                        }}
+                                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium transition cursor-pointer"
+                                      >
+                                        ✏️ Edit
+                                      </button>
+                                      <button
+                                        onClick={async () => {
+                                          if (confirm("Are you sure you want to delete this smart link?")) {
+                                            try {
+                                              const res = await fetch(`/api/admin/smart-links/${link.id}`, { method: 'DELETE' });
+                                              if (res.ok) {
+                                                fetchSmartLinks();
+                                                alert("Smart Link Deleted");
+                                              } else {
+                                                alert("Failed to delete link.");
+                                              }
+                                            } catch (err: any) {
+                                              alert(err.message);
+                                            }
+                                          }
+                                        }}
+                                        className="px-2 py-1 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 rounded font-medium transition cursor-pointer"
+                                      >
+                                        🗑 Delete
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* USER MODE SETTINGS */
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-800">
+                    <div>
+                      <h3 className="text-lg font-bold text-white">👥 User Created Links Configuration Defaults (USER MODE)</h3>
+                      <p className="text-slate-400 text-xs mt-1">Configure global redirection and monetization defaults applied to all short links created by normal users.</p>
+                    </div>
+                    <button
+                      id="save-user-settings-btn"
+                      onClick={() => saveUserShortenerSettings()}
+                      disabled={userShortenerSettingsSaving}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white font-semibold rounded-xl transition-all shadow-lg shadow-indigo-900/20 cursor-pointer"
+                    >
+                      {userShortenerSettingsSaving ? "⏳ Saving Defaults..." : "💾 Save Settings"}
+                    </button>
+                  </div>
+
+                  {userShortenerSettingsLoading ? (
+                    <div className="flex justify-center py-12">
+                      <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* Global Settings Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-4">
+                          <h4 className="text-sm font-semibold text-slate-300 border-b border-slate-850 pb-1">⚙️ Global Redirection Options</h4>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Total Pages (1-20)</label>
+                              <input
+                                id="user-total-pages-input"
+                                type="number"
+                                min="1"
+                                max="20"
+                                value={userShortenerSettings.totalPages || 1}
+                                onChange={(e) => handleUserTotalPagesChange(Number(e.target.value))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                            
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Auto Scroll Down</label>
+                              <select
+                                id="user-auto-scroll"
+                                value={userShortenerSettings.autoScroll !== false ? "true" : "false"}
+                                onChange={(e) => setUserShortenerSettings((prev: any) => ({ ...prev, autoScroll: e.target.value === "true" }))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                              >
+                                <option value="true">🟢 Enabled</option>
+                                <option value="false">🔴 Disabled</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Auto Redirect (Last Page)</label>
+                              <select
+                                id="user-auto-redirect"
+                                value={userShortenerSettings.autoRedirect !== false ? "true" : "false"}
+                                onChange={(e) => setUserShortenerSettings((prev: any) => ({ ...prev, autoRedirect: e.target.value === "true" }))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                              >
+                                <option value="true">🟢 Enabled (Countdown Auto)</option>
+                                <option value="false">🔴 Disabled (Show Button)</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Default Math Verification</label>
+                              <select
+                                id="user-human-verification"
+                                value={userShortenerSettings.humanVerification !== false ? "true" : "false"}
+                                onChange={(e) => setUserShortenerSettings((prev: any) => ({ ...prev, humanVerification: e.target.value === "true" }))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                              >
+                                <option value="true">🟢 Enabled</option>
+                                <option value="false">🔴 Disabled</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Global Instructions Text</label>
+                            <textarea
+                              id="user-global-instructions"
+                              rows={3}
+                              value={userShortenerSettings.instructions || ""}
+                              onChange={(e) => setUserShortenerSettings((prev: any) => ({ ...prev, instructions: e.target.value }))}
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                              placeholder="Follow the steps to reach destination URL..."
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <h4 className="text-sm font-semibold text-slate-300 border-b border-slate-850 pb-1">🛡️ Security & Integrity</h4>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Anti-VPN/Anti-Proxy Protection</label>
+                              <select
+                                id="user-vpn-detection"
+                                value={userShortenerSettings.vpnDetection === true ? "true" : "false"}
+                                onChange={(e) => setUserShortenerSettings((prev: any) => ({ ...prev, vpnDetection: e.target.value === "true" }))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                              >
+                                <option value="true">🟢 Enabled (IP Check)</option>
+                                <option value="false">🔴 Disabled</option>
+                              </select>
+                              <p className="text-[10px] text-slate-500 mt-1">Queries IP-API to block non-residential traffic.</p>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Bot Detection</label>
+                              <select
+                                id="user-bot-detection"
+                                value={userShortenerSettings.botDetection !== false ? "true" : "false"}
+                                onChange={(e) => setUserShortenerSettings((prev: any) => ({ ...prev, botDetection: e.target.value === "true" }))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                              >
+                                <option value="true">🟢 Enabled (Agent Filtering)</option>
+                                <option value="false">🔴 Disabled</option>
+                              </select>
+                              <p className="text-[10px] text-slate-500 mt-1">Filters spider, web crawl and headless browser traffic.</p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Verify Button Label</label>
+                              <input
+                                id="user-verify-label"
+                                type="text"
+                                value={userShortenerSettings.verifyButtonText || ""}
+                                onChange={(e) => setUserShortenerSettings((prev: any) => ({ ...prev, verifyButtonText: e.target.value }))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                placeholder="Verify This Step"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Continue Button Label</label>
+                              <input
+                                id="user-continue-label"
+                                type="text"
+                                value={userShortenerSettings.continueButtonText || ""}
+                                onChange={(e) => setUserShortenerSettings((prev: any) => ({ ...prev, continueButtonText: e.target.value }))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                placeholder="Proceed to Next Page"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Page Specific Settings Section */}
+                      <div className="border-t border-slate-800 pt-6 space-y-4">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                          <h4 className="text-base font-bold text-slate-200">📄 Dynamic Step Configurations (PAGE SETTINGS)</h4>
+                          <span className="text-xs text-slate-500 font-mono">Select a page step to configure individual settings & ads</span>
+                        </div>
+
+                        {/* Horizontal selector for activePageTab */}
+                        <div className="flex flex-wrap gap-1.5 bg-slate-950/60 p-2 border border-slate-850 rounded-xl">
+                          {Array.from({ length: userShortenerSettings.totalPages || 1 }).map((_, index) => {
+                            const pNum = index + 1;
+                            return (
+                              <button
+                                key={pNum}
+                                onClick={() => setActivePageTab(pNum)}
+                                className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                                  activePageTab === pNum
+                                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                                    : "text-slate-400 hover:text-white hover:bg-slate-850/50"
+                                }`}
+                              >
+                                Page {pNum}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Active Page configurations editor */}
+                        {(() => {
+                          // Find or build page config
+                          const pages = userShortenerSettings.pagesConfig || [];
+                          let pageConf = pages.find((p: any) => p.pageNumber === activePageTab);
+                          if (!pageConf) {
+                            pageConf = {
+                              pageNumber: activePageTab,
+                              timerDuration: 10,
+                              instructions: `Complete step ${activePageTab} verification.`,
+                              selectedAdIds: [],
+                              numberOfAds: 3,
+                              humanVerification: true
+                            };
+                          }
+
+                          const updatePageConfField = (field: string, val: any) => {
+                            setUserShortenerSettings((prev: any) => {
+                              const currentPages = prev.pagesConfig || [];
+                              const updated = currentPages.map((p: any) => {
+                                if (p.pageNumber === activePageTab) {
+                                  return { ...p, [field]: val };
+                                }
+                                return p;
+                              });
+                              // In case page configuration was missing from array
+                              if (!updated.some((p: any) => p.pageNumber === activePageTab)) {
+                                updated.push({ ...pageConf, [field]: val });
+                              }
+                              return { ...prev, pagesConfig: updated };
+                            });
+                          };
+
+                          return (
+                            <div className="bg-slate-950 border border-slate-850 rounded-xl p-5 space-y-4">
+                              <div className="flex items-center gap-2 border-b border-slate-850 pb-2">
+                                <span className="text-xl">📄</span>
+                                <span className="font-bold text-white text-sm">Step {activePageTab} Configuration</span>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Timer Duration (Seconds)</label>
+                                  <input
+                                    type="number"
+                                    value={pageConf.timerDuration}
+                                    onChange={(e) => updatePageConfField("timerDuration", Number(e.target.value))}
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Page InstructionsOverride</label>
+                                  <input
+                                    type="text"
+                                    value={pageConf.instructions || ""}
+                                    onChange={(e) => updatePageConfField("instructions", e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    placeholder="Follow the guidelines below..."
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Verify Button / Captcha Toggle</label>
+                                  <select
+                                    value={pageConf.humanVerification !== false ? "true" : "false"}
+                                    onChange={(e) => updatePageConfField("humanVerification", e.target.value === "true")}
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                  >
+                                    <option value="true">🟢 Enabled (Verify + Captcha)</option>
+                                    <option value="false">🔴 Disabled (Direct Unlock)</option>
+                                  </select>
+                                </div>
+                              </div>
+
+                              {/* Ads selection */}
+                              <div className="space-y-3">
+                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Select Ads for Step {activePageTab}</label>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-slate-400 font-mono">Ads Limit on Page:</span>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="10"
+                                      value={pageConf.numberOfAds || 3}
+                                      onChange={(e) => updatePageConfField("numberOfAds", Number(e.target.value))}
+                                      className="w-16 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white text-center focus:outline-none focus:border-indigo-500 font-bold"
+                                    />
+                                  </div>
+                                </div>
+
+                                {ads.length === 0 ? (
+                                  <p className="text-xs text-slate-500 bg-slate-900 p-3 rounded-lg border border-slate-800 text-center">No Ads in Ads Manager. Please configure some active ads under the Ads Manager tab first!</p>
+                                ) : (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto bg-slate-900 p-3 rounded-xl border border-slate-800">
+                                    {ads.map((ad: any) => {
+                                      const isChecked = (pageConf.selectedAdIds || []).includes(ad.id);
+                                      return (
+                                        <div
+                                          key={ad.id}
+                                          onClick={() => {
+                                            const currentSelected = pageConf.selectedAdIds || [];
+                                            const nextSelected = isChecked
+                                              ? currentSelected.filter((id: string) => id !== ad.id)
+                                              : [...currentSelected, ad.id];
+                                            updatePageConfField("selectedAdIds", nextSelected);
+                                          }}
+                                          className={`p-2.5 rounded-lg border transition-all cursor-pointer flex items-start gap-3 select-none ${
+                                            isChecked
+                                              ? "bg-indigo-600/10 border-indigo-500/50 text-white"
+                                              : "bg-slate-950 border-slate-850 text-slate-400 hover:border-slate-750"
+                                          }`}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            readOnly
+                                            className="mt-1 accent-indigo-500 animate-none"
+                                          />
+                                          <div className="space-y-0.5">
+                                            <p className="text-xs font-bold text-slate-200">{ad.adName}</p>
+                                            <div className="flex flex-wrap gap-1 text-[10px] font-semibold text-slate-500 font-mono">
+                                              <span className="bg-slate-950 px-1 py-0.5 rounded text-teal-400">{ad.adSource}</span>
+                                              <span className="bg-slate-950 px-1 py-0.5 rounded text-indigo-400">{ad.adType}</span>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

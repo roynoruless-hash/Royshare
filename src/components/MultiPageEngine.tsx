@@ -37,6 +37,17 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
   const [captchaInput, setCaptchaInput] = useState("");
   const [captchaError, setCaptchaError] = useState(false);
   const [mathQuestion, setMathQuestion] = useState("");
+  const [showVerifyButton, setShowVerifyButton] = useState(false);
+  const [verifyClicked, setVerifyClicked] = useState(false);
+
+  // Bottom scroll reference
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 150);
+  };
   
   // Final action states
   const [finalCountdown, setFinalCountdown] = useState(5);
@@ -131,13 +142,10 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
         const duration = page1Config ? Number(page1Config.timerDuration) : 5;
         setTimer(duration);
         setIsTimerActive(true);
-        
-        // Setup CAPTCHA if verification is enabled for Page 1
-        if (page1Config?.humanVerification) {
-          generateCaptcha();
-        } else {
-          setHumanVerified(true);
-        }
+        setShowVerifyButton(false);
+        setVerifyClicked(false);
+        setHumanVerified(false);
+        setIsPageComplete(false);
 
         setLoading(false);
       } catch (err: any) {
@@ -159,15 +167,11 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
       }, 1000);
     } else if (timer === 0 && isTimerActive) {
       setIsTimerActive(false);
-      // If no human verification is needed, unlock step completion immediately
-      const currentConfig = pagesConfig.find((p) => p.pageNumber === currentPage);
-      if (!currentConfig?.humanVerification) {
-        setHumanVerified(true);
-        setIsPageComplete(true);
-      }
+      // Show the Verify button when the countdown finishes
+      setShowVerifyButton(true);
     }
     return () => clearInterval(interval);
-  }, [isTimerActive, timer, currentPage, pagesConfig]);
+  }, [isTimerActive, timer]);
 
   // Generate simple math captcha for human verification
   const generateCaptcha = () => {
@@ -180,11 +184,37 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
     setHumanVerified(false);
   };
 
+  const handleVerifyClick = () => {
+    setVerifyClicked(true);
+    const currentPageConfig = pagesConfig.find((p) => p.pageNumber === currentPage);
+    const requiresCaptcha = currentPageConfig ? currentPageConfig.humanVerification : (itemData?.humanVerification !== false);
+
+    if (requiresCaptcha) {
+      generateCaptcha();
+      scrollToBottom();
+    } else {
+      setHumanVerified(true);
+      const isLast = currentPage === totalPages;
+      if (type === "shortener" && isLast) {
+        handleClaim();
+      } else {
+        setIsPageComplete(true);
+      }
+      scrollToBottom();
+    }
+  };
+
   const handleVerifyCaptcha = () => {
     if (captchaInput.trim() === captchaAnswer) {
       setHumanVerified(true);
       setCaptchaError(false);
-      setIsPageComplete(true);
+      const isLast = currentPage === totalPages;
+      if (type === "shortener" && isLast) {
+        handleClaim();
+      } else {
+        setIsPageComplete(true);
+      }
+      scrollToBottom();
     } else {
       setCaptchaError(true);
     }
@@ -216,17 +246,13 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
       setCurrentPage(next);
       setIsPageComplete(false);
       setHumanVerified(false);
+      setShowVerifyButton(false);
+      setVerifyClicked(false);
       
       // Load next page config
       const nextConfig = pagesConfig.find((p) => p.pageNumber === next);
       setTimer(nextConfig ? nextConfig.timerDuration : 5);
       setIsTimerActive(true);
-      
-      if (nextConfig?.humanVerification) {
-        generateCaptcha();
-      } else {
-        setHumanVerified(true);
-      }
       
       setLoading(false);
     } catch (err) {
@@ -389,7 +415,7 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
                     <span>🔗</span> {type === "download" ? "RoyShare Secure File Portal" : "RoyShare Smart URL Hub"}
                   </h1>
                   <p className="text-slate-400 text-sm">
-                    {itemData?.instructions || "Follow the instructions below to unlock your destination link."}
+                    {currentPageConfig ? currentPageConfig.instructions || itemData?.instructions : itemData?.instructions || "Follow the instructions below to unlock your destination link."}
                   </p>
                 </div>
 
@@ -397,13 +423,15 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
                 <div className="bg-slate-950/60 rounded-xl p-6 border border-white/5 space-y-4 text-sm relative overflow-hidden">
                   {/* Step status bar */}
                   <div className="flex justify-between items-center text-xs font-mono text-slate-500">
-                    <span>Task Verification Step {currentPage}</span>
-                    <span className="text-teal-400">Status: In Progress</span>
+                    <span>Task Verification Step {currentPage} of {totalPages}</span>
+                    <span className="text-teal-400">
+                      {isPageComplete ? "Status: Verification Successful" : "Status: In Progress"}
+                    </span>
                   </div>
 
                   <div className="h-px bg-white/5"></div>
 
-                  {/* Timer Loop */}
+                  {/* Timer or Verification Logic */}
                   {timer > 0 ? (
                     <div className="text-center py-4 space-y-2">
                       <div className="text-5xl font-black text-teal-400 tracking-tight animate-pulse">{timer}s</div>
@@ -413,38 +441,88 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
                     </div>
                   ) : (
                     <div className="text-center py-2 space-y-4">
-                      <p className="text-emerald-400 font-semibold text-sm flex items-center justify-center gap-1.5 bg-emerald-500/10 py-2 px-4 rounded-lg border border-emerald-500/15">
-                        ✅ Page unlocked! Proceed to verification.
-                      </p>
-
-                      {/* Math Verification Box if Enabled */}
-                      {currentPageConfig?.humanVerification && !humanVerified && (
-                        <div className="bg-slate-900 border border-white/10 rounded-xl p-4 space-y-3 max-w-xs mx-auto">
-                          <p className="text-xs font-bold text-slate-300 uppercase tracking-wider">Solve Math Challenge</p>
-                          <div className="flex items-center justify-center gap-3">
-                            <span className="font-mono text-lg font-bold text-teal-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-white/5">
-                              {mathQuestion}
-                            </span>
-                            <span className="text-slate-400 font-bold">=</span>
-                            <input
-                              type="number"
-                              placeholder="Answer"
-                              value={captchaInput}
-                              onChange={(e) => setCaptchaInput(e.target.value)}
-                              onKeyDown={(e) => e.key === "Enter" && handleVerifyCaptcha()}
-                              className="w-20 bg-slate-950 border border-slate-800 rounded-lg py-1.5 text-center font-mono text-lg text-white focus:outline-none focus:border-indigo-500"
-                            />
-                          </div>
-                          {captchaError && (
-                            <p className="text-[11px] text-rose-400 font-semibold">❌ Incorrect response. Try again!</p>
-                          )}
+                      {/* Show the Verify button if they haven't clicked verify yet */}
+                      {!verifyClicked ? (
+                        <div className="py-2">
                           <button
-                            onClick={handleVerifyCaptcha}
-                            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-1.5 rounded-lg text-xs transition"
+                            id="verify-btn"
+                            onClick={handleVerifyClick}
+                            className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold text-sm rounded-xl transition duration-200 transform active:scale-95 shadow-lg shadow-emerald-500/10 cursor-pointer flex items-center justify-center gap-2"
                           >
-                            Verify Human
+                            <span>✅</span> {itemData?.verifyButtonText || "Verify This Step"}
                           </button>
                         </div>
+                      ) : (
+                        currentPageConfig?.humanVerification && !humanVerified ? (
+                          <div className="bg-slate-900 border border-white/10 rounded-xl p-4 space-y-3 max-w-sm mx-auto text-left">
+                            <p className="text-xs font-bold text-slate-300 uppercase tracking-wider text-center">Solve Math Challenge</p>
+                            <div className="flex items-center justify-center gap-3">
+                              <span className="font-mono text-lg font-bold text-teal-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-white/5">
+                                {mathQuestion}
+                              </span>
+                              <span className="text-slate-400 font-bold">=</span>
+                              <input
+                                id="captcha-input"
+                                type="number"
+                                placeholder="Answer"
+                                value={captchaInput}
+                                onChange={(e) => setCaptchaInput(e.target.value)}
+                                onKeyDown={(e) => e.key === "Enter" && handleVerifyCaptcha()}
+                                className="w-24 bg-slate-950 border border-slate-800 rounded-lg py-1.5 text-center font-mono text-lg text-white focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                            {captchaError && (
+                              <p className="text-[11px] text-rose-400 font-semibold text-center">❌ Incorrect response. Try again!</p>
+                            )}
+                            <button
+                              id="submit-captcha-btn"
+                              onClick={handleVerifyCaptcha}
+                              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg text-xs transition cursor-pointer"
+                            >
+                              Verify Human
+                            </button>
+                          </div>
+                        ) : (
+                          type === "shortener" && currentPage === totalPages ? (
+                            redirecting ? (
+                              destinationUrl ? (
+                                itemData?.autoRedirect !== false ? (
+                                  <div className="space-y-3 py-2">
+                                    <p className="text-emerald-400 font-bold text-sm bg-emerald-500/10 py-1.5 px-3 rounded border border-emerald-500/10">Preparing Destination...</p>
+                                    <p className="text-slate-300 font-semibold text-xs">Redirecting in...</p>
+                                    <div className="text-5xl font-black text-teal-400 animate-pulse">{finalCountdown}s</div>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-4 py-2">
+                                    <p className="text-emerald-400 font-bold text-sm bg-emerald-500/10 py-1.5 px-3 rounded border border-emerald-500/10">Preparing Destination...</p>
+                                    <div className="pt-2">
+                                      <a
+                                        id="destination-link"
+                                        href={destinationUrl}
+                                        className="w-full py-4 rounded-xl font-bold text-sm tracking-wide bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white shadow-lg shadow-emerald-500/10 transition flex items-center justify-center gap-2 cursor-pointer"
+                                      >
+                                        🚀 Continue to Destination <ExternalLink size={14} />
+                                      </a>
+                                    </div>
+                                  </div>
+                                )
+                              ) : (
+                                <div className="py-4 space-y-2">
+                                  <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                                  <p className="text-slate-400 text-xs">Securing your redirect token...</p>
+                                </div>
+                              )
+                            ) : (
+                              <p className="text-emerald-400 font-semibold text-sm flex items-center justify-center gap-1.5 bg-emerald-500/10 py-2 px-4 rounded-lg border border-emerald-500/15">
+                                ✅ Verification completed successfully!
+                              </p>
+                            )
+                          ) : (
+                            <p className="text-emerald-400 font-semibold text-sm flex items-center justify-center gap-1.5 bg-emerald-500/10 py-2 px-4 rounded-lg border border-emerald-500/15">
+                              ✅ Verification completed successfully!
+                            </p>
+                          )
+                        )
                       )}
                     </div>
                   )}
@@ -483,27 +561,20 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
                 )}
 
                 {/* Progression Control */}
-                <div className="pt-2">
-                  <button
-                    onClick={handleNextPage}
-                    disabled={!isPageComplete}
-                    className={`w-full py-4 rounded-xl font-bold text-sm tracking-wide transition duration-300 transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg ${
-                      isPageComplete
-                        ? "bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-400 hover:to-indigo-500 text-white shadow-teal-500/10 cursor-pointer"
-                        : "bg-slate-800 text-slate-500 border border-white/5 cursor-not-allowed shadow-none"
-                    }`}
-                  >
-                    {isPageComplete ? (
-                      <>
-                        Proceed to Next Step <ArrowRight size={16} />
-                      </>
-                    ) : timer > 0 ? (
-                      `🔓 Unlocking in ${timer}s...`
-                    ) : (
-                      "Solve verification above to proceed"
-                    )}
-                  </button>
-                </div>
+                {isPageComplete && (type !== "shortener" || currentPage < totalPages) && (
+                  <div className="pt-2">
+                    <button
+                      id="continue-btn"
+                      onClick={handleNextPage}
+                      className="w-full py-4 rounded-xl font-bold text-sm tracking-wide bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-400 hover:to-indigo-500 text-white shadow-lg shadow-teal-500/10 cursor-pointer transition duration-300 transform active:scale-[0.98] flex items-center justify-center gap-2"
+                    >
+                      {itemData?.continueButtonText || "Proceed to Next Step"} <ArrowRight size={16} />
+                    </button>
+                  </div>
+                )}
+
+                {/* Scroll reference anchor */}
+                <div ref={bottomRef} className="h-2" />
               </motion.div>
             ) : (
               <motion.div

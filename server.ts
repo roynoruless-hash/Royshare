@@ -3136,6 +3136,59 @@ Bonus added successfully.`;
           itemData.Enabled = itemData.enabled;
         }
 
+        // Merge User Mode Settings if it's from the "links" collection (User Created Links)
+        if (type === "shortener" && col === "links") {
+          try {
+            const userSettingsSnap = await getDoc(doc(db, "settings", "user_shortener_config"));
+            const userSettings = userSettingsSnap.exists() ? userSettingsSnap.data() : {
+              totalPages: 2,
+              instructions: "Follow the steps below to reach your destination.",
+              autoScroll: true,
+              autoRedirect: true,
+              continueButtonText: "Proceed",
+              verifyButtonText: "Verify This Step",
+              humanVerification: true,
+              vpnDetection: false,
+              botDetection: true,
+              pagesConfig: [
+                {
+                  pageNumber: 1,
+                  timerDuration: 10,
+                  instructions: "Complete verification step 1.",
+                  selectedAdIds: [],
+                  numberOfAds: 3,
+                  humanVerification: true,
+                  verifyBtnText: "Verify Step 1",
+                  continueBtnText: "Proceed"
+                },
+                {
+                  pageNumber: 2,
+                  timerDuration: 10,
+                  instructions: "Complete the final verification step.",
+                  selectedAdIds: [],
+                  numberOfAds: 3,
+                  humanVerification: true,
+                  verifyBtnText: "Verify Step 2",
+                  continueBtnText: "Proceed"
+                }
+              ]
+            };
+
+            itemData.totalPages = userSettings.totalPages;
+            itemData.instructions = userSettings.instructions;
+            itemData.autoScroll = userSettings.autoScroll;
+            itemData.autoRedirect = userSettings.autoRedirect;
+            itemData.continueButtonText = userSettings.continueButtonText || "Proceed";
+            itemData.verifyButtonText = userSettings.verifyButtonText || "Verify This Step";
+            itemData.humanVerification = userSettings.humanVerification;
+            itemData.vpnDetection = userSettings.vpnDetection;
+            itemData.botDetection = userSettings.botDetection;
+            itemData.pagesConfig = userSettings.pagesConfig;
+          } catch (err) {
+            console.error("Error fetching user shortener settings config:", err);
+          }
+        }
+
         // Requirement 6: Debug logs
         console.log(`[DEBUG SHORTENER] Firestore document found: true in collection: "${col}"`);
         console.log(`[DEBUG SHORTENER] Document status: "${itemData.status || itemData.Status || 'N/A'}" (Enabled: ${itemData.enabled !== false && itemData.Enabled !== false})`);
@@ -3157,11 +3210,28 @@ Bonus added successfully.`;
         return res.status(404).json({ success: false, message: `${type === "shortener" ? "Smart link" : "File"} not found or disabled.` });
       }
 
-      // Security checking
+      // Security checking - Bot Detection
       const ua = req.headers["user-agent"] || "";
       const isBot = /bot|spider|crawl|slurp|lighthouse|chrome-lighthouse|headless/i.test(ua);
-      if (isBot) {
+      if (isBot && itemData.botDetection !== false) {
         return res.json({ success: false, securityBlocked: true, securityReason: "🤖 Automated agent request blocked by RoyShare Integrity Sentinel." });
+      }
+
+      // Security checking - VPN Detection
+      if (itemData.vpnDetection === true && ip && ip !== "Unknown" && ip !== "127.0.0.1" && ip !== "::1") {
+        try {
+          const ipCheckRes = await fetch(`http://ip-api.com/json/${ip}?fields=status,proxy,hosting`).catch(() => null);
+          if (ipCheckRes && ipCheckRes.ok) {
+            const checkData = await ipCheckRes.json();
+            if (checkData.status === "success") {
+              if (checkData.proxy === true || checkData.hosting === true) {
+                return res.json({ success: false, securityBlocked: true, securityReason: "🔒 Access restricted. VPN, proxy, or hosting network connections are prohibited." });
+              }
+            }
+          }
+        } catch (e) {
+          console.error("VPN detection error:", e);
+        }
       }
 
       // Initialize session ID
@@ -3662,6 +3732,66 @@ Bonus added successfully.`;
       res.json({ success: true });
     } catch (e: any) {
       console.error("Error deleting smart link:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/user-shortener-settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "user_shortener_config");
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        res.json(snap.data());
+      } else {
+        const defaultUserSettings = {
+          totalPages: 2,
+          instructions: "Follow the steps below to reach your destination.",
+          autoScroll: true,
+          autoRedirect: true,
+          continueButtonText: "Proceed",
+          verifyButtonText: "Verify This Step",
+          humanVerification: true,
+          vpnDetection: false,
+          botDetection: true,
+          pagesConfig: [
+            {
+              pageNumber: 1,
+              timerDuration: 10,
+              instructions: "Complete verification step 1.",
+              selectedAdIds: [],
+              numberOfAds: 3,
+              humanVerification: true,
+              verifyBtnText: "Verify Step 1",
+              continueBtnText: "Proceed"
+            },
+            {
+              pageNumber: 2,
+              timerDuration: 10,
+              instructions: "Complete the final verification step.",
+              selectedAdIds: [],
+              numberOfAds: 3,
+              humanVerification: true,
+              verifyBtnText: "Verify Step 2",
+              continueBtnText: "Proceed"
+            }
+          ]
+        };
+        res.json(defaultUserSettings);
+      }
+    } catch (e: any) {
+      console.error("Error fetching user shortener settings:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/admin/user-shortener-settings", async (req, res) => {
+    try {
+      const config = req.body;
+      const docRef = doc(db, "settings", "user_shortener_config");
+      await setDoc(docRef, config);
+      res.json({ success: true, config });
+    } catch (e: any) {
+      console.error("Error saving user shortener settings:", e);
       res.status(500).json({ error: e.message });
     }
   });
