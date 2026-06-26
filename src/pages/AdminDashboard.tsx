@@ -16,6 +16,7 @@ export default function AdminDashboard() {
   const [ticketsLoading, setTicketsLoading] = useState(false);
   const [ticketsError, setTicketsError] = useState("");
   const [ticketSearch, setTicketSearch] = useState("");
+  const [ticketStatusFilter, setTicketStatusFilter] = useState("all");
   
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<any>(null);
   const [selectedTicket, setSelectedTicket] = useState<any>(null);
@@ -81,7 +82,48 @@ export default function AdminDashboard() {
     maintenanceMode: "🟢 OFF"
   });
   const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
+  const [supportSettings, setSupportSettings] = useState<any>({
+    aiEnabled: true,
+    geminiApiKey: "",
+    geminiModel: "gemini-2.5-flash",
+    liveChatEnabled: true,
+    supportTelegram: "",
+    supportEmail: "support@royshare.com"
+  });
+  const [supportSettingsLoading, setSupportSettingsLoading] = useState(false);
   const [settingsTab, setSettingsTab] = useState('🤖 Bot Settings');
+
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [testConnectionLoading, setTestConnectionLoading] = useState(false);
+  const [testConnectionStatus, setTestConnectionStatus] = useState("");
+
+  const handleTestConnection = async () => {
+    setTestConnectionLoading(true);
+    setTestConnectionStatus("");
+    try {
+      const res = await fetch("/api/admin/support/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          geminiApiKey: supportSettings.geminiApiKey,
+          geminiModel: supportSettings.geminiModel || "gemini-2.5-flash"
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTestConnectionStatus("✅ Connected");
+        fetchSupportSettings();
+      } else {
+        setTestConnectionStatus(`❌ Invalid API Key: ${data.error || "Connection failed"}`);
+        fetchSupportSettings();
+      }
+    } catch (err: any) {
+      setTestConnectionStatus(`❌ Connection Error: ${err.message || "Failed to connect"}`);
+      fetchSupportSettings();
+    } finally {
+      setTestConnectionLoading(false);
+    }
+  };
   
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -489,6 +531,43 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchSupportSettings = async () => {
+    setSupportSettingsLoading(true);
+    try {
+      const res = await fetch("/api/admin/support/settings");
+      if (res.ok) {
+        const data = await res.json();
+        setSupportSettings(data);
+      }
+    } catch (err) {
+      console.error("Error fetching support settings:", err);
+    } finally {
+      setSupportSettingsLoading(false);
+    }
+  };
+
+  const saveSupportSettings = async (settingsToSave: any = supportSettings) => {
+    setSupportSettingsLoading(true);
+    try {
+      const res = await fetch("/api/admin/support/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settingsToSave)
+      });
+      if (res.ok) {
+        alert("Support settings saved successfully!");
+        setSupportSettings(settingsToSave);
+      } else {
+        alert("Failed to save support settings.");
+      }
+    } catch (err) {
+      console.error("Error saving support settings:", err);
+      alert("Error saving support settings.");
+    } finally {
+      setSupportSettingsLoading(false);
+    }
+  };
+
   const fetchAnalytics = async () => {
     setAnalyticsLoading(true);
     try {
@@ -752,6 +831,7 @@ export default function AdminDashboard() {
     } else if (activeTab === '⚙️ System Settings') {
       fetchSystemSettings();
       fetchTelegramSettings();
+      fetchSupportSettings();
     } else if (activeTab === '🛡 Security Center') {
       fetchSecurityData();
     } else if (activeTab === '📜 Activity Logs') {
@@ -788,6 +868,12 @@ export default function AdminDashboard() {
         endpoint = `/api/admin/tickets/${selectedTicket.id}/resolve`;
       } else if (modalAction === 'close_ticket') {
         endpoint = `/api/admin/tickets/${selectedTicket.id}/close`;
+      } else if (modalAction === 'delete_ticket') {
+        endpoint = `/api/admin/tickets/${selectedTicket.id}`;
+        method = 'DELETE';
+      } else if (modalAction === 'change_status_ticket') {
+        endpoint = `/api/admin/tickets/${selectedTicket.id}/status`;
+        body = { status: modalInput };
       } else if (modalAction === 'create_announcement') {
         endpoint = `/api/admin/announcements`;
         body = announcementForm;
@@ -1118,32 +1204,48 @@ export default function AdminDashboard() {
                 <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                   🎫 Support Manager
                 </h2>
-                <div className="flex items-center gap-2 w-full md:w-auto">
+                <div className="flex flex-col md:flex-row items-center gap-2 w-full md:w-auto">
                   <input
                     type="text"
-                    placeholder="Search ID, Username..."
+                    placeholder="Search ID, Ticket ID, User..."
                     value={ticketSearch}
                     onChange={e => setTicketSearch(e.target.value)}
                     className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full md:w-64"
                   />
+                  <select
+                    value={ticketStatusFilter}
+                    onChange={e => setTicketStatusFilter(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full md:w-auto"
+                  >
+                    <option value="all">🌐 All Statuses</option>
+                    <option value="open">🟡 Open</option>
+                    <option value="in_progress">🔵 In Progress</option>
+                    <option value="replied">💬 Replied</option>
+                    <option value="resolved">🟢 Resolved</option>
+                    <option value="closed">🔴 Closed</option>
+                  </select>
                   <button
                     onClick={fetchTickets}
                     disabled={ticketsLoading}
-                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 border border-slate-700 shrink-0"
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 border border-slate-700 shrink-0 w-full md:w-auto justify-center"
                   >
                     🔄 Refresh
                   </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
                   <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">🟡 Open</h3>
                   <p className="text-2xl font-bold text-yellow-400">{tickets.filter(t => t.status === 'open').length}</p>
                 </div>
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
-                  <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">💬 Replied</h3>
-                  <p className="text-2xl font-bold text-blue-400">{tickets.filter(t => t.status === 'replied').length}</p>
+                  <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">🔵 In Progress</h3>
+                  <p className="text-2xl font-bold text-blue-400">{tickets.filter(t => t.status === 'in_progress').length}</p>
+                </div>
+                <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4">
+                  <h3 className="text-xs font-semibold text-purple-500/80 uppercase tracking-wider mb-1">💬 Replied</h3>
+                  <p className="text-2xl font-bold text-purple-400">{tickets.filter(t => t.status === 'replied').length}</p>
                 </div>
                 <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
                   <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">🟢 Resolved</h3>
@@ -1171,9 +1273,10 @@ export default function AdminDashboard() {
                     <table className="w-full text-left text-sm text-slate-300">
                       <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
                         <tr>
-                          <th className="px-4 py-3">ID</th>
+                          <th className="px-4 py-3">Ticket ID</th>
                           <th className="px-4 py-3">User</th>
-                          <th className="px-4 py-3">Issue Type</th>
+                          <th className="px-4 py-3">Category</th>
+                          <th className="px-4 py-3">Priority</th>
                           <th className="px-4 py-3">Status</th>
                           <th className="px-4 py-3">Date</th>
                           <th className="px-4 py-3 text-right">Action</th>
@@ -1181,28 +1284,49 @@ export default function AdminDashboard() {
                       </thead>
                       <tbody>
                         {tickets
-                          .filter(t => 
-                            ticketSearch === "" || 
-                            t.id.toLowerCase().includes(ticketSearch.toLowerCase()) || 
-                            String(t.userId).includes(ticketSearch) || 
-                            (t.username || "").toLowerCase().includes(ticketSearch.toLowerCase())
-                          )
+                          .filter(t => {
+                            const matchesSearch = 
+                              ticketSearch === "" || 
+                              t.id.toLowerCase().includes(ticketSearch.toLowerCase()) || 
+                              (t.ticketId || "").toLowerCase().includes(ticketSearch.toLowerCase()) ||
+                              String(t.userId).includes(ticketSearch) || 
+                              (t.username || "").toLowerCase().includes(ticketSearch.toLowerCase());
+                            
+                            const matchesStatus = 
+                              ticketStatusFilter === "all" || 
+                              t.status === ticketStatusFilter;
+                            
+                            return matchesSearch && matchesStatus;
+                          })
                           .map((t: any) => (
                           <tr key={t.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-                            <td className="px-4 py-3 font-mono text-xs">{t.id.substring(0, 8)}...</td>
+                            <td className="px-4 py-3 font-mono text-xs text-indigo-400 font-bold">
+                              {t.ticketId || t.id.substring(0, 8).toUpperCase()}
+                            </td>
                             <td className="px-4 py-3">
                               <div className="font-medium text-white">{t.name}</div>
                               <div className="text-xs text-slate-500">@{t.username || 'unknown'}</div>
                             </td>
-                            <td className="px-4 py-3 font-medium">{t.issueType}</td>
+                            <td className="px-4 py-3 font-medium">{t.category || t.issueType}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                t.priority === 'High' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                                t.priority === 'Medium' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                                'bg-slate-500/10 text-slate-400'
+                              }`}>
+                                {t.priority || "Medium"}
+                              </span>
+                            </td>
                             <td className="px-4 py-3">
                               <span className={`px-2 py-1 rounded text-xs font-bold ${
                                 t.status === 'open' ? 'bg-yellow-500/20 text-yellow-400' :
-                                t.status === 'replied' ? 'bg-blue-500/20 text-blue-400' :
+                                t.status === 'in_progress' ? 'bg-blue-500/20 text-blue-400' :
+                                t.status === 'replied' ? 'bg-purple-500/20 text-purple-400' :
                                 t.status === 'resolved' ? 'bg-emerald-500/20 text-emerald-400' :
                                 'bg-red-500/20 text-red-400'
                               }`}>
                                 {t.status === 'open' ? '🟡 Open' : 
+                                 t.status === 'in_progress' ? '🔵 In Progress' : 
                                  t.status === 'replied' ? '💬 Replied' : 
                                  t.status === 'resolved' ? '🟢 Resolved' : '🔴 Closed'}
                               </span>
@@ -1210,15 +1334,31 @@ export default function AdminDashboard() {
                             <td className="px-4 py-3 text-xs text-slate-400">
                               {new Date(t.createdAt).toLocaleDateString()}
                             </td>
-                            <td className="px-4 py-3 text-right">
+                            <td className="px-4 py-3 text-right space-x-2">
                               <button 
                                 onClick={() => {
                                   setSelectedTicket(t);
                                   setModalAction('view_ticket');
                                 }}
-                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded-lg transition-colors"
+                                className="px-2.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white text-xs font-medium rounded-lg transition-colors border border-indigo-500/20"
                               >
-                                👁 View Ticket
+                                👁 View
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  if (confirm("Are you sure you want to delete this ticket?")) {
+                                    setSelectedTicket(t);
+                                    setModalAction('delete_ticket');
+                                    // Trigger immediate submit
+                                    setTimeout(() => {
+                                      const btn = document.querySelector("#submit-modal-btn") as HTMLButtonElement;
+                                      if (btn) btn.click();
+                                    }, 100);
+                                  }
+                                }}
+                                className="px-2.5 py-1.5 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white text-xs font-medium rounded-lg transition-colors border border-rose-500/20"
+                              >
+                                🗑 Delete
                               </button>
                             </td>
                           </tr>
@@ -1969,7 +2109,6 @@ export default function AdminDashboard() {
                         <option value="All">All Networks</option>
                         <option value="Adsterra">Adsterra</option>
                         <option value="Monetag">Monetag</option>
-                        <option value="AdCash">AdCash</option>
                       </select>
                     </div>
                     <div>
@@ -2956,7 +3095,7 @@ export default function AdminDashboard() {
               ) : (
                 <div className="flex flex-col md:flex-row gap-6">
                   <div className="w-full md:w-64 space-y-1">
-                    {['🤖 Bot Settings', '💰 Earnings Settings', '💸 Withdrawal Settings', '👥 Referral Settings', '🎁 Bonus Settings', '📢 Notification Settings', '🌐 Website Settings', '🔄 Maintenance Mode'].map(tab => (
+                    {['🤖 Bot Settings', '💰 Earnings Settings', '💸 Withdrawal Settings', '👥 Referral Settings', '🎁 Bonus Settings', '📢 Notification Settings', '🌐 Website Settings', '🎫 Support Settings', '🤖 AI Settings', '🔄 Maintenance Mode'].map(tab => (
                       <button key={tab} onClick={() => setSettingsTab(tab)} className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-colors ${settingsTab === tab ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>{tab}</button>
                     ))}
                   </div>
@@ -3420,6 +3559,201 @@ export default function AdminDashboard() {
                       </div>
                     )}
 
+                    {settingsTab === '🎫 Support Settings' && (
+                      <div className="space-y-6 max-w-lg">
+                        <div className="bg-indigo-500/10 border border-indigo-500/20 p-4 rounded-xl flex items-center justify-between">
+                          <div>
+                            <h4 className="text-white font-bold text-sm">🎫 Support Configuration</h4>
+                            <p className="text-slate-400 text-xs mt-0.5">Configure AI, Live Chat, and Contact Support options.</p>
+                          </div>
+                          <button
+                            onClick={() => saveSupportSettings(supportSettings)}
+                            disabled={supportSettingsLoading}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition"
+                          >
+                            {supportSettingsLoading ? "Saving..." : "💾 Save Settings"}
+                          </button>
+                        </div>
+
+                        {/* AI Support Toggle */}
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-4">
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <label className="block text-sm font-semibold text-white">🤖 AI Support Assistant</label>
+                              <p className="text-xs text-slate-500">Enable Gemini-powered AI help chat for users.</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSupportSettings({ ...supportSettings, aiEnabled: !supportSettings.aiEnabled })}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${supportSettings.aiEnabled ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                            >
+                              {supportSettings.aiEnabled ? "ENABLED" : "DISABLED"}
+                            </button>
+                          </div>
+
+                          {supportSettings.aiEnabled && (
+                            <div className="space-y-1 pt-2 border-t border-slate-900">
+                              <label className="block text-xs font-medium text-slate-400">Gemini API Key (Optional Override)</label>
+                              <input
+                                type="password"
+                                value={supportSettings.geminiApiKey || ""}
+                                onChange={(e) => setSupportSettings({ ...supportSettings, geminiApiKey: e.target.value })}
+                                placeholder="Leaves blank to use process.env.GEMINI_API_KEY"
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Live Chat Toggle */}
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+                          <div>
+                            <label className="block text-sm font-semibold text-white">💬 Live Chat Support</label>
+                            <p className="text-xs text-slate-500">Allow users to enter Live Chat box.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setSupportSettings({ ...supportSettings, liveChatEnabled: !supportSettings.liveChatEnabled })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${supportSettings.liveChatEnabled ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                          >
+                            {supportSettings.liveChatEnabled ? "ENABLED" : "DISABLED"}
+                          </button>
+                        </div>
+
+                        {/* Support Details */}
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-4">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-400">📩 Contact Support Configuration</h4>
+                          
+                          <div>
+                            <label className="block text-xs font-medium text-slate-400 mb-1">Support Telegram Link / Username</label>
+                            <input
+                              type="text"
+                              value={supportSettings.supportTelegram || ""}
+                              onChange={(e) => setSupportSettings({ ...supportSettings, supportTelegram: e.target.value })}
+                              placeholder="@RoyShareSupport"
+                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-medium text-slate-400 mb-1">Support Email Address</label>
+                            <input
+                              type="email"
+                              value={supportSettings.supportEmail || ""}
+                              onChange={(e) => setSupportSettings({ ...supportSettings, supportEmail: e.target.value })}
+                              placeholder="support@royshare.com"
+                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
+
+                    {settingsTab === '🤖 AI Settings' && (
+                      <div className="space-y-6 max-w-lg">
+                        <div className="bg-indigo-500/10 border border-indigo-500/20 p-4 rounded-xl flex items-center justify-between">
+                          <div>
+                            <h4 className="text-white font-bold text-sm">🤖 AI Support Configuration</h4>
+                            <p className="text-slate-400 text-xs mt-0.5">Configure Gemini AI models and settings.</p>
+                          </div>
+                          <button
+                            onClick={() => saveSupportSettings(supportSettings)}
+                            disabled={supportSettingsLoading}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-lg shadow-emerald-900/20"
+                          >
+                            {supportSettingsLoading ? "Saving..." : "💾 Save Settings"}
+                          </button>
+                        </div>
+
+                        {/* API Key and Model */}
+                        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 shadow-xl">
+                          <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Gemini API Key</label>
+                            <div className="relative">
+                              <input
+                                type={showApiKey ? "text" : "password"}
+                                value={supportSettings.geminiApiKey || ""}
+                                onChange={(e) => setSupportSettings({ ...supportSettings, geminiApiKey: e.target.value })}
+                                placeholder="Enter your Gemini API Key"
+                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 pr-12"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowApiKey(!showApiKey)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition text-xs font-semibold"
+                              >
+                                {showApiKey ? "🙈 Hide" : "👁 Show"}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Gemini Model</label>
+                            <select
+                              value={supportSettings.geminiModel || "gemini-2.5-flash"}
+                              onChange={(e) => setSupportSettings({ ...supportSettings, geminiModel: e.target.value })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
+                            >
+                              <option value="gemini-2.5-flash">gemini-2.5-flash (Recommended Default)</option>
+                              <option value="gemini-3.5-flash">gemini-3.5-flash (Advanced Fast)</option>
+                              <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Reasoning Pro)</option>
+                            </select>
+                          </div>
+
+                          <div className="pt-2 flex gap-3">
+                            <button
+                              type="button"
+                              onClick={handleTestConnection}
+                              disabled={testConnectionLoading}
+                              className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-sm transition-all disabled:opacity-50 shadow-lg shadow-indigo-900/30"
+                            >
+                              {testConnectionLoading ? "⚡ Testing Connection..." : "🔌 Test Connection"}
+                            </button>
+                          </div>
+
+                          {testConnectionStatus && (
+                            <div className={`mt-3 p-3 rounded-xl border text-sm font-medium ${testConnectionStatus.includes('✅') ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
+                              {testConnectionStatus}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Diagnostics Panel */}
+                        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 shadow-xl">
+                          <h4 className="text-sm font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-2">
+                            <span>📊</span> AI Diagnostics & Status
+                          </h4>
+                          <div className="grid grid-cols-1 gap-3 text-xs">
+                            <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
+                              <span className="text-slate-400 font-medium">API Key Saved</span>
+                              <span className={`font-bold px-2 py-1 rounded ${supportSettings.geminiApiKey ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                {supportSettings.geminiApiKey ? "Yes" : "No"}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
+                              <span className="text-slate-400 font-medium">Connection Status</span>
+                              <span className="font-bold text-white">{supportSettings.connectionStatus || "Not Checked"}</span>
+                            </div>
+                            <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
+                              <span className="text-slate-400 font-medium">Model Name</span>
+                              <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{supportSettings.geminiModel || "gemini-2.5-flash"}</span>
+                            </div>
+                            <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
+                              <span className="text-slate-400 font-medium">Last Response Time</span>
+                              <span className="font-bold text-white font-mono">{supportSettings.lastResponseTime || "N/A"}</span>
+                            </div>
+                            <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900 flex-wrap gap-2">
+                              <span className="text-slate-400 font-medium">Last Error</span>
+                              <span className="font-bold text-red-400 text-right max-w-full break-all font-mono bg-red-950/20 px-2 py-0.5 rounded border border-red-900/20">
+                                {supportSettings.lastError || "None"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {settingsTab === '🔄 Maintenance Mode' && (
                       <div className="space-y-6 max-w-lg">
                         <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl">
@@ -3674,18 +4008,22 @@ export default function AdminDashboard() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-xs text-slate-500 mb-1">Ticket ID</p>
-                      <p className="font-mono text-sm break-all">{selectedTicket.id}</p>
+                      <p className="font-mono text-sm break-all text-indigo-400 font-bold">
+                        {selectedTicket.ticketId || selectedTicket.id.substring(0, 8).toUpperCase()}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-500 mb-1">Status</p>
                       <p className={`font-bold ${
                         selectedTicket.status === 'open' ? 'text-yellow-400' :
-                        selectedTicket.status === 'replied' ? 'text-blue-400' :
+                        selectedTicket.status === 'in_progress' ? 'text-blue-400' :
+                        selectedTicket.status === 'replied' ? 'text-purple-400' :
                         selectedTicket.status === 'resolved' ? 'text-emerald-400' :
                         'text-red-400'
                       }`}>{selectedTicket.status === 'open' ? '🟡 Open' : 
-                         selectedTicket.status === 'replied' ? '💬 Replied' : 
-                         selectedTicket.status === 'resolved' ? '🟢 Resolved' : '🔴 Closed'}
+                          selectedTicket.status === 'in_progress' ? '🔵 In Progress' : 
+                          selectedTicket.status === 'replied' ? '💬 Replied' : 
+                          selectedTicket.status === 'resolved' ? '🟢 Resolved' : '🔴 Closed'}
                       </p>
                     </div>
                   </div>
@@ -3696,53 +4034,109 @@ export default function AdminDashboard() {
                     <p className="text-xs text-slate-400">🆔 User ID: <span className="font-mono text-white ml-1">{selectedTicket.userId}</span></p>
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-3">
                     <div className="bg-slate-800/50 rounded-xl p-3">
-                      <p className="text-xs text-slate-400 mb-1">📂 Issue Type</p>
-                      <p className="font-bold text-white">{selectedTicket.issueType}</p>
+                      <p className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">📂 Category</p>
+                      <p className="font-bold text-white text-xs truncate">{selectedTicket.category || selectedTicket.issueType}</p>
                     </div>
                     <div className="bg-slate-800/50 rounded-xl p-3">
-                      <p className="text-xs text-slate-400 mb-1">📅 Created</p>
-                      <p className="font-medium text-white text-sm">{new Date(selectedTicket.createdAt).toLocaleDateString()}</p>
+                      <p className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">⚡ Priority</p>
+                      <p className="font-bold text-white text-xs">{selectedTicket.priority || "Medium"}</p>
                     </div>
-                  </div>
-                  
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
-                    <h4 className="text-sm font-bold text-white mb-2">📝 User Message</h4>
-                    <p className="text-sm text-slate-300 whitespace-pre-wrap">{selectedTicket.message}</p>
+                    <div className="bg-slate-800/50 rounded-xl p-3">
+                      <p className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">📅 Created</p>
+                      <p className="font-medium text-white text-xs">{new Date(selectedTicket.createdAt).toLocaleDateString()}</p>
+                    </div>
                   </div>
 
-                  {selectedTicket.adminReply && (
-                    <div className="bg-blue-900/20 border border-blue-500/20 rounded-xl p-4">
-                      <h4 className="text-sm font-bold text-blue-400 mb-2">💬 Admin Reply</h4>
-                      <p className="text-sm text-slate-300 whitespace-pre-wrap">{selectedTicket.adminReply}</p>
-                      {selectedTicket.lastReply && (
-                        <p className="text-xs text-slate-500 mt-2">{new Date(selectedTicket.lastReply).toLocaleString()}</p>
-                      )}
+                  {/* Attachment Screenshot if present */}
+                  {selectedTicket.screenshotUrl && (
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                      <h4 className="text-xs font-bold text-slate-400 mb-2">📸 Attached Screenshot</h4>
+                      <div className="flex justify-center bg-slate-900 rounded-lg p-2 max-h-48 overflow-hidden border border-slate-800">
+                        <img 
+                          src={selectedTicket.screenshotUrl} 
+                          alt="Screenshot" 
+                          className="max-h-44 object-contain rounded cursor-pointer hover:opacity-90"
+                          onClick={() => window.open(selectedTicket.screenshotUrl, '_blank')}
+                        />
+                      </div>
                     </div>
                   )}
                   
-                  <div className="grid grid-cols-3 gap-2 pt-4">
-                    {['open', 'replied'].includes(selectedTicket.status) && (
+                  {/* Conversation Thread */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2.5 max-h-56 overflow-y-auto">
+                    <h4 className="text-xs font-bold text-slate-400 border-b border-slate-800/80 pb-1.5 flex justify-between items-center">
+                      <span>💬 Conversation History</span>
+                      <span className="text-[10px] text-slate-500 font-mono">ID: {selectedTicket.id.substring(0, 8)}</span>
+                    </h4>
+                    
+                    {/* First/Original message */}
+                    <div className="bg-slate-900/40 p-2.5 rounded-lg border border-slate-800">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-[11px] font-bold text-indigo-400">👤 User (Original Issue)</span>
+                        <span className="text-[10px] text-slate-500">{new Date(selectedTicket.createdAt).toLocaleString()}</span>
+                      </div>
+                      <p className="text-xs text-slate-300 whitespace-pre-wrap">{selectedTicket.message}</p>
+                    </div>
+
+                    {/* Sequential message replies */}
+                    {selectedTicket.replies && selectedTicket.replies.map((rep: any, idx: number) => (
+                      <div key={idx} className={`p-2.5 rounded-lg border ${rep.sender === 'admin' ? 'bg-blue-950/20 border-blue-900/20 ml-3' : 'bg-slate-900/40 border-slate-800 mr-3'}`}>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className={`text-[11px] font-bold ${rep.sender === 'admin' ? 'text-blue-400' : 'text-indigo-400'}`}>
+                            {rep.sender === 'admin' ? '🛡️ Admin Reply' : '👤 User Reply'}
+                          </span>
+                          <span className="text-[10px] text-slate-500">{rep.createdAt ? new Date(rep.createdAt).toLocaleString() : ''}</span>
+                        </div>
+                        <p className="text-xs text-slate-300 whitespace-pre-wrap">{rep.message}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Actions Row */}
+                  <div className="grid grid-cols-4 gap-2 pt-2">
+                    <button 
+                      onClick={() => { setModalAction('reply_ticket'); setModalInput(""); }}
+                      className="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg text-xs transition"
+                    >
+                      💬 Reply
+                    </button>
+                    
+                    {/* Status transition: In Progress */}
+                    {selectedTicket.status !== 'in_progress' && (
                       <button 
-                        onClick={() => { setModalAction('reply_ticket'); setModalInput(""); }}
-                        className="col-span-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg text-sm"
+                        onClick={() => {
+                          if (confirm("Change status to In Progress?")) {
+                            setModalAction('change_status_ticket');
+                            setModalInput('in_progress');
+                            setTimeout(() => {
+                              const btn = document.querySelector("#submit-modal-btn") as HTMLButtonElement;
+                              if (btn) btn.click();
+                            }, 100);
+                          }
+                        }}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 rounded-lg text-xs transition"
                       >
-                        💬 Reply
+                        🔵 Progress
                       </button>
                     )}
-                    {['open', 'replied'].includes(selectedTicket.status) && (
+
+                    {/* Status transition: Resolve */}
+                    {selectedTicket.status !== 'resolved' && (
                       <button 
                         onClick={() => { setModalAction('resolve_ticket'); setModalInput(""); }}
-                        className="col-span-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 rounded-lg text-sm"
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 rounded-lg text-xs transition"
                       >
                         🟢 Resolve
                       </button>
                     )}
+
+                    {/* Status transition: Close */}
                     {selectedTicket.status !== 'closed' && (
                       <button 
                         onClick={() => { setModalAction('close_ticket'); setModalInput(""); }}
-                        className="col-span-1 bg-red-600 hover:bg-red-500 text-white font-medium py-2 rounded-lg text-sm"
+                        className="bg-slate-700 hover:bg-slate-600 text-white font-medium py-2 rounded-lg text-xs transition"
                       >
                         🔴 Close
                       </button>
@@ -4066,7 +4460,6 @@ export default function AdminDashboard() {
                         <option value="">-- No Ad Network --</option>
                         <option value="Adsterra">Adsterra</option>
                         <option value="Monetag">Monetag</option>
-                        <option value="AdCash">AdCash</option>
                       </select>
                     </div>
                   </div>
@@ -4086,8 +4479,6 @@ export default function AdminDashboard() {
                             const adType = String(ad.adType || "").toLowerCase();
                             if (n === "adsterra" || n === "monetag") {
                               return adType.includes("banner") || adType.includes("native") || adType.includes("direct") || adType.includes("link");
-                            } else if (n === "adcash") {
-                              return adType.includes("display") || adType.includes("interstitial") || adType.includes("pop") || adType.includes("slider") || adType.includes("video") || adType.includes("vast") || adType.includes("stream");
                             }
                             return false;
                           }).length} Available
@@ -4105,8 +4496,6 @@ export default function AdminDashboard() {
                             const adType = String(ad.adType || "").toLowerCase();
                             if (n === "adsterra" || n === "monetag") {
                               return adType.includes("banner") || adType.includes("native") || adType.includes("direct") || adType.includes("link");
-                            } else if (n === "adcash") {
-                              return adType.includes("display") || adType.includes("interstitial") || adType.includes("pop") || adType.includes("slider") || adType.includes("video") || adType.includes("vast") || adType.includes("stream");
                             }
                             return false;
                           });
@@ -4179,7 +4568,6 @@ export default function AdminDashboard() {
                       >
                         <option value="Adsterra">Adsterra</option>
                         <option value="Monetag">Monetag</option>
-                        <option value="AdCash">AdCash</option>
                       </select>
                     </div>
                     <div>
@@ -4685,78 +5073,13 @@ export default function AdminDashboard() {
                             onStatusChange={(status, msg, diag) => {
                               const el = document.getElementById('ad-preview-status-full');
                               if (el) {
-                                if (adForm.adType === "VAST Video Ad" || adForm.adType === "VAST Video") {
-                                  el.innerHTML = `
-                                    <div class="text-emerald-500 font-bold mb-2">📹 VAST Video Player Validation</div>
-                                    <div class="space-y-1.5 font-mono text-sm p-3 bg-slate-950/80 rounded-xl border border-slate-800">
-                                      <div class="flex items-center justify-between">
-                                        <span class="text-slate-400">Video Loaded</span>
-                                        <span class="${msg.includes('Video Loaded') || msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
-                                          ${msg.includes('Video Loaded') || msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Video Loaded
-                                        </span>
-                                      </div>
-                                      <div class="flex items-center justify-between">
-                                        <span class="text-slate-400">Video Playing</span>
-                                        <span class="${msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
-                                          ${msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Video Playing
-                                        </span>
-                                      </div>
-                                      <div class="flex items-center justify-between">
-                                        <span class="text-slate-400">Ad Started</span>
-                                        <span class="${msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
-                                          ${msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Ad Started
-                                        </span>
-                                      </div>
-                                      <div class="flex items-center justify-between">
-                                        <span class="text-slate-400">Ad Completed</span>
-                                        <span class="${msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
-                                          ${msg.includes('Ad Completed') ? '🟢' : '⚫'} Ad Completed
-                                        </span>
-                                      </div>
-                                    </div>
-                                    <div class="mt-2 text-xs text-slate-500 italic">Rendered via Video Player Validation instead of Standard Iframe.</div>
-                                  `;
-                                } else if (adForm.adType === "Interstitial Ad" || adForm.adType === "Interstitial") {
-                                  el.innerHTML = `
-                                    <div class="text-blue-400 font-bold mb-2">⚡ AdCash Interstitial Validation</div>
-                                    <div class="space-y-1.5 font-mono text-sm p-3 bg-slate-950/80 rounded-xl border border-slate-800">
-                                      <div class="flex items-center justify-between">
-                                        <span class="text-slate-400">Library Loaded</span>
-                                        <span class="${diag?.libraryLoaded === 'Yes' ? 'text-emerald-400 font-bold' : 'text-slate-500'}">
-                                          ${diag?.libraryLoaded === 'Yes' ? '🟢 Yes' : '⚫ No'}
-                                        </span>
-                                      </div>
-                                      <div class="flex items-center justify-between">
-                                        <span class="text-slate-400">window.aclib Available</span>
-                                        <span class="${diag?.aclibAvailable === 'Yes' ? 'text-emerald-400 font-bold' : 'text-slate-500'}">
-                                          ${diag?.aclibAvailable === 'Yes' ? '🟢 Yes' : '⚫ No'}
-                                        </span>
-                                      </div>
-                                      <div class="flex items-center justify-between">
-                                        <span class="text-slate-400">Zone ID</span>
-                                        <span class="text-emerald-400 font-bold">${diag?.zoneId || '11511010'}</span>
-                                      </div>
-                                      <div class="flex items-center justify-between">
-                                        <span class="text-slate-400">runInterstitial Executed</span>
-                                        <span class="${diag?.runExecuted === 'Yes' ? 'text-emerald-400 font-bold' : 'text-slate-500'}">
-                                          ${diag?.runExecuted === 'Yes' ? '🟢 Yes' : '⚫ No'}
-                                        </span>
-                                      </div>
-                                      <div class="flex items-center justify-between pt-1 border-t border-slate-800/60">
-                                        <span class="text-slate-400 font-bold">Result</span>
-                                        <span class="${diag?.result === 'Success' ? 'text-emerald-400 font-bold' : (diag?.result === 'Failed' ? 'text-red-400 font-bold' : 'text-yellow-400 font-bold')}">
-                                          ${diag?.result || 'Pending'}
-                                        </span>
-                                      </div>
-                                    </div>
-                                    <div class="mt-2 text-xs text-slate-500 italic">AdCash Interstitial library loaded once and executed successfully.</div>
-                                  `;
-                                } else if (status === 'Loaded') {
+                                if (status === 'Loaded') {
                                   el.innerHTML = `
                                     <div class="text-emerald-500 font-bold mb-1">🟢 Ad Loaded Successfully</div>
                                     <div class="text-slate-400">Script Injected = <span class="text-white">${diag?.scriptInjected || 'Yes'}</span></div>
                                     <div class="text-slate-400">Iframe Created = <span class="text-white">${diag?.iframeCreated || 'Yes'}</span></div>
                                     <div class="text-slate-400">Content Rendered = <span class="text-white">${diag?.contentRendered || 'Yes'}</span></div>
+                                    <div class="text-slate-400">Initialization Count = <span class="text-white font-bold">${diag?.initCount || 1}</span></div>
                                     <div class="text-slate-400">Container Size = <span class="text-white">${diag?.containerWidth || 0}x${diag?.containerHeight || 0}</span></div>
                                     <div class="text-slate-400">DOM Elements = <span class="text-white">${diag?.domElementsCreated || 0}</span></div>
                                   `;
@@ -4766,6 +5089,7 @@ export default function AdminDashboard() {
                                     <div class="text-slate-400">Script Injected = <span class="text-white">${diag?.scriptInjected || 'Yes'}</span></div>
                                     <div class="text-slate-400">Iframe Created = <span class="text-white">${diag?.iframeCreated || 'No'}</span></div>
                                     <div class="text-slate-400">Content Rendered = <span class="text-white">${diag?.contentRendered || 'No'}</span></div>
+                                    <div class="text-slate-400">Initialization Count = <span class="text-white font-bold">${diag?.initCount || 1}</span></div>
                                     <div class="text-slate-400">Elements = <span class="text-white">${diag?.domElementsCreated || 0}</span></div>
                                   `;
                                 } else {
@@ -4775,6 +5099,7 @@ export default function AdminDashboard() {
                                     <div class="text-slate-400">Script Injected = <span class="text-white">${diag?.scriptInjected || 'Yes'}</span></div>
                                     <div class="text-slate-400">Iframe Created = <span class="text-white">${diag?.iframeCreated || 'No'}</span></div>
                                     <div class="text-slate-400">Content Rendered = <span class="text-white">${diag?.contentRendered || 'No'}</span></div>
+                                    <div class="text-slate-400">Initialization Count = <span class="text-white font-bold">${diag?.initCount || 1}</span></div>
                                   `;
                                 }
                               }

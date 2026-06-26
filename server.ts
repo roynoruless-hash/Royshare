@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { getDb } from "./src/lib/firebase";
 import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc } from "firebase/firestore";
 import { REWARD_TASKS } from "./src/lib/tasks";
+import { GoogleGenAI } from "@google/genai";
 
 // ...
 const db = getDb();
@@ -12,6 +13,7 @@ const db = getDb();
 async function startServer() {
   const app = express();
   app.use(express.json());
+
   const PORT = 3000;
 
   app.get("/api/health", async (req, res) => {
@@ -263,7 +265,20 @@ async function startServer() {
       const snap = await getDoc(ref);
       if (!snap.exists()) return res.status(404).json({ error: "Not found" });
       
-      await setDoc(ref, { status: "replied", adminReply: replyMessage, lastReply: new Date().toISOString() }, { merge: true });
+      const ticketData = snap.data();
+      const replies = ticketData.replies || [];
+      replies.push({
+        sender: "admin",
+        message: replyMessage,
+        createdAt: new Date().toISOString()
+      });
+      
+      await setDoc(ref, { 
+        status: "replied", 
+        adminReply: replyMessage, 
+        lastReply: new Date().toISOString(),
+        replies
+      }, { merge: true });
       
       const data = snap.data();
       await sendTgMessage(data.userId, `💬 <b>Support Reply</b>\n\nTicket ID:\n${id}\n\nMessage:\n${replyMessage}`);
@@ -306,6 +321,321 @@ async function startServer() {
       res.json({ success: true });
     } catch (e: any) {
       console.error("Admin close error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin Change Ticket Status Route
+  app.post("/api/admin/tickets/:id/status", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body; // "open" | "in_progress" | "resolved" | "closed"
+      const ref = doc(db, "tickets", id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return res.status(404).json({ error: "Not found" });
+      
+      await setDoc(ref, { status, updatedAt: new Date().toISOString() }, { merge: true });
+      
+      const data = snap.data();
+      const statusLabels: Record<string, string> = {
+        open: "🟡 Open",
+        in_progress: "🔵 In Progress",
+        resolved: "🟢 Resolved",
+        closed: "🔴 Closed"
+      };
+      const label = statusLabels[status] || status;
+      await sendTgMessage(data.userId, `ℹ️ <b>Ticket Status Updated</b>\n\nTicket ID:\n${id}\n\nNew Status: ${label}`);
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Admin ticket status change error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin Delete Ticket Route
+  app.delete("/api/admin/tickets/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const ref = doc(db, "tickets", id);
+      await deleteDoc(ref);
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Admin ticket deletion error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Public Support Settings
+  app.get("/api/support/settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "support");
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        res.json({
+          aiEnabled: true,
+          liveChatEnabled: true,
+          supportTelegram: "",
+          supportEmail: "support@royshare.com"
+        });
+      } else {
+        const data = docSnap.data();
+        res.json({
+          aiEnabled: data.aiEnabled !== false,
+          liveChatEnabled: data.liveChatEnabled !== false,
+          supportTelegram: data.supportTelegram || "",
+          supportEmail: data.supportEmail || "support@royshare.com"
+        });
+      }
+    } catch (e: any) {
+      console.error("Get support settings error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin Support Settings
+  app.get("/api/admin/support/settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "support");
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        res.json({
+          aiEnabled: true,
+          geminiApiKey: "",
+          liveChatEnabled: true,
+          supportTelegram: "",
+          supportEmail: "support@royshare.com"
+        });
+      } else {
+        res.json(docSnap.data());
+      }
+    } catch (e: any) {
+      console.error("Admin support settings fetch error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Update Support Settings
+  app.put("/api/admin/support/settings", async (req, res) => {
+    try {
+      const payload = req.body;
+      const docRef = doc(db, "settings", "support");
+      await setDoc(docRef, { ...payload, updatedAt: new Date().toISOString() }, { merge: true });
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Admin support settings update error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Test Gemini Connection
+  app.post("/api/admin/support/test-connection", async (req, res) => {
+    try {
+      const { geminiApiKey, geminiModel } = req.body;
+      const apiKeyToUse = geminiApiKey || process.env.GEMINI_API_KEY;
+      if (!apiKeyToUse) {
+        return res.status(400).json({ error: "Gemini API Key is not configured." });
+      }
+
+      const modelToUse = geminiModel || "gemini-2.5-flash";
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKeyToUse,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const startTime = Date.now();
+      const response = await ai.models.generateContent({
+        model: modelToUse,
+        contents: "Hello",
+      });
+      const endTime = Date.now();
+      const durationMs = endTime - startTime;
+
+      if (response && response.text) {
+        // Save test diagnostics back to Firestore doc (settings/support)
+        const docRef = doc(db, "settings", "support");
+        const diagData = {
+          connectionStatus: "✅ Connected",
+          lastResponseTime: `${durationMs}ms`,
+          lastError: "None",
+          apiSaved: true,
+          modelName: modelToUse,
+          testedAt: new Date().toISOString()
+        };
+        await setDoc(docRef, diagData, { merge: true });
+
+        return res.json({
+          success: true,
+          durationMs,
+          modelName: modelToUse,
+          reply: response.text
+        });
+      } else {
+        throw new Error("No response or empty text returned from Gemini API.");
+      }
+    } catch (e: any) {
+      console.error("Gemini Test Connection error:", e);
+      const errMsg = e.message || "Invalid API Key or connection issue";
+      
+      // Save failure diagnostics to Firestore
+      const docRef = doc(db, "settings", "support");
+      const diagData = {
+        connectionStatus: "❌ Invalid API Key",
+        lastError: errMsg,
+        lastResponseTime: "-",
+        testedAt: new Date().toISOString()
+      };
+      await setDoc(docRef, diagData, { merge: true });
+
+      return res.status(500).json({
+        success: false,
+        error: errMsg
+      });
+    }
+  });
+
+  // Gemini AI Chat Proxy
+  app.post("/api/support/ai-chat", async (req, res) => {
+    try {
+      const { messages, newMessage } = req.body;
+      
+      const supportSettingsRef = doc(db, "settings", "support");
+      const supportSettingsSnap = await getDoc(supportSettingsRef);
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-2.5-flash" };
+      
+      if (supportData.aiEnabled === false) {
+        return res.status(403).json({ error: "AI Support is currently unavailable." });
+      }
+      
+      const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+      
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+      
+      const selectedModel = supportData.geminiModel || "gemini-2.5-flash";
+      
+      const chat = ai.chats.create({
+        model: selectedModel,
+        config: {
+          systemInstruction: "You are an automated support assistant for RoyShare, a secure Telegram-powered file sharing & URL shortener platform. Assist the user with issues related to Account, Rewards, Withdrawal, Tasks, Telegram Bot, or Technical Issues. Keep answers helpful, empathetic, concise, and professional. If you cannot answer or fully resolve the user's issue, you must output exactly: 'I couldn't fully resolve your issue. Please create a support ticket.'"
+        },
+        history: (messages || []).map((m: any) => ({
+          role: m.sender === "user" ? "user" : "model",
+          parts: [{ text: m.text }]
+        }))
+      });
+      
+      const response = await chat.sendMessage({ message: newMessage });
+      res.json({ reply: response.text });
+    } catch (e: any) {
+      console.error("AI chat error:", e);
+      // Return the fallback response as requested when AI cannot answer
+      res.json({ reply: "I couldn't fully resolve your issue. Please create a support ticket." });
+    }
+  });
+
+  // Fetch User-specific Support Tickets
+  app.get("/api/support/tickets", async (req, res) => {
+    try {
+      const { userId } = req.query;
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      
+      const q = query(collection(db, "tickets"), where("userId", "==", String(userId)));
+      const snap = await getDocs(q);
+      const tickets = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      tickets.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      res.json(tickets);
+    } catch (e: any) {
+      console.error("User tickets fetch error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Create User Support Ticket
+  app.post("/api/support/tickets", async (req, res) => {
+    try {
+      const { userId, name, username, subject, category, description, screenshot, priority } = req.body;
+      if (!userId) return res.status(400).json({ error: "userId is required" });
+      
+      const ticketId = "TKT" + (Math.floor(Math.random() * 900000) + 100000);
+      const ticketData = {
+        ticketId,
+        userId: String(userId),
+        name: name || "User",
+        username: username || "",
+        subject: subject || "",
+        category: category || "Other",
+        issueType: category || "Other", // compatibility
+        description: description || "",
+        screenshot: screenshot || null,
+        priority: priority || "Medium",
+        status: "open",
+        createdAt: new Date().toISOString(),
+        replies: [
+          {
+            sender: "user",
+            message: description,
+            createdAt: new Date().toISOString()
+          }
+        ]
+      };
+      
+      const docRef = await addDoc(collection(db, "tickets"), ticketData);
+      
+      try {
+        await sendTgMessage(String(userId), `🎫 <b>Ticket Created Successfully!</b>\n\nTicket ID: <code>${ticketId}</code>\nSubject: ${subject}\nPriority: ${priority}\n\nOur support team will review it shortly.`);
+      } catch (tgErr) {
+        console.error("Failed to send TG confirmation to user:", tgErr);
+      }
+      
+      res.json({ success: true, id: docRef.id, ticketId });
+    } catch (e: any) {
+      console.error("Ticket creation error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // User replies to ticket
+  app.post("/api/support/tickets/:id/reply", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { message } = req.body;
+      
+      const ref = doc(db, "tickets", id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return res.status(404).json({ error: "Not found" });
+      
+      const data = snap.data();
+      const replies = data.replies || [];
+      
+      replies.push({
+        sender: "user",
+        message,
+        createdAt: new Date().toISOString()
+      });
+      
+      await setDoc(ref, { 
+        status: "open", // mark back as open for admins
+        replies,
+        lastReply: new Date().toISOString()
+      }, { merge: true });
+      
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("User ticket reply error:", e);
       res.status(500).json({ error: "Server error" });
     }
   });

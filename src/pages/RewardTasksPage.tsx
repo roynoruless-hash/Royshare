@@ -2,10 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, Play, Pause, RotateCcw, Volume2, VolumeX, ShieldCheck, AlertCircle, Sparkles, CheckCircle2 } from "lucide-react";
 import { db } from "../lib/firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore";
 import AdScriptRenderer from "../components/AdScriptRenderer";
 import AdRenderer from "../components/AdRenderer";
-import RewardVideoPlayer from "../components/RewardVideoPlayer";
 
 interface Task {
   id: string;
@@ -13,6 +12,11 @@ interface Task {
   amount: number;
   adNetwork?: string;
   selectedAdIds?: string[];
+  description?: string;
+  timerDuration?: string | number;
+  totalPages?: string | number;
+  timer?: string | number;
+  title?: string;
 }
 
 export default function RewardTasksPage() {
@@ -25,6 +29,7 @@ export default function RewardTasksPage() {
   const [currency, setCurrency] = useState("INR");
   const [currentTask, setCurrentTask] = useState<Task | null>(null);
   const [botUsername, setBotUsername] = useState("RoyShareEarnBot");
+  const [firestoreReadStatus, setFirestoreReadStatus] = useState("Pending");
 
   // Video State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -104,12 +109,53 @@ export default function RewardTasksPage() {
         setUserName(data.userName || "User");
         setBotUsername(data.botUsername || "RoyShareEarnBot");
 
-        const resolvedTask = (data.tasks || []).find((t: Task) => t.id === taskId);
+        let resolvedTask: Task | null = null;
+        let firestoreReadStatusLocal = "Pending";
+
+        try {
+          const taskDocRef = doc(db, "tasks", taskId);
+          const taskDocSnap = await getDoc(taskDocRef);
+          if (taskDocSnap.exists()) {
+            const tData = taskDocSnap.data();
+            resolvedTask = {
+              id: taskId,
+              name: tData.title || tData.name || "",
+              amount: Number(tData.rewardAmount) || Number(tData.amount) || 0,
+              ...tData
+            };
+            firestoreReadStatusLocal = "Success";
+          } else {
+            firestoreReadStatusLocal = "Not Found in Firestore";
+          }
+        } catch (fErr: any) {
+          console.error("Error reading task from Firestore directly:", fErr);
+          firestoreReadStatusLocal = `Failed: ${fErr.message || fErr}`;
+        }
+
+        // Fallback to data.tasks
+        if (!resolvedTask) {
+          if (data.tasks && Array.isArray(data.tasks)) {
+            data.tasks.forEach((t: Task) => {
+              if (t.id === taskId) {
+                resolvedTask = t;
+              }
+            });
+          }
+        }
+
+        setFirestoreReadStatus(firestoreReadStatusLocal);
+
         if (resolvedTask) {
           setCurrentTask(resolvedTask);
           if ((data.completedTaskIds || []).includes(taskId)) {
             setError("You have already completed this task. Duplicate rewards are not allowed.");
             return;
+          }
+
+          // Set timer duration exactly from dynamic/saved config
+          const savedDuration = resolvedTask.timerDuration ? Number(resolvedTask.timerDuration) : (resolvedTask.timer ? Number(resolvedTask.timer) : (data.timerDuration ? Number(data.timerDuration) : 30));
+          if (savedDuration && !isNaN(savedDuration)) {
+            setDuration(savedDuration);
           }
         } else {
           setError("Requested video reward task not found.");
@@ -131,17 +177,35 @@ export default function RewardTasksPage() {
 
         // Populate selected ads specifically assigned to this task
         let taskSelectedAds: any[] = [];
-        if (resolvedTask.selectedAdIds && Array.isArray(resolvedTask.selectedAdIds)) {
-          taskSelectedAds = adsList.filter(ad => resolvedTask.selectedAdIds.includes(ad.id));
+        if (resolvedTask && (resolvedTask as Task).selectedAdIds && Array.isArray((resolvedTask as Task).selectedAdIds)) {
+          const adsMap: Record<string, any> = {};
+          adsList.forEach(ad => {
+            if (ad && ad.id) {
+              adsMap[ad.id] = ad;
+            }
+          });
+          ((resolvedTask as Task).selectedAdIds || []).forEach((id, index) => {
+            const matchedAd = adsMap[id];
+            if (matchedAd) {
+              taskSelectedAds.push({
+                ...matchedAd,
+                uniqueId: `${matchedAd.id}-${index}`
+              });
+            }
+          });
         }
         setSelectedAds(taskSelectedAds);
 
         // Try to find an active video ad from the task's assigned ads
-        let chosenAd = null;
+        let chosenAd: any = null;
         if (taskSelectedAds.length > 0) {
-          chosenAd = taskSelectedAds.find(ad => {
+          taskSelectedAds.forEach(ad => {
             const t = String(ad.adType || "").toLowerCase();
-            return (t.includes("video") || t.includes("vast") || t.includes("stream") || t.includes("slider"));
+            if (t.includes("video") || t.includes("vast") || t.includes("stream") || t.includes("slider")) {
+              if (!chosenAd) {
+                chosenAd = ad;
+              }
+            }
           });
         }
 
@@ -153,10 +217,19 @@ export default function RewardTasksPage() {
             (ad.placement === "Video Slot" || ad.placement === "Video Slot")
           );
 
-          // Fallback Order: AdCash -> Adsterra -> Monetag
-          chosenAd = activeVideoAds.find(ad => ad.adSource === "AdCash");
-          if (!chosenAd) chosenAd = activeVideoAds.find(ad => ad.adSource === "Adsterra");
-          if (!chosenAd) chosenAd = activeVideoAds.find(ad => ad.adSource === "Monetag");
+          // Fallback Order: Adsterra -> Monetag
+          activeVideoAds.forEach(ad => {
+            if (ad.adSource === "Adsterra" && !chosenAd) {
+              chosenAd = ad;
+            }
+          });
+          if (!chosenAd) {
+            activeVideoAds.forEach(ad => {
+              if (ad.adSource === "Monetag" && !chosenAd) {
+                chosenAd = ad;
+              }
+            });
+          }
         }
 
         if (chosenAd) {
@@ -320,6 +393,12 @@ export default function RewardTasksPage() {
     );
   }
 
+  const renderedAds = selectedAds;
+  const totalSelectedAds = selectedAds.length;
+  const totalRenderedAds = renderedAds.length;
+  const selectedAdIds = selectedAds.map(ad => ad.id);
+  const renderedAdIds = renderedAds.map(ad => ad.id);
+
   return (
     <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col justify-between py-6 px-4">
       {/* Top Details Header */}
@@ -328,9 +407,14 @@ export default function RewardTasksPage() {
           <div>
             <h1 className="text-lg font-bold text-white flex items-center gap-2">
               <Sparkles size={18} className="text-amber-400" />
-              <span>Watch Video Task</span>
+              <span>{currentTask?.name || currentTask?.title || "Watch Video Task"}</span>
             </h1>
-            <p className="text-xs text-slate-400 mt-1">Complete video viewing to claim points.</p>
+            <p className="text-xs text-slate-400 mt-1">{currentTask?.description || ""}</p>
+            {currentTask?.totalPages && (
+              <p className="text-[11px] text-indigo-400 font-semibold mt-1">
+                Pages Count: {currentTask.totalPages}
+              </p>
+            )}
           </div>
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-1.5 text-right shrink-0">
             <p className="text-[9px] text-amber-500 font-bold uppercase tracking-wider">REWARD</p>
@@ -351,21 +435,11 @@ export default function RewardTasksPage() {
               <span className={`w-2 h-2 rounded-full ${videoCompleted ? 'bg-emerald-500' : isPlaying ? 'bg-amber-500 animate-pulse' : 'bg-slate-500'}`}></span>
               {videoCompleted ? 'Video Finished' : isPlaying ? 'Playing Sponsored Ad...' : 'Ready to play'}
             </span>
-            <span>Ad Network: <span className="text-blue-400">{videoAd?.adSource || 'AdCash'}</span></span>
+            <span>Ad Network: <span className="text-blue-400">{videoAd?.adSource || 'Adsterra'}</span></span>
           </div>
 
           {/* Video Frame */}
-          {videoAd && videoAd.placement === 'Video Slot' && videoAd.adSource === 'AdCash' && (videoAd.adType === 'VAST Video Ad' || videoAd.adType === 'VAST Video') ? (
-            <div className="p-4 flex justify-center bg-slate-950">
-              <RewardVideoPlayer 
-                scriptCode={videoAd.scriptCode}
-                onComplete={() => {
-                  setVideoCompleted(true);
-                  setCurrentTime(15);
-                }}
-              />
-            </div>
-          ) : videoAd && (videoAd.adType === 'VAST Video Ad' || videoAd.adType === 'VAST Video') ? (
+          {videoAd && (videoAd.adType === 'VAST Video Ad' || videoAd.adType === 'VAST Video') ? (
             <div className="p-4 flex justify-center bg-slate-950">
               <AdScriptRenderer 
                 scriptCode={videoAd.scriptCode} 
@@ -373,7 +447,7 @@ export default function RewardTasksPage() {
                 onStatusChange={(status, message, diagnostics) => {
                   if (status === 'Loaded' || message?.includes('Completed') || diagnostics?.adCompleted === 'Yes') {
                     setVideoCompleted(true);
-                    setCurrentTime(15);
+                    setCurrentTime(duration);
                   }
                 }}
               />
@@ -408,7 +482,7 @@ export default function RewardTasksPage() {
                         <Play size={28} className="ml-1" />
                       </div>
                       <p className="text-sm font-extrabold text-white mt-4">Click to Play Sponsor's Video</p>
-                      <p className="text-xs text-slate-400 mt-1 max-w-xs">You must watch the full 15-second duration to receive points.</p>
+                      <p className="text-xs text-slate-400 mt-1 max-w-xs">You must watch the full {duration}-second duration to receive points.</p>
                     </motion.div>
                   )}
 
@@ -486,8 +560,8 @@ export default function RewardTasksPage() {
         {/* Dynamic task-specific selected ads */}
         {selectedAds.length > 0 && (
           <div className="space-y-4">
-            {selectedAds.filter(ad => ad.id !== videoAd?.id).map(ad => (
-              <div key={ad.id} className="w-full bg-slate-900/40 border border-slate-800/40 rounded-2xl p-4">
+            {selectedAds.map(ad => (
+              <div key={ad.uniqueId || ad.id} className="w-full bg-slate-900/40 border border-slate-800/40 rounded-2xl p-4">
                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2 flex items-center gap-1">
                   <span>Sponsored Ad ({ad.adSource} - {ad.adType})</span>
                 </p>
@@ -509,6 +583,24 @@ export default function RewardTasksPage() {
             ))}
           </div>
         )}
+
+        {/* Diagnostics block */}
+        <div id="reward-task-ad-diagnostics" className="p-4 bg-slate-950/60 border border-slate-850 rounded-2xl font-mono text-xs text-slate-400 mt-4 space-y-1.5 shadow-inner">
+          <div className="text-slate-500 font-bold uppercase tracking-wider text-[10px] mb-2">🔍 AD RENDERING DIAGNOSTICS</div>
+          <div>Saved Task ID = <span className="text-blue-400 font-bold">{taskId || 'None'}</span></div>
+          <div>Selected Ads Count = <span className="text-amber-400 font-bold">{totalSelectedAds}</span></div>
+          <div>Rendered Ads Count = <span className="text-emerald-400 font-bold">{totalRenderedAds}</span></div>
+          <div className="break-all">Selected Ad IDs = <span className="text-blue-400 font-medium">{selectedAdIds.join(', ') || 'None'}</span></div>
+          <div className="break-all">Rendered Ad IDs = <span className="text-blue-400 font-medium">{renderedAdIds.join(', ') || 'None'}</span></div>
+          {totalRenderedAds < totalSelectedAds && (
+            <div className="text-red-400">Rendering Mismatch Reason = <span>Rendered count ({totalRenderedAds}) is less than Selected count ({totalSelectedAds})</span></div>
+          )}
+          <div>Saved Timer = <span className="text-blue-400">{currentTask?.timerDuration || currentTask?.timer || 'None'}</span></div>
+          <div>Loaded Timer = <span className="text-blue-400">{duration}</span></div>
+          <div className="break-words">Saved Instructions = <span className="text-blue-400">{currentTask?.description || 'None'}</span></div>
+          <div className="break-words">Loaded Instructions = <span className="text-blue-400">{currentTask?.description || 'None'}</span></div>
+          <div>Firestore Read Status = <span className="text-emerald-400 font-bold">{firestoreReadStatus}</span></div>
+        </div>
       </div>
 
       {/* Footer Controls */}

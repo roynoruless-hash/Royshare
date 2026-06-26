@@ -20,6 +20,7 @@ import EarnRewardsPage from "./pages/EarnRewardsPage";
 import RewardTasksPage from "./pages/RewardTasksPage";
 import VerifyWithdrawalPage from "./pages/VerifyWithdrawalPage";
 import AdTestPage from "./pages/AdTestPage";
+import CustomerSupportPage from "./pages/CustomerSupportPage";
 
 const ADMIN_AUTH_ENABLED = false;
 
@@ -125,6 +126,10 @@ export default function App() {
 
   if (window.location.pathname === "/ad-test") {
     return <AdTestPage />;
+  }
+
+  if (window.location.pathname === "/support" || window.location.pathname === "/customer-support") {
+    return <CustomerSupportPage />;
   }
 
   return (
