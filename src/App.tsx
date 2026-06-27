@@ -77,18 +77,83 @@ export default function App() {
     return <AdminDashboard />;
   }
 
-  const downloadMatch = window.location.pathname.match(/^\/download\/([a-zA-Z0-9_-]+)/);
-  if (downloadMatch) {
-    const fileId = downloadMatch[1];
-    return <MultiPageEngine type="download" id={fileId} />;
+  // 1. Log incoming URL details for debugging
+  console.log("[App.tsx] Incoming URL:", window.location.href);
+  console.log("[App.tsx] Pathname:", window.location.pathname);
+  console.log("[App.tsx] Search params:", window.location.search);
+
+  // 2. Parse query parameters
+  const params = new URLSearchParams(window.location.search);
+  const redirectParam = params.get("redirect") || params.get("url") || params.get("id") || params.get("alias") || params.get("linkId") || params.get("gpl_token");
+  
+  let detectedLinkId: string | null = null;
+  let detectedType: "shortener" | "download" | null = null;
+
+  // Check pathname matches first
+  const pathLinkMatch = window.location.pathname.match(/^\/lnk\/([a-zA-Z0-9_-]+)/) || 
+                        window.location.pathname.match(/^\/link\/([a-zA-Z0-9_-]+)/) ||
+                        window.location.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)/);
+
+  const pathDownloadMatch = window.location.pathname.match(/^\/download\/([a-zA-Z0-9_-]+)/);
+
+  if (pathLinkMatch) {
+    detectedLinkId = pathLinkMatch[1];
+    detectedType = "shortener";
+    console.log("[App.tsx] Detected link ID from pathname:", detectedLinkId);
+  } else if (pathDownloadMatch) {
+    detectedLinkId = pathDownloadMatch[1];
+    detectedType = "download";
+    console.log("[App.tsx] Detected download ID from pathname:", detectedLinkId);
   }
 
-  const linkMatch = window.location.pathname.match(/^\/lnk\/([a-zA-Z0-9_-]+)/) || 
-                    window.location.pathname.match(/^\/link\/([a-zA-Z0-9_-]+)/) ||
-                    window.location.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)/);
-  if (linkMatch) {
-    const linkId = linkMatch[1];
-    return <MultiPageEngine type="shortener" id={linkId} />;
+  // 3. Fallback/Override from query parameters
+  if (!detectedLinkId && redirectParam) {
+    console.log("[App.tsx] Found redirect/id/url query parameter:", redirectParam);
+    const decodedParam = decodeURIComponent(redirectParam);
+    console.log("[App.tsx] Decoded redirect parameter:", decodedParam);
+
+    try {
+      if (decodedParam.startsWith("http://") || decodedParam.startsWith("https://")) {
+        const parsedUrl = new URL(decodedParam);
+        console.log("[App.tsx] Parsed full URL from query parameter:", parsedUrl.href);
+        const qPathMatch = parsedUrl.pathname.match(/^\/lnk\/([a-zA-Z0-9_-]+)/) || 
+                           parsedUrl.pathname.match(/^\/link\/([a-zA-Z0-9_-]+)/) ||
+                           parsedUrl.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)/);
+        const qDownloadMatch = parsedUrl.pathname.match(/^\/download\/([a-zA-Z0-9_-]+)/);
+        
+        if (qPathMatch) {
+          detectedLinkId = qPathMatch[1];
+          detectedType = "shortener";
+        } else if (qDownloadMatch) {
+          detectedLinkId = qDownloadMatch[1];
+          detectedType = "download";
+        }
+      } else if (decodedParam.startsWith("/lnk/") || decodedParam.startsWith("/link/") || decodedParam.startsWith("/s/")) {
+        const cleanParam = decodedParam.replace(/^\//, "");
+        const parts = cleanParam.split("/");
+        if (parts.length >= 2) {
+          detectedLinkId = parts[1];
+          detectedType = "shortener";
+        }
+      } else if (decodedParam.startsWith("/download/")) {
+        const cleanParam = decodedParam.replace(/^\//, "");
+        const parts = cleanParam.split("/");
+        if (parts.length >= 2) {
+          detectedLinkId = parts[1];
+          detectedType = "download";
+        }
+      } else if (/^[a-zA-Z0-9_-]+$/.test(decodedParam)) {
+        detectedLinkId = decodedParam;
+        detectedType = "shortener";
+      }
+    } catch (e) {
+      console.error("[App.tsx] Error parsing decoded redirectParam:", e);
+    }
+  }
+
+  if (detectedLinkId && detectedType) {
+    console.log(`[App.tsx] Directing to MultiPageEngine: type=${detectedType}, id=${detectedLinkId}`);
+    return <MultiPageEngine type={detectedType} id={detectedLinkId} />;
   }
 
   if (window.location.pathname === "/daily-bonus") {

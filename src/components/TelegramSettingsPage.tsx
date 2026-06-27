@@ -49,8 +49,8 @@ export default function TelegramSettingsPage() {
             headers: { "Content-Type": "application/json" }, 
             body: JSON.stringify({ 
                 botToken: configs.botToken, 
-                channelUsername: configs.channelUsername || extractUsername(configs.channelLink),
-                groupUsername: configs.groupUsername || extractUsername(configs.groupLink)
+                channelUsername: (configs as any).channelUsername || extractUsername(configs.channelLink),
+                groupUsername: (configs as any).groupUsername || extractUsername(configs.groupLink)
             }) 
         });
         const data = await res.json();

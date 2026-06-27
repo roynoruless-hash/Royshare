@@ -257,6 +257,193 @@ async function startServer() {
     }
   });
 
+  // AI Support - Ticket Analyzer
+  app.post("/api/admin/tickets/:id/ai-analyze", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const ref = doc(db, "tickets", id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return res.status(404).json({ error: "Ticket not found" });
+
+      const ticket = snap.data();
+      const subject = ticket.subject || "";
+      const description = ticket.description || ticket.message || "";
+      const replies = ticket.replies || [];
+      const repliesStr = replies.map((r: any) => `${r.sender === "admin" ? "Admin" : "User"}: ${r.message}`).join("\n");
+
+      const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : {};
+      const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.status(400).json({ error: "Gemini API Key is not configured." });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+      });
+      const selectedModel = supportData.geminiModel || "gemini-2.5-flash";
+
+      const prompt = `
+You are an advanced support automation assistant for RoyShare.
+Analyze the following support ticket details:
+
+Ticket Subject: ${subject}
+Ticket Description: ${description}
+Existing Conversation History:
+${repliesStr || "(No replies yet)"}
+
+Extract and determine the following 5 fields:
+1. "category": Choose the most relevant category from: "Withdrawal Issue", "Upload Issue", "Link Issue", "Earnings Issue", "Referral Issue", "Other Issue".
+2. "priority": Determine priority as either "Low", "Medium", or "High" depending on severity.
+3. "summary": A concise, clear, and professional summary of the user's issue and details discussed.
+4. "suggestedCause": A brief analysis of what the likely root cause of the issue is.
+5. "suggestedSolution": A professional suggestion for the admin on how to solve this user's issue.
+
+Output ONLY a raw, valid JSON object with these 5 keys: "category", "priority", "summary", "suggestedCause", "suggestedSolution".
+Do NOT include markdown formatting like \`\`\`json or any other text before or after.
+`;
+
+      const response = await ai.models.generateContent({
+        model: selectedModel,
+        contents: prompt
+      });
+
+      const rawText = response.text || "";
+      const cleanText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+      const parsed = JSON.parse(cleanText);
+
+      const updateData: any = {};
+      if (parsed.summary) updateData.aiSummary = parsed.summary;
+      if (parsed.suggestedCause) updateData.aiSuggestedCause = parsed.suggestedCause;
+      if (parsed.suggestedSolution) updateData.aiSuggestedSolution = parsed.suggestedSolution;
+      if (parsed.category) {
+        updateData.category = parsed.category;
+        updateData.issueType = parsed.category;
+      }
+      if (parsed.priority) updateData.priority = parsed.priority;
+
+      await setDoc(ref, updateData, { merge: true });
+
+      res.json({ success: true, ...updateData });
+    } catch (e: any) {
+      console.error("AI Ticket Analysis error:", e);
+      res.status(500).json({ error: e.message || "Failed to run AI Analysis" });
+    }
+  });
+
+  // AI Support - Ticket Reply Generator
+  app.post("/api/admin/tickets/:id/ai-suggest-reply", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const ref = doc(db, "tickets", id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return res.status(404).json({ error: "Ticket not found" });
+
+      const ticket = snap.data();
+      const subject = ticket.subject || "";
+      const description = ticket.description || ticket.message || "";
+      const replies = ticket.replies || [];
+      const repliesStr = replies.map((r: any) => `${r.sender === "admin" ? "Admin" : "User"}: ${r.message}`).join("\n");
+
+      const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : {};
+      const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.status(400).json({ error: "Gemini API Key is not configured." });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+      });
+      const selectedModel = supportData.geminiModel || "gemini-2.5-flash";
+
+      const prompt = `
+You are a highly professional support assistant at RoyShare, a file hosting and link shortening monetization platform.
+Generate a polite, clear, structured, and helpful reply to the following user support ticket.
+
+User Name: ${ticket.name || "User"}
+Ticket Subject: ${subject}
+Ticket Description: ${description}
+Existing Conversation History:
+${repliesStr || "(No replies yet)"}
+
+Create a draft of a professional, solution-oriented reply that addresses the user's issue.
+Your response should be friendly and empathetic. Avoid using generic boilerplate if details are available.
+Keep the tone natural, crisp, and direct.
+
+Output ONLY the text of the reply. Do not include subject lines, placeholders like [Your Name], or markdown formatting around the reply.
+`;
+
+      const response = await ai.models.generateContent({
+        model: selectedModel,
+        contents: prompt
+      });
+
+      const suggestedReply = response.text || "";
+      res.json({ success: true, suggestedReply });
+    } catch (e: any) {
+      console.error("AI Ticket Suggested Reply error:", e);
+      res.status(500).json({ error: e.message || "Failed to generate suggested reply" });
+    }
+  });
+
+  // AI Announcement Improvement
+  app.post("/api/admin/announcements/improve", async (req, res) => {
+    try {
+      const { title, message } = req.body;
+      if (!title || !message) {
+        return res.status(400).json({ error: "Title and Message are required." });
+      }
+
+      const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : {};
+      const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.status(400).json({ error: "Gemini API Key is not configured." });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+      });
+      const selectedModel = supportData.geminiModel || "gemini-2.5-flash";
+
+      const prompt = `
+You are an advanced communication specialist for RoyShare, a link sharing and monetization platform.
+Improve the following announcement title and message to be highly engaging, professional, clear, and appealing to users. Use elegant formatting (bolding, spacing) if appropriate.
+
+Original Title: ${title}
+Original Message: ${message}
+
+Output ONLY a raw, valid JSON object with these 2 keys: "improvedTitle" and "improvedMessage".
+Do NOT include markdown formatting like \`\`\`json or any other text before or after.
+`;
+
+      const response = await ai.models.generateContent({
+        model: selectedModel,
+        contents: prompt
+      });
+
+      const rawText = response.text || "";
+      const cleanText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+      const parsed = JSON.parse(cleanText);
+
+      res.json({
+        success: true,
+        improvedTitle: parsed.improvedTitle || title,
+        improvedMessage: parsed.improvedMessage || message
+      });
+    } catch (e: any) {
+      console.error("AI Announcement Improvement error:", e);
+      res.status(500).json({ error: e.message || "Failed to improve announcement" });
+    }
+  });
+
   app.post("/api/admin/tickets/:id/reply", async (req, res) => {
     try {
       const { id } = req.params;
@@ -4000,6 +4187,10 @@ Bonus added successfully.`;
           completedRedirects: currentRedirects,
           conversionRate
         });
+
+        if (!itemData.destinationUrl) {
+          return res.status(400).json({ success: false, message: "Target destination URL is missing in the database." });
+        }
 
         res.json({
           success: true,

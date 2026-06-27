@@ -20,6 +20,7 @@ interface Ticket {
   username: string;
   subject: string;
   category: string;
+  issueType?: string;
   description: string;
   screenshot?: string | null;
   priority: "Low" | "Medium" | "High";
@@ -380,32 +381,8 @@ export default function CustomerSupportPage() {
         {/* Support Grid Actions */}
         <section className="space-y-4">
           <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">How can we assist you today?</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             
-            {/* 💬 Live Support */}
-            <button
-              onClick={() => {
-                setActiveModal("live_support");
-              }}
-              className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-emerald-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"
-            >
-              <div className="absolute top-0 right-0 p-3 text-emerald-500/20 group-hover:text-emerald-500/30 transition-all">
-                <MessageSquare className="w-16 h-16" />
-              </div>
-              <div className="p-2.5 bg-emerald-600/10 text-emerald-400 rounded-xl w-fit border border-emerald-500/20">
-                <MessageSquare className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-white flex items-center gap-1.5 text-base">
-                  💬 Live Support
-                  <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                </h3>
-                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  Chat with our support staff.
-                </p>
-              </div>
-            </button>
-
             {/* 🎫 Create Ticket */}
             <button
               onClick={() => {
@@ -555,7 +532,7 @@ export default function CustomerSupportPage() {
       <AnimatePresence>
         
         {/* 1. LIVE SUPPORT MODAL */}
-        {activeModal === "live_support" && (
+        {false && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -661,7 +638,7 @@ export default function CustomerSupportPage() {
                         <div className={`max-w-[85%] rounded-2xl p-3.5 text-sm ${
                           msg.sender === 'user' 
                             ? 'bg-emerald-600 text-white rounded-br-none' 
-                            : 'bg-slate-800 border border-slate-700/50 text-slate-200 rounded-bl-none'
+                             : 'bg-slate-800 border border-slate-700/50 text-slate-200 rounded-bl-none'
                         }`}>
                           <p className="whitespace-pre-wrap">{msg.text}</p>
                           <span className="block text-[9px] text-slate-400/80 text-right mt-1 font-mono">{msg.time}</span>

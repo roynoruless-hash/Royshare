@@ -1,15 +1,80 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, ShieldAlert, ArrowRight, Download, ExternalLink, CheckCircle2 } from "lucide-react";
 import AnimatedBackground from "./AnimatedBackground";
 import AdScriptRenderer from "./AdScriptRenderer";
 import AdRenderer from "./AdRenderer";
 
+// ----------------- Error Boundary -----------------
+interface ErrorBoundaryProps {
+  children?: ReactNode;
+  fallback?: (error: Error) => ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null
+    };
+  }
+
+  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("[ErrorBoundary] Caught uncaught render error inside MultiPageEngine:", error, errorInfo);
+  }
+
+  public render() {
+    if (this.state.hasError && this.state.error) {
+      if (this.props.fallback) {
+        return this.props.fallback(this.state.error);
+      }
+      return (
+        <div className="min-h-screen relative text-slate-200 font-sans flex flex-col justify-between overflow-hidden bg-slate-950">
+          <AnimatedBackground />
+          <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6">
+            <div className="w-full max-w-md bg-slate-900/95 border border-rose-500/30 backdrop-blur-md rounded-2xl p-8 shadow-2xl space-y-6 text-center">
+              <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center justify-center mx-auto text-rose-400">
+                <span>⚠️</span>
+              </div>
+              <h2 className="text-xl font-bold text-white">Application Render Error</h2>
+              <p className="text-slate-400 text-sm">
+                A JavaScript error occurred while rendering the page content.
+              </p>
+              <div className="text-left bg-slate-950/60 p-4 rounded-xl border border-white/5 font-mono text-xs text-rose-300 max-h-40 overflow-y-auto break-all">
+                {this.state.error.message || String(this.state.error)}
+              </div>
+              <button
+                onClick={() => window.location.reload()}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition"
+              >
+                🔄 Reload Page
+              </button>
+            </div>
+          </main>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 interface PageConfig {
   pageNumber: number;
   timerDuration: number;
   humanVerification: boolean;
   selectedAdIds: string[];
+  instructions?: string;
 }
 
 interface MultiPageEngineProps {
@@ -17,7 +82,7 @@ interface MultiPageEngineProps {
   id: string; // shortLink alias/id or fileId
 }
 
-export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
+function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [itemData, setItemData] = useState<any>(null);
@@ -82,6 +147,7 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
   useEffect(() => {
     const initSession = async () => {
       try {
+        console.log(`[MultiPageEngine] initSession triggered. Type="${type}", ID="${id}"`);
         setLoading(true);
         // Get user device details for tracking
         const ua = navigator.userAgent;
@@ -96,15 +162,24 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
         else if (ua.includes("Safari")) browser = "Safari";
         else if (ua.includes("Edge")) browser = "Edge";
 
+        console.log(`[MultiPageEngine] Client Environment details: Device=${device}, Browser=${browser}, UserAgent="${ua}"`);
+
         let country = "Unknown";
         try {
+          console.log("[MultiPageEngine] Fetching geolocation data...");
           const geoRes = await fetch("https://ipapi.co/json/").catch(() => null);
           if (geoRes && geoRes.ok) {
             const geoData = await geoRes.json();
             country = geoData.country_name || "Unknown";
+            console.log("[MultiPageEngine] Geolocation lookup success. Country:", country);
+          } else {
+            console.warn("[MultiPageEngine] Geolocation response was not successful.");
           }
-        } catch (e) {}
+        } catch (e) {
+          console.error("[MultiPageEngine] Geolocation lookup error:", e);
+        }
 
+        console.log("[MultiPageEngine] Initializing secure routing session...");
         const initRes = await fetch("/api/smart-links/session/init", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -117,21 +192,27 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
           })
         });
 
+        console.log(`[MultiPageEngine] Session API raw response status: ${initRes.status} ${initRes.statusText}`);
         const initData = await initRes.json();
+        console.log("[MultiPageEngine] Session API parsed data:", initData);
 
         if (!initRes.ok || !initData.success) {
-          setError(initData.message || "Failed to initialize redirection session.");
+          const errMsg = initData.message || `Session API error (status: ${initRes.status})`;
+          console.error("[MultiPageEngine] Session initiation failed:", errMsg);
+          setError(errMsg);
           setLoading(false);
           return;
         }
 
         // Check security blocks
         if (initData.securityBlocked) {
+          console.warn("[MultiPageEngine] Access blocked due to security policies:", initData.securityReason);
           setSecurityBlockReason(initData.securityReason);
           setLoading(false);
           return;
         }
 
+        console.log("[MultiPageEngine] Session claims authorized. Active SessionID:", initData.sessionId);
         setItemData(initData.data);
         setSessionId(initData.sessionId);
         setTotalPages(initData.totalPages || 1);
@@ -140,6 +221,7 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
         // Setup Page 1 Timer
         const page1Config = initData.pagesConfig?.find((p: any) => p.pageNumber === 1);
         const duration = page1Config ? Number(page1Config.timerDuration) : 5;
+        console.log(`[MultiPageEngine] Page 1 config located. Timer duration: ${duration}s`);
         setTimer(duration);
         setIsTimerActive(true);
         setShowVerifyButton(false);
@@ -148,9 +230,10 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
         setIsPageComplete(false);
 
         setLoading(false);
+        console.log("[MultiPageEngine] Session initialization completed. Render stage active.");
       } catch (err: any) {
-        console.error("Error initiating session:", err);
-        setError("Error establishing a secure session. Please reload.");
+        console.error("[MultiPageEngine] Fatal error during session initiation:", err);
+        setError("Error establishing a secure session: " + (err.message || String(err)));
         setLoading(false);
       }
     };
@@ -264,61 +347,97 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
 
   // Final Action: Claim Destination URL or Secure Download
   const handleClaim = async () => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      console.warn("[MultiPageEngine] Cannot claim. Missing sessionId.");
+      return;
+    }
+    console.log(`[MultiPageEngine] handleClaim triggered for sessionId: "${sessionId}"`);
     setRedirecting(true);
     try {
+      console.log("[MultiPageEngine] Calling session claim API...");
       const res = await fetch("/api/smart-links/session/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId })
       });
 
+      console.log("[MultiPageEngine] Session claim response status:", res.status);
       const data = await res.json();
+      console.log("[MultiPageEngine] Session claim response body:", data);
+
       if (!res.ok || !data.success) {
-        setError(data.message || "Claim validation failed.");
+        const errMsg = data.message || "Claim validation failed.";
+        console.error("[MultiPageEngine] Claim failed:", errMsg);
+        setError(errMsg);
         setRedirecting(false);
         return;
       }
 
       if (type === "shortener") {
+        if (!data.destinationUrl) {
+          const errMsg = "The target destination URL is missing or unavailable. Please contact the administrator.";
+          console.error("[MultiPageEngine] Destination URL is missing:", data);
+          setError(errMsg);
+          setRedirecting(false);
+          return;
+        }
+
+        console.log("[MultiPageEngine] Claimed destination URL successfully:", data.destinationUrl);
         setDestinationUrl(data.destinationUrl);
         
         // Start auto-redirect countdown if enabled
         if (itemData?.autoRedirect !== false) {
           const delay = itemData?.finalRedirectDelay !== undefined ? Number(itemData.finalRedirectDelay) : 5;
+          console.log(`[MultiPageEngine] Auto-redirect is enabled. Starting countdown of ${delay}s...`);
           setFinalCountdown(delay);
           
           let cd = delay;
           const rdInterval = setInterval(() => {
             cd--;
             setFinalCountdown(cd);
+            console.log(`[MultiPageEngine] Redirecting in ${cd}s to:`, data.destinationUrl);
             if (cd <= 0) {
               clearInterval(rdInterval);
+              console.log("[MultiPageEngine] Redirecting now to:", data.destinationUrl);
               window.location.href = data.destinationUrl;
             }
           }, 1000);
+        } else {
+          console.log("[MultiPageEngine] Auto-redirect is disabled. User must click manually.");
         }
       } else {
+        if (!data.downloadUrl) {
+          const errMsg = "The secure file download URL is missing or expired. Please contact the administrator.";
+          console.error("[MultiPageEngine] Download URL is missing:", data);
+          setError(errMsg);
+          setRedirecting(false);
+          return;
+        }
+
+        console.log("[MultiPageEngine] Claimed secure file download URL successfully:", data.downloadUrl);
         setDownloadUrl(data.downloadUrl);
         // Automatically open file download link in a new tab if available
         if (data.downloadUrl) {
+          console.log("[MultiPageEngine] Opening download URL in a new tab:", data.downloadUrl);
           window.open(data.downloadUrl, "_blank", "noopener,noreferrer");
         }
       }
-    } catch (err) {
-      console.error("Error claiming target:", err);
-      setError("An error occurred during final redirection.");
+    } catch (err: any) {
+      console.error("[MultiPageEngine] Error claiming target:", err);
+      setError("An error occurred during final redirection: " + (err.message || String(err)));
       setRedirecting(false);
     }
   };
 
-  if (loading && currentPage === 1) {
+  if (loading) {
     return (
       <div className="min-h-screen relative text-slate-200 font-sans flex flex-col justify-between overflow-hidden">
         <AnimatedBackground />
         <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6">
           <div className="w-16 h-16 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mb-4"></div>
-          <span className="text-slate-400 font-medium">Verifying security parameters and loading center...</span>
+          <span className="text-slate-400 font-medium">
+            {currentPage === 1 ? "Verifying security parameters and loading center..." : `Synchronizing with security portal (Step ${currentPage})...`}
+          </span>
         </main>
       </div>
     );
@@ -784,5 +903,13 @@ export default function MultiPageEngine({ type, id }: MultiPageEngineProps) {
         &copy; {new Date().getFullYear()} RoyShare Center. All rights reserved.
       </footer>
     </div>
+  );
+}
+
+export default function MultiPageEngine(props: MultiPageEngineProps) {
+  return (
+    <ErrorBoundary>
+      <MultiPageEngineInner {...props} />
+    </ErrorBoundary>
   );
 }

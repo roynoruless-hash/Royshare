@@ -133,12 +133,7 @@ export async function handleUpdate(botToken: string, update: any) {
         const userSnap = await getDoc(userDocRef);
         const userData = userSnap.exists() ? userSnap.data() : null;
 
-        if (userData?.liveSupportActive === true) {
-            console.log("Routing directly to Live Support handler");
-            const consumed = await handleLiveSupportMessage(botToken, chatId, user, msg.text || msg.caption || "");
-            if (consumed) return;
-        }
-        
+
         if (msg.text && msg.text.startsWith("/start")) {
              console.log("Matched /start command");
              await processStart(botToken, chatId, user, msg.text);
@@ -254,12 +249,7 @@ https://youtube.com`;
             const userDoc = await getDoc(doc(db, "users", String(user.id)));
             const userData = userDoc.data();
 
-            if (userData?.liveSupportActive) {
-                const consumed = await handleLiveSupportMessage(botToken, chatId, user, msg.text);
-                if (consumed) return;
-            }
-
-            const pendingAnnouncement = userData?.pendingAnnouncement;
+const pendingAnnouncement = userData?.pendingAnnouncement;
             const pendingTicket = userData?.pendingSupportTicket;
 
             if (pendingAnnouncement) {
@@ -2549,7 +2539,6 @@ How can we help you?`;
 
     const inlineKeyboard = {
         inline_keyboard: [
-            [{ text: "💬 Live Support", callback_data: "support_live" }],
             [{ text: "➕ Create Ticket", callback_data: "support_create" }],
             [{ text: "📋 My Tickets", callback_data: "support_list" }],
             [{ text: "📞 Contact Admin", callback_data: "support_admin" }]
@@ -4356,7 +4345,7 @@ async function processCallback(botToken: string, callbackQuery: any) {
             });
             await setDoc(doc(db, "users", String(userId)), { pendingAnnouncement: null }, { merge: true });
             await sendTelegramMessage(botToken, chatId, `✅ Announcement Published: ${pending.title}`);
-        } else if (data === "support_live") {
+        } else if (data === "support_live_disabled") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
                     method: "POST",
@@ -4365,7 +4354,7 @@ async function processCallback(botToken: string, callbackQuery: any) {
                 });
             } catch (e) {}
             await startLiveSupportSession(botToken, chatId, callbackQuery.from);
-        } else if (data === "support_live_exit") {
+        } else if (data === "support_live_exit_disabled") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
                     method: "POST",
@@ -4379,7 +4368,7 @@ async function processCallback(botToken: string, callbackQuery: any) {
 Thank you for chatting with us. Let us know if you need anything else!`;
             await sendTelegramMessage(botToken, chatId, exitMsg, { parse_mode: "Markdown" });
             await processSupport(botToken, chatId, callbackQuery.from);
-        } else if (data === "support_solved_from_live") {
+        } else if (data === "support_solved_from_live_disabled") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
                     method: "POST",
@@ -4391,7 +4380,7 @@ Thank you for chatting with us. Let us know if you need anything else!`;
             const solvedMsg = `🎉 *Great!* We're glad your support issue has been resolved. Let us know if you need anything else!`;
             await sendTelegramMessage(botToken, chatId, solvedMsg, { parse_mode: "Markdown" });
             await processSupport(botToken, chatId, callbackQuery.from);
-        } else if (data === "support_create_from_live") {
+        } else if (data === "support_create_from_live_disabled") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
                     method: "POST",
