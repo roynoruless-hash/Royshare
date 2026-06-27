@@ -608,9 +608,27 @@ async function processStart(botToken: string, chatId: number, user: any, startTe
         }
     }
 
+    // Check for download deep link
+    if (startText && startText.includes(" dl_")) {
+        const fileId = startText.split(" dl_")[1]?.trim();
+        console.log(`Detected Download Intent: ${fileId}`);
+        await setDoc(doc(db, "users", String(user.id)), {
+            pendingDownloadId: fileId
+        }, { merge: true });
+    }
+
     const userDoc = await getDoc(doc(db, "users", String(user.id)));
     if (userDoc.exists() && userDoc.data()?.membershipVerified) {
-        await sendTelegramMessage(botToken, chatId, "Welcome back to RoyShare!", { reply_markup: getMainMenuKeyboard() });
+        const userData = userDoc.data();
+        if (userData?.pendingDownloadId) {
+            await fulfillDownload(botToken, chatId, userData.pendingDownloadId);
+            // Clear pending download
+            await setDoc(doc(db, "users", String(user.id)), {
+                pendingDownloadId: null
+            }, { merge: true });
+        } else {
+            await sendTelegramMessage(botToken, chatId, "Welcome back to RoyShare!", { reply_markup: getMainMenuKeyboard() });
+        }
     } else {
         await sendTelegramMessage(botToken, chatId, "📱 Please share your contact to continue.", {
             reply_markup: {
@@ -804,6 +822,39 @@ ${generatedLink}`;
     };
     
     await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+}
+
+async function copyMessage(botToken: string, chatId: number | string, fromChatId: string | number, messageId: number | string) {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/copyMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            chat_id: chatId,
+            from_chat_id: fromChatId,
+            message_id: messageId
+        })
+    });
+    return await res.json();
+}
+
+async function fulfillDownload(botToken: string, chatId: number, fileId: string) {
+    const db = getDb();
+    const fileDoc = await getDoc(doc(db, "uploads", fileId));
+    if (!fileDoc.exists()) {
+        await sendTelegramMessage(botToken, chatId, "❌ File not found or has been deleted.");
+        return;
+    }
+    const fileData = fileDoc.data();
+    
+    // Increment download count
+    const currentDownloads = Number(fileData.downloads || 0) + 1;
+    await setDoc(doc(db, "uploads", fileId), { downloads: currentDownloads }, { merge: true });
+
+    if (fileData.telegramMessageId && fileData.storageChannelId && fileData.telegramMessageId !== "NOT_SET") {
+        await copyMessage(botToken, chatId, fileData.storageChannelId, fileData.telegramMessageId);
+    } else {
+        await sendTelegramMessage(botToken, chatId, `📄 File Name: ${fileData.fileName}\n🔗 Download here: ${fileData.generatedLink || 'N/A'}`);
+    }
 }
 
 async function processShortenUrl(botToken: string, chatId: number, user: any, urlText: string) {
@@ -3996,6 +4047,18 @@ async function processCallback(botToken: string, callbackQuery: any) {
                         contactVerified: true,
                         membershipVerified: true
                     }, { merge: true });
+
+                    const userDoc = await getDoc(doc(db, "users", String(userId)));
+                    const userData = userDoc.data();
+                    if (userData?.pendingDownloadId) {
+                        await fulfillDownload(botToken, chatId, userData.pendingDownloadId);
+                        await setDoc(doc(db, "users", String(userId)), {
+                            pendingDownloadId: null
+                        }, { merge: true });
+                        await sendTelegramMessage(botToken, chatId, "Welcome to RoyShare!", { reply_markup: getMainMenuKeyboard() });
+                    } else {
+                        await sendTelegramMessage(botToken, chatId, "✅ Membership verified! Welcome to RoyShare.", { reply_markup: getMainMenuKeyboard() });
+                    }
 
                     // Process referral counting if they were referred
                     try {

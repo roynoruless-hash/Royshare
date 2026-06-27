@@ -4271,10 +4271,11 @@ Bonus added successfully.`;
         // Get original download URL from Telegram
         const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
         const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
+        const botUsername = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botUsername : null;
         
         let downloadUrl = "";
-        if (botToken && itemData.storageChannelId && itemData.telegramMessageId && itemData.telegramMessageId !== "NOT_SET") {
-          downloadUrl = `https://t.me/c/${itemData.storageChannelId.toString().replace("-100", "")}/${itemData.telegramMessageId}`;
+        if (botToken && botUsername && itemData.storageChannelId && itemData.telegramMessageId && itemData.telegramMessageId !== "NOT_SET") {
+          downloadUrl = `https://t.me/${botUsername}?start=dl_${linkId}`;
         } else {
           downloadUrl = itemData.generatedLink || "";
         }
