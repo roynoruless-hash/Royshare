@@ -3812,62 +3812,62 @@ Bonus added successfully.`;
           itemData.Enabled = itemData.enabled;
         }
 
-        // Merge User Mode Settings if it's from the "links" collection (User Created Links)
-        if (type === "shortener" && col === "links") {
-          try {
-            const userSettingsSnap = await getDoc(doc(db, "settings", "user_shortener_config"));
-            const userSettings = userSettingsSnap.exists() ? userSettingsSnap.data() : {
-              totalPages: 2,
-              instructions: "Follow the steps below to reach your destination.",
-              autoScroll: true,
-              autoRedirect: true,
-              continueButtonText: "Proceed",
-              verifyButtonText: "Verify This Step",
-              humanVerification: true,
-              vpnDetection: false,
-              botDetection: true,
-              pagesConfig: [
-                {
-                  pageNumber: 1,
-                  timerDuration: 10,
-                  instructions: "Complete verification step 1.",
-                  selectedAdIds: [],
-                  numberOfAds: 3,
-                  humanVerification: true,
-                  verifyBtnText: "Verify Step 1",
-                  continueBtnText: "Proceed"
-                },
-                {
-                  pageNumber: 2,
-                  timerDuration: 10,
-                  instructions: "Complete the final verification step.",
-                  selectedAdIds: [],
-                  numberOfAds: 3,
-                  humanVerification: true,
-                  verifyBtnText: "Verify Step 2",
-                  continueBtnText: "Proceed"
-                }
-              ]
-            };
-
-            itemData.totalPages = userSettings.totalPages;
-            itemData.instructions = userSettings.instructions;
-            itemData.autoScroll = userSettings.autoScroll;
-            itemData.autoRedirect = userSettings.autoRedirect;
-            itemData.continueButtonText = userSettings.continueButtonText || "Proceed";
-            itemData.verifyButtonText = userSettings.verifyButtonText || "Verify This Step";
-            itemData.humanVerification = userSettings.humanVerification;
-            itemData.vpnDetection = userSettings.vpnDetection;
-            itemData.botDetection = userSettings.botDetection;
-            itemData.pagesConfig = userSettings.pagesConfig;
-          } catch (err) {
-            console.error("Error fetching user shortener settings config:", err);
+        // Fetch Global Configuration Defaults
+        let globalSettings: any = {
+          totalPages: 1,
+          instructions: "Follow the steps below to reach your destination.",
+          autoScroll: true,
+          autoRedirect: true,
+          continueButtonText: "Proceed",
+          verifyButtonText: "Verify This Step",
+          humanVerification: true,
+          vpnDetection: false,
+          botDetection: true,
+          pagesConfig: []
+        };
+        try {
+          const userSettingsSnap = await getDoc(doc(db, "settings", "user_shortener_config"));
+          if (userSettingsSnap.exists()) {
+            globalSettings = userSettingsSnap.data();
           }
+        } catch (err) {
+          console.error("Error fetching global shortener settings config:", err);
+        }
+
+        // Requirement 9: Apply configuration logic
+        // If it's from the "links" collection (Bot/User created), always enforce global settings
+        // If it's a Smart Link or Download, use specific settings but fallback to global defaults if specific ones are missing
+        if (type === "shortener" && col === "links") {
+          itemData.totalPages = globalSettings.totalPages;
+          itemData.instructions = globalSettings.instructions;
+          itemData.autoScroll = globalSettings.autoScroll;
+          itemData.autoRedirect = globalSettings.autoRedirect;
+          itemData.continueButtonText = globalSettings.continueButtonText || "Proceed";
+          itemData.verifyButtonText = globalSettings.verifyButtonText || "Verify This Step";
+          itemData.humanVerification = globalSettings.humanVerification;
+          itemData.vpnDetection = globalSettings.vpnDetection;
+          itemData.botDetection = globalSettings.botDetection;
+          itemData.pagesConfig = globalSettings.pagesConfig;
+        } else {
+          // Smart Links / Downloads: Use item-specific values if they exist, otherwise fallback to global
+          itemData.totalPages = itemData.totalPages ? Number(itemData.totalPages) : globalSettings.totalPages;
+          itemData.pagesConfig = (itemData.pagesConfig && itemData.pagesConfig.length > 0) ? itemData.pagesConfig : globalSettings.pagesConfig;
+          
+          itemData.instructions = itemData.instructions || globalSettings.instructions;
+          itemData.autoScroll = itemData.autoScroll !== undefined ? itemData.autoScroll : globalSettings.autoScroll;
+          itemData.autoRedirect = itemData.autoRedirect !== undefined ? itemData.autoRedirect : globalSettings.autoRedirect;
+          itemData.continueButtonText = itemData.continueButtonText || globalSettings.continueButtonText || "Proceed";
+          itemData.verifyButtonText = itemData.verifyButtonText || globalSettings.verifyButtonText || "Verify This Step";
+          
+          if (itemData.humanVerification === undefined) itemData.humanVerification = globalSettings.humanVerification;
+          if (itemData.vpnDetection === undefined) itemData.vpnDetection = globalSettings.vpnDetection;
+          if (itemData.botDetection === undefined) itemData.botDetection = globalSettings.botDetection;
         }
 
         // Requirement 6: Debug logs
         console.log(`[DEBUG SHORTENER] Firestore document found: true in collection: "${col}"`);
         console.log(`[DEBUG SHORTENER] Document status: "${itemData.status || itemData.Status || 'N/A'}" (Enabled: ${itemData.enabled !== false && itemData.Enabled !== false})`);
+        console.log(`[DEBUG SHORTENER] Config Applied - Pages: ${itemData.totalPages}, AutoRedirect: ${itemData.autoRedirect}`);
         console.log(`[DEBUG SHORTENER] Redirect destination: "${itemData.destinationUrl || "N/A"}"`);
       } else {
         console.log(`[DEBUG SHORTENER] Firestore document found: false`);
@@ -4117,6 +4117,27 @@ Bonus added successfully.`;
       }
 
       if (itemData) {
+        // Fetch Global Configuration Defaults for claim verification
+        let globalSettings: any = {
+          totalPages: 1,
+        };
+        try {
+          const userSettingsSnap = await getDoc(doc(db, "settings", "user_shortener_config"));
+          if (userSettingsSnap.exists()) {
+            globalSettings = userSettingsSnap.data();
+          }
+        } catch (err) {
+          console.error("Error fetching global shortener settings config in claim:", err);
+        }
+
+        // Apply same configuration logic as session init
+        const col = (docRef.path || "").split("/")[0];
+        if (type === "shortener" && col === "links") {
+          itemData.totalPages = globalSettings.totalPages;
+        } else {
+          itemData.totalPages = itemData.totalPages ? Number(itemData.totalPages) : globalSettings.totalPages;
+        }
+
         // Compatibility mapping for "links" and "smart_links"
         itemData.destinationUrl = itemData.destinationUrl || itemData.originalUrl;
         itemData.id = itemData.id || itemData.linkId || linkId;
@@ -4145,6 +4166,7 @@ Bonus added successfully.`;
         // Debug logs
         console.log(`[DEBUG CLAIM] Firestore document found: true`);
         console.log(`[DEBUG CLAIM] Document status: "${itemData.status || itemData.Status || 'N/A'}" (Enabled: ${itemData.enabled !== false && itemData.Enabled !== false})`);
+        console.log(`[DEBUG CLAIM] Final Verification - Required Pages: ${itemData.totalPages}, Completed: ${completedPages.length}`);
         console.log(`[DEBUG CLAIM] Redirect destination: "${itemData.destinationUrl || "N/A"}"`);
       } else {
         console.log(`[DEBUG CLAIM] Firestore document found: false`);

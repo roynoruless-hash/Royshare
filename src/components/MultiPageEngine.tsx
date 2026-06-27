@@ -127,6 +127,12 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   // Available Ads Cache
   const [allAds, setAllAds] = useState<any[]>([]);
 
+  // Find current page ads and keep the exact selection order
+  const currentPageConfig = pagesConfig.find((p) => p.pageNumber === currentPage);
+  const currentPageAds = (currentPageConfig?.selectedAdIds || [])
+    .map((id) => allAds.find((ad) => ad.id === id))
+    .filter(Boolean) as any[];
+
   useEffect(() => {
     // 1. Fetch active ads for custom placement ID matching
     const fetchAds = async () => {
@@ -255,6 +261,61 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
     }
     return () => clearInterval(interval);
   }, [isTimerActive, timer]);
+
+  // Execute non-visual ads (e.g. Popunder, Interstitial, Social Bar) directly on the parent window context
+  useEffect(() => {
+    if (currentPageAds.length === 0) return;
+
+    const nonVisualAds = currentPageAds.filter(ad => {
+      const type = (ad.adType || "").toLowerCase();
+      // Executed globally if it's NOT a standard Banner or Native ad
+      return !type.includes("banner") && !type.includes("native");
+    });
+
+    if (nonVisualAds.length === 0) return;
+
+    const createdElements: HTMLDivElement[] = [];
+
+    nonVisualAds.forEach((ad) => {
+      try {
+        const container = document.createElement("div");
+        container.setAttribute("data-ad-id", ad.id);
+        container.className = "hidden-ad-container hidden";
+        document.body.appendChild(container);
+        createdElements.push(container);
+
+        // Safely parse and inject script tags into parent top context
+        const range = document.createRange();
+        const documentFragment = range.createContextualFragment(ad.scriptCode);
+        
+        const scripts = documentFragment.querySelectorAll("script");
+        scripts.forEach((oldScript) => {
+          const newScript = document.createElement("script");
+          Array.from(oldScript.attributes).forEach((attr) => {
+            newScript.setAttribute(attr.name, attr.value);
+          });
+          if (oldScript.innerHTML) {
+            newScript.innerHTML = oldScript.innerHTML;
+          }
+          oldScript.parentNode?.replaceChild(newScript, oldScript);
+        });
+
+        container.appendChild(documentFragment);
+      } catch (err) {
+        console.error("Error executing non-visual ad:", err);
+      }
+    });
+
+    return () => {
+      createdElements.forEach((el) => {
+        try {
+          if (el.parentNode) {
+            el.parentNode.removeChild(el);
+          }
+        } catch (e) {}
+      });
+    };
+  }, [currentPage, currentPageAds]);
 
   // Generate simple math captcha for human verification
   const generateCaptcha = () => {
@@ -429,6 +490,8 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
     }
   };
 
+  const isFinalStep = currentPage > totalPages;
+
   if (loading) {
     return (
       <div className="min-h-screen relative text-slate-200 font-sans flex flex-col justify-between overflow-hidden">
@@ -485,70 +548,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
       </div>
     );
   }
-
-  const currentPageConfig = pagesConfig.find((p) => p.pageNumber === currentPage);
-  
-  // Find current page ads and keep the exact selection order
-  const currentPageAds = (currentPageConfig?.selectedAdIds || [])
-    .map((id) => allAds.find((ad) => ad.id === id))
-    .filter(Boolean) as any[];
-
-  // Execute non-visual ads (e.g. Popunder, Interstitial, Social Bar) directly on the parent window context
-  useEffect(() => {
-    if (currentPageAds.length === 0) return;
-
-    const nonVisualAds = currentPageAds.filter(ad => {
-      const type = (ad.adType || "").toLowerCase();
-      // Executed globally if it's NOT a standard Banner or Native ad
-      return !type.includes("banner") && !type.includes("native");
-    });
-
-    if (nonVisualAds.length === 0) return;
-
-    const createdElements: HTMLDivElement[] = [];
-
-    nonVisualAds.forEach((ad) => {
-      try {
-        const container = document.createElement("div");
-        container.setAttribute("data-ad-id", ad.id);
-        container.className = "hidden-ad-container hidden";
-        document.body.appendChild(container);
-        createdElements.push(container);
-
-        // Safely parse and inject script tags into parent top context
-        const range = document.createRange();
-        const documentFragment = range.createContextualFragment(ad.scriptCode);
-        
-        const scripts = documentFragment.querySelectorAll("script");
-        scripts.forEach((oldScript) => {
-          const newScript = document.createElement("script");
-          Array.from(oldScript.attributes).forEach((attr) => {
-            newScript.setAttribute(attr.name, attr.value);
-          });
-          if (oldScript.innerHTML) {
-            newScript.innerHTML = oldScript.innerHTML;
-          }
-          oldScript.parentNode?.replaceChild(newScript, oldScript);
-        });
-
-        container.appendChild(documentFragment);
-      } catch (err) {
-        console.error("Error executing non-visual ad:", err);
-      }
-    });
-
-    return () => {
-      createdElements.forEach((el) => {
-        try {
-          if (el.parentNode) {
-            el.parentNode.removeChild(el);
-          }
-        } catch (e) {}
-      });
-    };
-  }, [currentPage, currentPageAds]);
-
-  const isFinalStep = currentPage > totalPages;
 
   return (
     <div className="min-h-screen relative text-slate-200 font-sans flex flex-col justify-between overflow-hidden">
@@ -623,7 +622,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                             onClick={handleVerifyClick}
                             className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold text-sm rounded-xl transition duration-200 transform active:scale-95 shadow-lg shadow-emerald-500/10 cursor-pointer flex items-center justify-center gap-2"
                           >
-                            <span>✅</span> {itemData?.verifyButtonText || "Verify This Step"}
+                            <span>✅</span> {currentPageConfig?.verifyBtnText || itemData?.verifyButtonText || "Verify This Step"}
                           </button>
                         </div>
                       ) : (
@@ -754,7 +753,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                       onClick={handleNextPage}
                       className="w-full py-4 rounded-xl font-bold text-sm tracking-wide bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-400 hover:to-indigo-500 text-white shadow-lg shadow-teal-500/10 cursor-pointer transition duration-300 transform active:scale-[0.98] flex items-center justify-center gap-2"
                     >
-                      {itemData?.continueButtonText || "Proceed to Next Step"} <ArrowRight size={16} />
+                      {currentPageConfig?.continueBtnText || itemData?.continueButtonText || "Proceed to Next Step"} <ArrowRight size={16} />
                     </button>
                   </div>
                 )}
