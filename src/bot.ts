@@ -2,6 +2,7 @@ import { getDb } from "./lib/firebase";
 import { REWARD_TASKS } from "./lib/tasks";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, deleteDoc, limit } from "firebase/firestore";
 import { GoogleGenAI } from "@google/genai";
+import { safeGenerateContent } from "./lib/gemini";
 
 function formatCurrency(amount: number, currency: string = "INR", includeSymbol: boolean = true): string {
     if (currency === "USD") {
@@ -17,6 +18,10 @@ async function shortenWithProvider(provider: string, apiKey: string, url: string
     let responseText = "";
     
     const cleanProvider = (provider || "").trim().toLowerCase();
+    
+    if (cleanProvider === "own") {
+        return url;
+    }
     
     if (cleanProvider === "gplinks") {
         endpoint = `https://gplinks.in/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
@@ -830,12 +835,13 @@ async function processShortenUrl(botToken: string, chatId: number, user: any, ur
         if (sysDoc.exists()) {
             const sysData = sysDoc.data();
             const shortener = sysData.urlShortener;
-            if (shortener && shortener.enabled && shortener.apiKey) {
+            const isOwnProvider = (shortener?.provider || "").trim().toLowerCase() === "own";
+            if (shortener && shortener.enabled && (shortener.apiKey || isOwnProvider)) {
                 providerName = shortener.provider || "GPLinks";
                 try {
                     finalShortLink = await shortenWithProvider(
                         shortener.provider,
-                        shortener.apiKey,
+                        shortener.apiKey || "",
                         localShortLink,
                         shortener.publisherId
                     );
@@ -2610,7 +2616,7 @@ Please describe your problem.`;
     } else {
         try {
             const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
-            const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
+            const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
             
             const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
             if (!apiKey) {
@@ -2661,7 +2667,7 @@ The user you are speaking with is authenticated in Telegram.
                     }
                 });
 
-                const selectedModel = supportData.geminiModel && supportData.geminiModel !== "gemini-2.5-flash" ? supportData.geminiModel : "gemini-3.5-flash";
+                const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
 
                 const systemInstruction = `
 You are Sarah, a highly professional, polite, and helpful human support representative at RoyShare.
@@ -2694,48 +2700,55 @@ User Account Context:
 ${userContext}
 `;
 
-                const chat = ai.chats.create({
-                    model: selectedModel,
-                    config: {
-                        systemInstruction: systemInstruction
-                    },
-                    history: updatedHistory.slice(0, -1).map((m: any) => ({
-                        role: m.sender === "user" ? "user" : "model",
-                        parts: [{ text: m.text }]
-                    }))
-                });
+                const modelsToTry = [
+                    selectedModel,
+                    "gemini-1.5-flash",
+                    "gemini-2.0-flash",
+                    "gemini-1.5-pro",
+                    "gemini-flash-latest"
+                ];
+                const uniqueModels = [...new Set(modelsToTry)].filter(m => m && (m.startsWith("gemini-") || m.startsWith("models/gemini-")));
 
-                // Silent retry mechanism
-                let retries = 2;
                 let success = false;
-                while (retries > 0 && !success) {
-                    try {
-                        const response = await chat.sendMessage({
-                            message: text
-                        });
-                        reply = response.text || "";
-                        if (reply) {
-                            success = true;
-                        } else {
-                            retries--;
-                        }
-                    } catch (apiErr) {
-                        console.error(`Gemini API attempt failed. Retries left: ${retries - 1}`, apiErr);
-                        retries--;
-                        if (retries > 0) {
-                            await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                const tryChatModels = async (aiInstance: any) => {
+                    for (const modelName of uniqueModels) {
+                        try {
+                            const chat = aiInstance.chats.create({
+                                model: modelName,
+                                config: { systemInstruction },
+                                history: updatedHistory.slice(0, -1).map((m: any) => ({
+                                    role: m.sender === "user" ? "user" : "model",
+                                    parts: [{ text: m.text }]
+                                }))
+                            });
+
+                            const response = await chat.sendMessage({ message: text });
+                            const chatReply = response.text || "";
+                            if (chatReply) {
+                                reply = chatReply;
+                                success = true;
+                                break;
+                            }
+                        } catch (err: any) {
+                            console.warn(`[Bot Chat Fallback] Model ${modelName} failed: ${err.message}.`);
+                            continue;
                         }
                     }
-                }
+                };
+
+                // Try default (usually v1beta)
+                await tryChatModels(ai);
 
                 if (!success) {
-                    reply = "Please wait a moment while I check your issue...";
+                    throw new Error("All Gemini models failed to generate a response in the support chat.");
                 }
             }
         } catch (err) {
             console.error("Telegram bot live support Gemini error:", err);
-            reply = "Please wait a moment while I check your issue...";
+            reply = "I'm sorry, I'm having trouble connecting to my AI core. Please try again in a few moments.";
         }
+
     }
 
     const agentMsg = { sender: "agent", text: reply, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
@@ -4405,7 +4418,7 @@ Thank you for chatting with us. Let us know if you need anything else!`;
 
             try {
                 const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
-                const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
+                const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
                 const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
 
                 if (apiKey) {
@@ -4415,7 +4428,7 @@ Thank you for chatting with us. Let us know if you need anything else!`;
                             headers: { 'User-Agent': 'aistudio-build' }
                         }
                     });
-                    const selectedModel = supportData.geminiModel && supportData.geminiModel !== "gemini-2.5-flash" ? supportData.geminiModel : "gemini-3.5-flash";
+                    const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
 
                     const analysisPrompt = `
 You are an advanced support automation assistant for RoyShare.
@@ -4435,11 +4448,12 @@ Output ONLY a raw, valid JSON object with these 5 keys: "category", "priority", 
 Do NOT include markdown code block formatting (no \`\`\`json) or any other text before or after.
 `;
 
-                    const response = await ai.models.generateContent({
-                        model: selectedModel,
-                        contents: analysisPrompt
-                    });
+                const response = await safeGenerateContent(ai, {
+                    model: selectedModel,
+                    contents: analysisPrompt
+                });
 
+                if (response) {
                     const rawText = response.text || "";
                     const cleanText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
                     const parsed = JSON.parse(cleanText);
@@ -4449,7 +4463,8 @@ Do NOT include markdown code block formatting (no \`\`\`json) or any other text 
                     if (parsed.suggestedCause) suggestedCause = parsed.suggestedCause;
                     if (parsed.suggestedSolution) suggestedSolution = parsed.suggestedSolution;
                 }
-            } catch (aiErr) {
+            }
+        } catch (aiErr) {
                 console.error("Failed to run Gemini analysis for escalation in Telegram Bot:", aiErr);
             }
 

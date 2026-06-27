@@ -75,6 +75,8 @@ interface PageConfig {
   humanVerification: boolean;
   selectedAdIds: string[];
   instructions?: string;
+  verifyBtnText?: string;
+  continueBtnText?: string;
 }
 
 interface MultiPageEngineProps {

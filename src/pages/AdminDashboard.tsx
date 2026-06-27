@@ -129,7 +129,7 @@ export default function AdminDashboard() {
   const [supportSettings, setSupportSettings] = useState<any>({
     aiEnabled: true,
     geminiApiKey: "",
-    geminiModel: "gemini-2.5-flash",
+    geminiModel: "gemini-1.5-flash",
     liveChatEnabled: true,
     supportTelegram: "",
     supportEmail: "support@royshare.com"
@@ -197,7 +197,7 @@ export default function AdminDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           geminiApiKey: supportSettings.geminiApiKey,
-          geminiModel: supportSettings.geminiModel || "gemini-2.5-flash"
+          geminiModel: supportSettings.geminiModel || "gemini-1.5-flash"
         })
       });
       const data = await res.json();
@@ -267,6 +267,15 @@ export default function AdminDashboard() {
   const [isSelfTesting, setIsSelfTesting] = useState(false);
   const [selfTestResults, setSelfTestResults] = useState<{ apiWorking: boolean, deliveryWorking: boolean, usersLoaded: boolean, buttonsWorking: boolean, completedSuccessfully: boolean } | null>(null);
   const [selfTestError, setSelfTestError] = useState("");
+
+  // AI Instruction Generation states
+  const [aiGeneratingInstructions, setAiGeneratingInstructions] = useState(false);
+  const [suggestedInstructions, setSuggestedInstructions] = useState<string | null>(null);
+
+  // AI Task Generation states
+  const [aiGeneratingTask, setAiGeneratingTask] = useState(false);
+  const [aiTaskSuggestion, setAiTaskSuggestion] = useState<any | null>(null);
+  const [aiTaskType, setAiTaskType] = useState("Watch Ads");
 
   const [securityLogs, setSecurityLogs] = useState<any[]>([]);
   const [securityStats, setSecurityStats] = useState<any>({});
@@ -412,6 +421,84 @@ export default function AdminDashboard() {
       setTelegramFeedback(`❌ Action Error: ${err.message}`);
     } finally {
       setActionLoading((prev: any) => ({ ...prev, setWebhook: false }));
+    }
+  };
+
+  const handleGenerateAiInstructions = async () => {
+    setAiGeneratingInstructions(true);
+    setAiError("");
+    try {
+      const res = await fetch("/api/admin/shortener/generate-instructions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: userShortenerSettings })
+      });
+      const data = await res.json();
+      if (res.ok && data.text) {
+        setSuggestedInstructions(data.text);
+      } else {
+        setAiError(data.error || "Failed to generate instructions");
+      }
+    } catch (err: any) {
+      setAiError(err.message || "Failed to make request to AI");
+    } finally {
+      setAiGeneratingInstructions(false);
+    }
+  };
+
+  const handleGenerateAiTask = async (field?: string) => {
+    setAiGeneratingTask(true);
+    setAiError("");
+    try {
+      const res = await fetch("/api/admin/tasks/generate-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          taskType: aiTaskType,
+          field, // Optional: if generating for a specific field
+          currentTask: taskForm
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.task) {
+        if (field) {
+          // If individual field generation, just update that field
+          setTaskForm(prev => ({ ...prev, [field]: data.task[field] }));
+        } else {
+          // If full generation, fill all fields automatically and also show suggestion panel for analytics
+          setTaskForm(prev => ({
+            ...prev,
+            ...data.task,
+            adNetwork: data.task.adNetwork || prev.adNetwork
+          }));
+          setAiTaskSuggestion(data);
+        }
+      } else {
+        setAiError(data.error || "Failed to generate task. Please check API key.");
+      }
+    } catch (err: any) {
+      setAiError(err.message || "Failed to make request to AI. Server might be offline.");
+    } finally {
+      setAiGeneratingTask(false);
+    }
+  };
+
+  const applyAiTask = () => {
+    if (aiTaskSuggestion && aiTaskSuggestion.task) {
+      setTaskForm(prev => ({
+        ...prev,
+        ...aiTaskSuggestion.task,
+        // Preserve selectedAdIds if they were already set, or use what AI suggested if it matches existing ads
+        adNetwork: aiTaskSuggestion.task.adNetwork || prev.adNetwork
+      }));
+      setAiTaskSuggestion(null);
+    }
+  };
+
+  const useSuggestedInstructions = () => {
+    if (suggestedInstructions) {
+      setUserShortenerSettings((prev: any) => ({ ...prev, instructions: suggestedInstructions }));
+      setSuggestedInstructions(null);
     }
   };
 
@@ -3001,7 +3088,22 @@ export default function AdminDashboard() {
                           </div>
 
                           <div>
-                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Global Instructions Text</label>
+                            <div className="flex justify-between items-center mb-2">
+                              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Global Instructions Text</label>
+                              <button
+                                onClick={handleGenerateAiInstructions}
+                                disabled={aiGeneratingInstructions}
+                                className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-[10px] font-bold rounded-lg transition-colors border border-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {aiGeneratingInstructions ? "⏳ Generating..." : "✨ AI Generate"}
+                              </button>
+                            </div>
+                            {aiError && (
+                              <div className="mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex justify-between items-center">
+                                <span>{aiError}</span>
+                                <button onClick={() => setAiError("")} className="hover:text-red-300">✖</button>
+                              </div>
+                            )}
                             <textarea
                               id="user-global-instructions"
                               rows={3}
@@ -3010,6 +3112,36 @@ export default function AdminDashboard() {
                               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                               placeholder="Follow the steps to reach destination URL..."
                             />
+                            {suggestedInstructions && (
+                              <div className="mt-3 p-4 bg-indigo-500/5 border border-indigo-500/20 rounded-xl space-y-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">✨ AI Suggested Instructions</span>
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={handleGenerateAiInstructions}
+                                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded transition-colors"
+                                    >
+                                      🔄 Regenerate
+                                    </button>
+                                    <button
+                                      onClick={useSuggestedInstructions}
+                                      className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded transition-colors"
+                                    >
+                                      ✅ Use This
+                                    </button>
+                                    <button
+                                      onClick={() => setSuggestedInstructions(null)}
+                                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded transition-colors"
+                                    >
+                                      ✖
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="text-xs text-slate-300 whitespace-pre-wrap italic">
+                                  {suggestedInstructions}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -4933,13 +5065,13 @@ export default function AdminDashboard() {
                           <div>
                             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Gemini Model</label>
                             <select
-                              value={supportSettings.geminiModel || "gemini-2.5-flash"}
+                              value={supportSettings.geminiModel || "gemini-1.5-flash"}
                               onChange={(e) => setSupportSettings({ ...supportSettings, geminiModel: e.target.value })}
                               className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
                             >
-                              <option value="gemini-2.5-flash">gemini-2.5-flash (Recommended Default)</option>
-                              <option value="gemini-3.5-flash">gemini-3.5-flash (Advanced Fast)</option>
-                              <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Reasoning Pro)</option>
+                              <option value="gemini-1.5-flash">gemini-1.5-flash (Standard)</option>
+                              <option value="gemini-2.0-flash">gemini-2.0-flash (Fast)</option>
+                              <option value="gemini-1.5-pro">gemini-1.5-pro (Highest Reasoning)</option>
                             </select>
                           </div>
 
@@ -4979,7 +5111,7 @@ export default function AdminDashboard() {
                             </div>
                             <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
                               <span className="text-slate-400 font-medium">Model Name</span>
-                              <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{supportSettings.geminiModel || "gemini-2.5-flash"}</span>
+                              <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{supportSettings.geminiModel || "gemini-1.5-flash"}</span>
                             </div>
                             <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
                               <span className="text-slate-400 font-medium">Last Response Time</span>
@@ -5056,6 +5188,7 @@ export default function AdminDashboard() {
                               })}
                               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
                             >
+                              <option value="own">🏠 Own Shortener (RoyShare)</option>
                               <option value="GPLinks">GPLinks (gplinks.in)</option>
                               <option value="ShrinkMe">ShrinkMe (shrinkme.io)</option>
                               <option value="Droplink">Droplink (droplink.co)</option>
@@ -5154,7 +5287,9 @@ export default function AdminDashboard() {
                             </div>
                             <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
                               <span className="text-slate-400 font-medium">Active Provider</span>
-                              <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{systemSettings?.urlShortener?.provider || "GPLinks"}</span>
+                              <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                                {systemSettings?.urlShortener?.provider === "own" ? "🏠 Own Shortener" : (systemSettings?.urlShortener?.provider || "GPLinks")}
+                              </span>
                             </div>
                             {systemSettings?.urlShortener?.testedAt && (
                               <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
@@ -6111,8 +6246,135 @@ export default function AdminDashboard() {
                 </div>
               ) : (modalAction === 'create_task' || modalAction === 'edit_task') ? (
                 <div className="space-y-4">
+                  {aiError && (
+                    <div className="bg-red-500/10 border border-red-500/20 p-3 rounded-xl flex justify-between items-center text-red-400 text-xs animate-in fade-in slide-in-from-top-1">
+                      <div className="flex items-center gap-2">
+                        <span>⚠️</span>
+                        <span>{aiError}</span>
+                      </div>
+                      <button onClick={() => setAiError("")} className="text-red-400/50 hover:text-red-400 transition-colors">✖</button>
+                    </div>
+                  )}
+                  {/* AI Task Generator Bar */}
+                  <div className="flex flex-col sm:flex-row gap-2 mb-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800 shadow-xl">
+                    <div className="flex-1 space-y-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Task Context</label>
+                      <select 
+                        value={aiTaskType}
+                        onChange={(e) => setAiTaskType(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-medium"
+                      >
+                        <option value="Watch Ads">Watch Ads</option>
+                        <option value="Visit Website">Visit Website</option>
+                        <option value="App Install">App Install</option>
+                        <option value="Telegram Join">Telegram Join</option>
+                        <option value="YouTube Subscribe">YouTube Subscribe</option>
+                        <option value="YouTube Watch">YouTube Watch</option>
+                        <option value="Instagram Follow">Instagram Follow</option>
+                        <option value="Facebook Like">Facebook Like</option>
+                        <option value="Twitter/X Follow">Twitter/X Follow</option>
+                        <option value="Survey">Survey</option>
+                        <option value="URL Shortener">URL Shortener</option>
+                        <option value="Daily Bonus">Daily Bonus</option>
+                        <option value="Referral Task">Referral Task</option>
+                        <option value="Custom Task">Custom Task</option>
+                      </select>
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <button
+                        onClick={() => handleGenerateAiTask()}
+                        disabled={aiGeneratingTask}
+                        className="flex-1 sm:flex-none px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center justify-center gap-2 transition-all h-[38px]"
+                      >
+                        {aiGeneratingTask ? "⏳" : "🚀"} Generate Complete Task
+                      </button>
+                      <button
+                        onClick={() => {
+                          const types = ["Watch Ads", "Visit Website", "App Install", "YouTube Subscribe", "Instagram Follow"];
+                          setAiTaskType(types[Math.floor(Math.random() * types.length)]);
+                          handleGenerateAiTask();
+                        }}
+                        disabled={aiGeneratingTask}
+                        className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-bold rounded-lg border border-slate-800 h-[38px]"
+                        title="Random Task"
+                      >
+                        🎲
+                      </button>
+                    </div>
+                  </div>
+
+                  {aiTaskSuggestion && (
+                    <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                      <div className="flex justify-between items-center pb-2 border-b border-indigo-500/10">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-2 w-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                          <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">AI Optimised Proposal</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleGenerateAiTask()}
+                            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded transition-colors"
+                          >
+                            🔄 Regenerate
+                          </button>
+                          <button
+                            onClick={applyAiTask}
+                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded transition-colors shadow-lg shadow-indigo-500/20"
+                          >
+                            ✅ Apply Suggestion
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                          <div className="text-[10px] text-slate-500 font-bold uppercase">Completion Rate</div>
+                          <div className="text-sm font-bold text-emerald-400">{aiTaskSuggestion.analytics?.completionRate || "85%"}</div>
+                        </div>
+                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                          <div className="text-[10px] text-slate-500 font-bold uppercase">Recommended Reward</div>
+                          <div className="text-sm font-bold text-blue-400">₹{aiTaskSuggestion.task?.rewardAmount || "5"}</div>
+                        </div>
+                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                          <div className="text-[10px] text-slate-500 font-bold uppercase">Fraud Risk</div>
+                          <div className={`text-sm font-bold ${aiTaskSuggestion.analytics?.risk === 'Low' ? 'text-emerald-400' : 'text-amber-400'}`}>{aiTaskSuggestion.analytics?.risk || "Low"}</div>
+                        </div>
+                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                          <div className="text-[10px] text-slate-500 font-bold uppercase">User Difficulty</div>
+                          <div className="text-sm font-bold text-indigo-400">{aiTaskSuggestion.analytics?.difficulty || "Medium"}</div>
+                        </div>
+                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                          <div className="text-[10px] text-slate-500 font-bold uppercase">Time to Complete</div>
+                          <div className="text-sm font-bold text-slate-300">{aiTaskSuggestion.analytics?.estimatedTime || "45s"}</div>
+                        </div>
+                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                          <div className="text-[10px] text-slate-500 font-bold uppercase">Network</div>
+                          <div className="text-sm font-bold text-purple-400">{aiTaskSuggestion.task?.adNetwork || "Direct"}</div>
+                        </div>
+                      </div>
+
+                      {aiTaskSuggestion.analytics?.suggestions && (
+                        <div className="bg-slate-950/80 p-3 rounded-lg border border-indigo-500/10">
+                          <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Optimization Tips</div>
+                          <div className="text-[11px] text-slate-400 leading-relaxed italic">
+                            "{aiTaskSuggestion.analytics.suggestions}"
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-1">📝 Task Title</label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-sm font-medium text-slate-400">📝 Task Title</label>
+                      <button 
+                        onClick={() => handleGenerateAiTask('title')}
+                        disabled={aiGeneratingTask}
+                        className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors flex items-center gap-1"
+                      >
+                        ✨ AI Suggest
+                      </button>
+                    </div>
                     <input 
                       type="text" 
                       value={taskForm.title}
@@ -6122,7 +6384,16 @@ export default function AdminDashboard() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-1">📄 Task Description</label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-sm font-medium text-slate-400">📄 Task Description</label>
+                      <button 
+                        onClick={() => handleGenerateAiTask('description')}
+                        disabled={aiGeneratingTask}
+                        className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors flex items-center gap-1"
+                      >
+                        ✨ AI Generate
+                      </button>
+                    </div>
                     <textarea 
                       value={taskForm.description}
                       onChange={(e) => setTaskForm({...taskForm, description: e.target.value})}
@@ -6132,7 +6403,16 @@ export default function AdminDashboard() {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-slate-400 mb-1">💰 Reward Amount</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-sm font-medium text-slate-400">💰 Reward Amount</label>
+                        <button 
+                          onClick={() => handleGenerateAiTask('rewardAmount')}
+                          disabled={aiGeneratingTask}
+                          className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors"
+                        >
+                          ✨
+                        </button>
+                      </div>
                       <input 
                         type="number" 
                         value={taskForm.rewardAmount}
@@ -6142,7 +6422,16 @@ export default function AdminDashboard() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-400 mb-1">🕒 Timer Duration (s)</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-sm font-medium text-slate-400">🕒 Timer (s)</label>
+                        <button 
+                          onClick={() => handleGenerateAiTask('timerDuration')}
+                          disabled={aiGeneratingTask}
+                          className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors"
+                        >
+                          ✨
+                        </button>
+                      </div>
                       <input 
                         type="number" 
                         value={taskForm.timerDuration}
@@ -6154,7 +6443,16 @@ export default function AdminDashboard() {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-slate-400 mb-1">📄 Total Pages</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-sm font-medium text-slate-400">📄 Total Pages</label>
+                        <button 
+                          onClick={() => handleGenerateAiTask('totalPages')}
+                          disabled={aiGeneratingTask}
+                          className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors"
+                        >
+                          ✨
+                        </button>
+                      </div>
                       <input 
                         type="number" 
                         value={taskForm.totalPages}
@@ -6176,7 +6474,16 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-1">📷 Task Image (Optional URL)</label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-sm font-medium text-slate-400">📷 Task Image URL</label>
+                      <button 
+                        onClick={() => handleGenerateAiTask('imageUrl')}
+                        disabled={aiGeneratingTask}
+                        className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors flex items-center gap-1"
+                      >
+                        ✨ AI Image
+                      </button>
+                    </div>
                     <input 
                       type="text" 
                       value={taskForm.imageUrl}

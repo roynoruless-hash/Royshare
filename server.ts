@@ -6,6 +6,7 @@ import { getDb } from "./src/lib/firebase";
 import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc } from "firebase/firestore";
 import { REWARD_TASKS } from "./src/lib/tasks";
 import { GoogleGenAI } from "@google/genai";
+import { safeGenerateContent } from "./src/lib/gemini";
 
 // ...
 const db = getDb();
@@ -283,7 +284,7 @@ async function startServer() {
         apiKey: apiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
-      const selectedModel = supportData.geminiModel || "gemini-2.5-flash";
+      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
 
       const prompt = `
 You are an advanced support automation assistant for RoyShare.
@@ -305,7 +306,7 @@ Output ONLY a raw, valid JSON object with these 5 keys: "category", "priority", 
 Do NOT include markdown formatting like \`\`\`json or any other text before or after.
 `;
 
-      const response = await ai.models.generateContent({
+      const response = await safeGenerateContent(ai, {
         model: selectedModel,
         contents: prompt
       });
@@ -359,7 +360,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         apiKey: apiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
-      const selectedModel = supportData.geminiModel || "gemini-2.5-flash";
+      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
 
       const prompt = `
 You are a highly professional support assistant at RoyShare, a file hosting and link shortening monetization platform.
@@ -378,7 +379,7 @@ Keep the tone natural, crisp, and direct.
 Output ONLY the text of the reply. Do not include subject lines, placeholders like [Your Name], or markdown formatting around the reply.
 `;
 
-      const response = await ai.models.generateContent({
+      const response = await safeGenerateContent(ai, {
         model: selectedModel,
         contents: prompt
       });
@@ -411,7 +412,7 @@ Output ONLY the text of the reply. Do not include subject lines, placeholders li
         apiKey: apiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
-      const selectedModel = supportData.geminiModel || "gemini-2.5-flash";
+      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
 
       const prompt = `
 You are an advanced communication specialist for RoyShare, a link sharing and monetization platform.
@@ -424,7 +425,7 @@ Output ONLY a raw, valid JSON object with these 2 keys: "improvedTitle" and "imp
 Do NOT include markdown formatting like \`\`\`json or any other text before or after.
 `;
 
-      const response = await ai.models.generateContent({
+      const response = await safeGenerateContent(ai, {
         model: selectedModel,
         contents: prompt
       });
@@ -699,7 +700,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         return res.status(400).json({ error: "Gemini API Key is not configured." });
       }
 
-      const modelToUse = geminiModel || "gemini-2.5-flash";
+      const modelToUse = geminiModel || "gemini-1.5-flash";
 
       const ai = new GoogleGenAI({
         apiKey: apiKeyToUse,
@@ -711,7 +712,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       });
 
       const startTime = Date.now();
-      const response = await ai.models.generateContent({
+      const response = await safeGenerateContent(ai, {
         model: modelToUse,
         contents: "Hello",
       });
@@ -770,7 +771,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       
       const supportSettingsRef = doc(db, "settings", "support");
       const supportSettingsSnap = await getDoc(supportSettingsRef);
-      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
       
       if (supportData.aiEnabled === false) {
         return res.status(403).json({ error: "Support is currently offline." });
@@ -832,8 +833,8 @@ The user you are speaking with is authenticated.
         }
       });
       
-      // Prefer modern gemini-3.5-flash for text tasks per system instructions
-      const selectedModel = supportData.geminiModel && supportData.geminiModel !== "gemini-2.5-flash" ? supportData.geminiModel : "gemini-3.5-flash";
+      // Prefer modern gemini-1.5-flash for text tasks
+      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
       
       const systemInstruction = `
 You are Sarah, a highly professional, polite, and helpful human support representative at RoyShare.
@@ -851,7 +852,7 @@ ${userContext}
 `;
 
       const chat = ai.chats.create({
-        model: selectedModel,
+        model: selectedModel || "gemini-1.5-flash",
         config: {
           systemInstruction: systemInstruction
         },
@@ -879,9 +880,9 @@ ${userContext}
       
       // Load Gemini Configuration for analysis
       const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
-      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { geminiApiKey: "", geminiModel: "gemini-2.5-flash" };
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
       const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
-      const modelToUse = supportData.geminiModel || "gemini-2.5-flash";
+      const modelToUse = supportData.geminiModel || "gemini-1.5-flash";
 
       let aiAnalysis = {
         category: "Other",
@@ -914,7 +915,7 @@ Your job is to analyze a support conversation transcript between a user and our 
 You MUST reply ONLY with a valid JSON object. Do not include any markdown formatting or backticks outside of the JSON.
 `;
 
-          const aiResponse = await ai.models.generateContent({
+          const aiResponse = await safeGenerateContent(ai, {
             model: modelToUse,
             contents: `Analyze the following transcript:\n\n${transcript}`,
             config: {
@@ -1588,6 +1589,10 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     
     const cleanProvider = (provider || "").trim().toLowerCase();
     
+    if (cleanProvider === "own") {
+      return url; // Internal links already use our short URL format
+    }
+    
     if (cleanProvider === "gplinks") {
       endpoint = `https://gplinks.in/api?api=${apiKey}&url=${encodeURIComponent(url)}`;
     } else if (cleanProvider === "shrinkme") {
@@ -1658,7 +1663,9 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
   app.post("/api/admin/shortener/test-connection", async (req, res) => {
     try {
       const { provider, apiKey, publisherId } = req.body;
-      if (!apiKey) {
+      const cleanProvider = (provider || "").trim().toLowerCase();
+      
+      if (cleanProvider !== "own" && !apiKey) {
         return res.status(400).json({ error: "API Key / URL Template is required." });
       }
       
@@ -2022,7 +2029,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         return res.status(400).json({ error: "No Gemini API Key configured in settings/support." });
       }
 
-      const model = supportData.geminiModel || "gemini-3.5-flash";
+      const model = supportData.geminiModel || "gemini-1.5-flash";
 
       const ai = new GoogleGenAI({
         apiKey,
@@ -2054,7 +2061,7 @@ ${text}
 
 Please reply ONLY with the rewritten message itself. Do not include any intro, outro, explanations, or quotes.`;
 
-      const response = await ai.models.generateContent({
+      const response = await safeGenerateContent(ai, {
         model,
         contents: prompt
       });
@@ -2538,8 +2545,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         try {
           const { GoogleGenAI } = await import("@google/genai");
           const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-          const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+          const response = await safeGenerateContent(ai, {
+            model: "gemini-1.5-flash",
             contents: "ping",
           });
           if (response && response.text) {
@@ -4434,6 +4441,137 @@ Bonus added successfully.`;
       res.json({ success: true });
     } catch (e: any) {
       console.error("Error deleting smart link:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // AI Generate Instructions
+  app.post("/api/admin/shortener/generate-instructions", async (req, res) => {
+    try {
+      const { settings } = req.body;
+      if (!settings) {
+        return res.status(400).json({ error: "Settings are required" });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY!,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const prompt = `
+        Analyze these URL Shortener settings and generate professional visitor instructions:
+        - Total Pages: ${settings.totalPages || 1}
+        - Timer Duration: ${settings.pagesConfig?.[0]?.timerDuration || 10} seconds
+        - Verify Button Text: ${settings.verifyButtonText || "Verify This Step"}
+        - Auto Redirect: ${settings.autoRedirect ? "Enabled" : "Disabled"}
+        - Math Verification (Human Check): ${settings.humanVerification ? "Enabled" : "Disabled"}
+        - Ads: Multiple placements active
+        - Anti VPN: ${settings.vpnDetection ? "Active" : "Inactive"}
+        - Bot Detection: ${settings.botDetection ? "Active" : "Inactive"}
+
+        Requirements for the output:
+        - Short and professional
+        - Use emojis
+        - Easy to understand
+        - SEO and Human friendly
+        - Formatted as a single instruction text block
+
+        Example format:
+        📢 Please complete all verification steps to continue.
+        ✔ Read the instructions on each page.
+        ✔ Wait for the timer to finish.
+        ✔ Complete the verification if required.
+        ✔ Follow all pages until the final destination unlocks.
+        Thank you for your patience.
+      `;
+
+      const result = await safeGenerateContent(ai, {
+        model: "gemini-1.5-flash",
+        contents: prompt,
+        config: {
+          systemInstruction: "You are a professional copywriter specialized in UX and instruction writing for web applications. Generate short, clear, and engaging instructions. Use bullet points and emojis where appropriate.",
+        }
+      });
+
+      res.json({ text: result.text });
+    } catch (e: any) {
+      console.error("Error generating instructions:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // AI Generate Task
+  app.post("/api/admin/tasks/generate-ai", async (req, res) => {
+    try {
+      const { taskType, field, currentTask } = req.body;
+      
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({ error: "Gemini API Key is missing. Please add it to your environment variables." });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      let prompt = `
+        You are an expert Reward System Task Architect. 
+        Generate details for a task of type: "${taskType}".
+        
+        The reward system uses these rules:
+        - Reward: User gets this amount (e.g. 1-100)
+        - Timer: User must stay on page for X seconds (e.g. 5-60)
+        - Pages: User must visit N pages (e.g. 1-5)
+        - Ad Network: Adsterra or Monetag or Direct
+        
+        ${field ? `The user only wants to update the "${field}" field specifically.` : `Generate a complete optimized task.`}
+        
+        For the "imageUrl", always suggest a high-quality, relevant, royalty-free placeholder image URL from Unsplash (e.g. https://images.unsplash.com/photo-...) that matches the task type perfectly.
+        
+        Return the result as a JSON object with this structure:
+        {
+          "task": {
+            "title": "...",
+            "description": "...",
+            "rewardAmount": "...",
+            "timerDuration": "...",
+            "totalPages": "...",
+            "imageUrl": "...",
+            "adNetwork": "Adsterra|Monetag|Direct"
+          },
+          "analytics": {
+            "completionRate": "85%",
+            "risk": "Low|Medium|High",
+            "difficulty": "Easy|Medium|Hard",
+            "estimatedTime": "45s",
+            "suggestions": "Brief optimization advice..."
+          }
+        }
+      `;
+
+      const result = await safeGenerateContent(ai, {
+        model: "gemini-1.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          systemInstruction: "You are an AI specialized in generating high-conversion, professional task instructions and settings for reward-based applications. Ensure the tone is engaging, human-friendly, and optimized for mobile users. Always return valid JSON.",
+        }
+      });
+
+      const responseText = result.text;
+      const data = JSON.parse(responseText);
+      res.json(data);
+    } catch (e: any) {
+      console.error("Error generating AI task:", e);
       res.status(500).json({ error: e.message });
     }
   });
