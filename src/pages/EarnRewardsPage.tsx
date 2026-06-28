@@ -8,6 +8,8 @@ interface Task {
   id: string;
   name: string;
   amount: number;
+  adNetwork?: string;
+  description?: string;
 }
 
 const AD_LINKS = [
@@ -63,6 +65,8 @@ export default function EarnRewardsPage() {
   // Completion State
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [isCompletedSuccess, setIsCompletedSuccess] = useState<boolean>(false);
+  const [isMonetagAdRunning, setIsMonetagAdRunning] = useState<boolean>(false);
+  const [monetagError, setMonetagError] = useState<string | null>(null);
 
   // Initialize Telegram WebApp and parse parameters
   useEffect(() => {
@@ -182,6 +186,28 @@ export default function EarnRewardsPage() {
     if (!adClicked && !adTimerActive) {
       setAdTimer(5);
       setAdTimerActive(true);
+    }
+  };
+
+  const handleMonetagClaim = async () => {
+    if (isMonetagAdRunning || isCompletedSuccess || submitting) return;
+
+    if (typeof (window as any).show_11210088 !== 'function') {
+      setMonetagError("Ad service unavailable. Please refresh or try later.");
+      return;
+    }
+
+    setIsMonetagAdRunning(true);
+    setMonetagError(null);
+    try {
+      await (window as any).show_11210088();
+      // Reward user only after successful completion
+      submitTaskCompletion();
+    } catch (err: any) {
+      console.error("Monetag ad error:", err);
+      setMonetagError("Please watch the complete ad to receive your reward.");
+    } finally {
+      setIsMonetagAdRunning(false);
     }
   };
 
@@ -308,6 +334,105 @@ export default function EarnRewardsPage() {
           >
             🤖 Return To Telegram Bot
           </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (currentTask?.adNetwork === 'Monetag Mini App') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1118] text-white p-6 text-center">
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-blue-600/10 blur-[120px] rounded-full pointer-events-none"></div>
+        
+        <motion.div 
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="max-w-md w-full space-y-12 relative"
+        >
+          {/* Task Info */}
+          <div className="space-y-4">
+             <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-[11px] font-black uppercase tracking-widest mx-auto">
+              <CheckCircle2 size={14} className="text-blue-400" />
+              <span>Premium Task</span>
+            </div>
+            <h1 className="text-4xl font-black text-white tracking-tight leading-tight">
+              {currentTask?.name || "Earn Rewards"}
+            </h1>
+            <p className="text-gray-400 text-lg leading-relaxed px-4">
+              {currentTask?.description || "Watch a short ad to claim your reward coins instantly."}
+            </p>
+          </div>
+
+          {/* Reward Amount */}
+          <div className="bg-slate-900/60 border border-slate-800 rounded-[3rem] p-12 shadow-2xl relative overflow-hidden group">
+             <p className="text-slate-500 font-bold uppercase tracking-[0.25em] text-[10px] mb-4">You will earn</p>
+             <p className="text-7xl font-black text-amber-400 drop-shadow-md">
+               {formatValue(currentTask.amount)}
+             </p>
+          </div>
+
+          {/* Claim Button */}
+          <div className="pt-4 px-2">
+            <button
+              onClick={handleMonetagClaim}
+              disabled={isMonetagAdRunning || isCompletedSuccess || submitting}
+              className={`w-full py-6 rounded-[2.5rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden ${
+                isCompletedSuccess 
+                  ? "bg-emerald-600/20 border border-emerald-500/30 text-emerald-400" 
+                  : "bg-gradient-to-br from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white shadow-blue-900/40"
+              }`}
+            >
+              {isMonetagAdRunning ? (
+                <>
+                  <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin mb-1" />
+                  <span>Loading Ad...</span>
+                </>
+              ) : isCompletedSuccess ? (
+                <>
+                  <CheckCircle2 size={32} />
+                  <span>Reward Credited</span>
+                </>
+              ) : (
+                <>
+                  <motion.div
+                    animate={{ scale: [1, 1.2, 1] }}
+                    transition={{ repeat: Infinity, duration: 1.5 }}
+                  >
+                    <Award size={36} className="text-amber-400" />
+                  </motion.div>
+                  <span>Claim Rewards</span>
+                </>
+              )}
+            </button>
+
+            {/* Status & Errors */}
+            <div className="h-8 mt-6">
+              <AnimatePresence mode="wait">
+                {monetagError ? (
+                  <motion.p 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="text-red-400 text-sm font-bold flex items-center justify-center gap-1.5 bg-red-400/10 py-2 px-4 rounded-full border border-red-400/20"
+                  >
+                    <AlertCircle size={14} /> {monetagError}
+                  </motion.p>
+                ) : isCompletedSuccess ? (
+                  <motion.p 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-emerald-400 text-sm font-bold"
+                  >
+                    Reward Credited Successfully
+                  </motion.p>
+                ) : (
+                  <p className="text-slate-500 text-xs font-medium uppercase tracking-[0.3em] opacity-50">
+                    Secure Rewarded Ad
+                  </p>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
         </motion.div>
       </div>
     );

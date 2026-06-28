@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Clock, Play, Pause, RotateCcw, Volume2, VolumeX, ShieldCheck, AlertCircle, Sparkles, CheckCircle2, Zap } from "lucide-react";
+import { Clock, Play, Pause, RotateCcw, Volume2, VolumeX, ShieldCheck, AlertCircle, Sparkles, CheckCircle2, Zap, Award } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore";
 import AdScriptRenderer from "../components/AdScriptRenderer";
@@ -43,6 +43,7 @@ export default function RewardTasksPage() {
   const [videoSrc, setVideoSrc] = useState("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
   const [fallbackAttempts, setFallbackAttempts] = useState(0);
   const [isMonetagAdRunning, setIsMonetagAdRunning] = useState(false);
+  const [monetagError, setMonetagError] = useState<string | null>(null);
 
   const handleVideoError = () => {
     console.warn("Video failed to load in RewardTasksPage. Trying fallback...");
@@ -309,20 +310,16 @@ export default function RewardTasksPage() {
     }
 
     setIsMonetagAdRunning(true);
+    setMonetagError(null);
     try {
       await (window as any).show_11210088();
       // Reward user only after successful completion
       setVideoCompleted(true);
       setCurrentTime(duration);
-      // After ad is done, the user can click the claim button which is already there
-      // or we can auto-submit if that's the preferred flow.
-      // The prompt says "When Claim is pressed, execute: show_11210088().then(...)".
-      // So the Claim button initiates the ad, and then the reward is granted.
-      // I'll auto-submit for better UX as the user already clicked "Claim".
       submitTaskCompletion();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Monetag ad error:", err);
-      alert("Please complete the ad to receive your reward.");
+      setMonetagError("Please watch the complete ad to receive your reward.");
     } finally {
       setIsMonetagAdRunning(false);
     }
@@ -427,6 +424,112 @@ export default function RewardTasksPage() {
   const totalRenderedAds = renderedAds.length;
   const selectedAdIds = selectedAds.map(ad => ad.id);
   const renderedAdIds = renderedAds.map(ad => ad.id);
+
+  if (currentTask?.adNetwork === 'Monetag Mini App') {
+    return (
+      <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col items-center justify-center py-6 px-4">
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-blue-500/10 blur-[100px] rounded-full pointer-events-none"></div>
+        
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-md w-full space-y-10 text-center relative"
+        >
+          {/* Task Info */}
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-[10px] font-bold uppercase tracking-widest mx-auto">
+              <Zap size={12} className="fill-current" />
+              <span>Premium Rewarded Task</span>
+            </div>
+            <h1 className="text-4xl font-black text-white tracking-tight leading-tight">
+              {currentTask?.name || currentTask?.title || "Watch Video Task"}
+            </h1>
+            <p className="text-slate-400 text-lg leading-relaxed max-w-[320px] mx-auto">
+              {currentTask?.description || "Watch a short sponsored video to unlock your reward coins instantly."}
+            </p>
+          </div>
+
+          {/* Reward Amount */}
+          <div className="bg-slate-900/40 border border-slate-800 rounded-[2.5rem] p-10 relative overflow-hidden group shadow-2xl">
+             <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
+                <Award size={120} />
+             </div>
+             <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] mb-3">Total Reward Points</p>
+             <p className="text-6xl font-black text-amber-400 drop-shadow-sm">
+               {currency === "USD" ? `$${(currentTask.amount * 0.0118).toFixed(2)}` : `₹${currentTask.amount.toFixed(2)}`}
+             </p>
+             <div className="mt-4 flex items-center justify-center gap-1.5 text-emerald-400 text-xs font-bold">
+               <ShieldCheck size={14} />
+               <span>Verified by Monetag SDK</span>
+             </div>
+          </div>
+
+          {/* Claim Button */}
+          <div className="pt-2">
+            <button
+              onClick={handleMonetagClaim}
+              disabled={isMonetagAdRunning || videoCompleted || submitting}
+              className={`w-full py-6 rounded-[2rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden ${
+                videoCompleted 
+                  ? "bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 cursor-default" 
+                  : "bg-gradient-to-br from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white shadow-blue-900/40"
+              }`}
+            >
+              {isMonetagAdRunning ? (
+                <>
+                  <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin mb-1" />
+                  <span>Loading Ad...</span>
+                </>
+              ) : videoCompleted ? (
+                <>
+                  <CheckCircle2 size={32} />
+                  <span>Reward Credited</span>
+                </>
+              ) : (
+                <>
+                  <motion.div
+                    animate={{ scale: [1, 1.15, 1], rotate: [0, 5, -5, 0] }}
+                    transition={{ repeat: Infinity, duration: 2 }}
+                  >
+                    <Zap size={32} className="fill-current text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]" />
+                  </motion.div>
+                  <span>Claim Now</span>
+                </>
+              )}
+            </button>
+
+            {/* Status & Errors */}
+            <div className="h-6 mt-4">
+              <AnimatePresence mode="wait">
+                {monetagError ? (
+                  <motion.p 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="text-red-400 text-sm font-bold flex items-center justify-center gap-1.5"
+                  >
+                    <AlertCircle size={14} /> {monetagError}
+                  </motion.p>
+                ) : videoCompleted ? (
+                  <motion.p 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-emerald-400 text-sm font-bold"
+                  >
+                    Reward Credited Successfully
+                  </motion.p>
+                ) : (
+                  <p className="text-slate-500 text-xs font-medium uppercase tracking-widest opacity-60">
+                    Tap to watch and earn
+                  </p>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col justify-between py-6 px-4">
