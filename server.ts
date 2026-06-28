@@ -1320,7 +1320,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
   // Admin Task Completions logs
   app.get("/api/admin/task-logs", async (req, res) => {
     try {
-      const q = query(collection(db, "taskCompletions"));
+      const q = query(collection(db, "task_completions"));
       const snapshot = await getDocs(q);
       const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       logs.sort((a: any, b: any) => new Date(b.completedAt || 0).getTime() - new Date(a.completedAt || 0).getTime());

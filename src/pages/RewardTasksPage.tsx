@@ -49,8 +49,13 @@ export default function RewardTasksPage() {
   const [isTelegramApp, setIsTelegramApp] = useState(false);
 
   useEffect(() => {
-    const isTg = !!(window as any).Telegram?.WebApp?.initData;
+    const tg = (window as any).Telegram?.WebApp;
+    const isTg = !!tg?.initData;
     setIsTelegramApp(isTg);
+    if (tg) {
+      tg.ready();
+      tg.expand();
+    }
   }, []);
 
   const handleVideoError = () => {
@@ -456,9 +461,16 @@ export default function RewardTasksPage() {
             <AlertCircle size={40} />
           </div>
           <h1 className="text-2xl font-bold text-white mb-2">Telegram Only Task</h1>
-          <p className="text-slate-400 max-w-xs">
-            This reward task is only available inside the Telegram Mini App. Please open our bot to continue.
+          <p className="text-slate-400 max-w-xs mb-8">
+            Please open this reward inside Telegram Mini App.
           </p>
+          <button
+            onClick={() => window.location.href = `https://t.me/${botUsername}`}
+            className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30 transition-all active:scale-95 flex items-center gap-2"
+          >
+            <Play size={18} className="fill-current" />
+            Open In Telegram
+          </button>
         </div>
       );
     }

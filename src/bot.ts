@@ -2460,14 +2460,20 @@ async function processEarnRewards(botToken: string, chatId: number, user: any) {
     for (const t of mergedTasks) {
         const isCompleted = completedTaskIds.has(t.id);
         const formattedAmount = formatCurrency(t.amount, currency);
+        const isMonetag = t.adNetwork === "Monetag Mini App";
         
         message += `${t.name} - ${formattedAmount}${isCompleted ? " (Completed ✅)" : ""}\n`;
 
         const btnText = isCompleted 
             ? `✅ ${t.name} Completed` 
-            : `🌐 Open ${t.name} In Chrome`;
+            : (isMonetag ? `🎁 Open ${t.name}` : `🌐 Open ${t.name} In Chrome`);
         const webAppUrl = `${appUrl}/earn-rewards?userId=${user.id}&taskId=${t.id}`;
-        buttons.push([{ text: btnText, url: webAppUrl }]);
+        
+        if (isMonetag && !isCompleted) {
+            buttons.push([{ text: btnText, web_app: { url: webAppUrl } }]);
+        } else {
+            buttons.push([{ text: btnText, url: webAppUrl }]);
+        }
     }
 
     message += `\n━━━━━━━━━━━━━━━\nSelect a task below to start earning rewards!`;

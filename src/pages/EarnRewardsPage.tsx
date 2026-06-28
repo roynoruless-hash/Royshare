@@ -80,6 +80,7 @@ export default function EarnRewardsPage() {
     const tg = (window as any).Telegram?.WebApp;
     setIsTelegramApp(!!tg?.initData);
     if (tg) {
+      tg.ready();
       tg.expand();
     }
     const tgUserId = tg?.initDataUnsafe?.user?.id;
@@ -362,9 +363,16 @@ export default function EarnRewardsPage() {
             <AlertCircle size={40} />
           </div>
           <h1 className="text-2xl font-bold text-white mb-2">Mini App Required</h1>
-          <p className="text-gray-400 max-w-xs">
-            This reward task is only available inside the Telegram Mini App.
+          <p className="text-gray-400 max-w-xs mb-8">
+            Please open this reward inside Telegram Mini App.
           </p>
+          <button
+            onClick={() => window.location.href = `https://t.me/${botUsername}`}
+            className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30 transition-all active:scale-95 flex items-center gap-2"
+          >
+            <Play size={18} className="fill-current" />
+            Open In Telegram
+          </button>
         </div>
       );
     }
