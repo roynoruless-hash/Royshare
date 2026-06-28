@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Clock, Play, Pause, RotateCcw, Volume2, VolumeX, ShieldCheck, AlertCircle, Sparkles, CheckCircle2 } from "lucide-react";
+import { Clock, Play, Pause, RotateCcw, Volume2, VolumeX, ShieldCheck, AlertCircle, Sparkles, CheckCircle2, Zap } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore";
 import AdScriptRenderer from "../components/AdScriptRenderer";
@@ -42,6 +42,7 @@ export default function RewardTasksPage() {
 
   const [videoSrc, setVideoSrc] = useState("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
   const [fallbackAttempts, setFallbackAttempts] = useState(0);
+  const [isMonetagAdRunning, setIsMonetagAdRunning] = useState(false);
 
   const handleVideoError = () => {
     console.warn("Video failed to load in RewardTasksPage. Trying fallback...");
@@ -299,6 +300,34 @@ export default function RewardTasksPage() {
     }
   };
 
+  const handleMonetagClaim = async () => {
+    if (isMonetagAdRunning || videoCompleted || submitting) return;
+
+    if (typeof (window as any).show_11210088 !== 'function') {
+      alert("Ad is temporarily unavailable. Please try again.");
+      return;
+    }
+
+    setIsMonetagAdRunning(true);
+    try {
+      await (window as any).show_11210088();
+      // Reward user only after successful completion
+      setVideoCompleted(true);
+      setCurrentTime(duration);
+      // After ad is done, the user can click the claim button which is already there
+      // or we can auto-submit if that's the preferred flow.
+      // The prompt says "When Claim is pressed, execute: show_11210088().then(...)".
+      // So the Claim button initiates the ad, and then the reward is granted.
+      // I'll auto-submit for better UX as the user already clicked "Claim".
+      submitTaskCompletion();
+    } catch (err) {
+      console.error("Monetag ad error:", err);
+      alert("Please complete the ad to receive your reward.");
+    } finally {
+      setIsMonetagAdRunning(false);
+    }
+  };
+
   const submitTaskCompletion = async () => {
     if (!userId || !taskId) return;
     setSubmitting(true);
@@ -374,8 +403,8 @@ export default function RewardTasksPage() {
           <div className="w-20 h-20 bg-emerald-500/20 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto mb-6 text-emerald-400">
             <CheckCircle2 size={44} />
           </div>
-          <h2 className="text-3xl font-extrabold text-emerald-400 mb-2">✅ Video Watched</h2>
-          <p className="text-gray-300 font-semibold mb-6 text-base">Points Credited! Redirecting to Bot...</p>
+          <h2 className="text-3xl font-extrabold text-emerald-400 mb-2">✅ Task Completed</h2>
+          <p className="text-gray-300 font-semibold mb-6 text-base">Reward credited successfully.</p>
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-6 mb-8 max-w-sm mx-auto">
             <p className="text-gray-400 text-xs uppercase tracking-wider font-bold mb-1">💰 Reward Earned</p>
             <p className="text-4xl font-black text-amber-400 tracking-tight">
@@ -439,7 +468,41 @@ export default function RewardTasksPage() {
           </div>
 
           {/* Video Frame */}
-          {videoAd && (videoAd.adType === 'VAST Video Ad' || videoAd.adType === 'VAST Video') ? (
+          {currentTask?.adNetwork === 'Monetag Mini App' ? (
+            <div className="aspect-video bg-slate-950 flex items-center justify-center p-8">
+              <div className="text-center space-y-6">
+                <div className="w-16 h-16 bg-blue-500/10 border border-blue-500/20 rounded-full flex items-center justify-center mx-auto text-blue-400">
+                  <Play size={32} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-bold text-white">Watch Rewarded Ad</h3>
+                  <p className="text-sm text-slate-400">Complete the short ad to claim your reward coins.</p>
+                </div>
+                <button
+                  onClick={handleMonetagClaim}
+                  disabled={isMonetagAdRunning || videoCompleted || submitting}
+                  className="w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white rounded-2xl font-bold transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2 text-lg active:scale-95"
+                >
+                  {isMonetagAdRunning ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Ad is Running...</span>
+                    </>
+                  ) : videoCompleted ? (
+                    <>
+                      <CheckCircle2 size={24} />
+                      <span>Ad Completed</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap size={20} className="fill-current" />
+                      <span>Claim Reward Coins</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : videoAd && (videoAd.adType === 'VAST Video Ad' || videoAd.adType === 'VAST Video') ? (
             <div className="p-4 flex justify-center bg-slate-950">
               <AdScriptRenderer 
                 scriptCode={videoAd.scriptCode} 

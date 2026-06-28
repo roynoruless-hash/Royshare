@@ -129,7 +129,7 @@ export default function AdminDashboard() {
   const [supportSettings, setSupportSettings] = useState<any>({
     aiEnabled: true,
     geminiApiKey: "",
-    geminiModel: "gemini-1.5-flash",
+    geminiModel: "gemini-3.5-flash",
     liveChatEnabled: true,
     supportTelegram: "",
     supportEmail: "support@royshare.com"
@@ -197,7 +197,7 @@ export default function AdminDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           geminiApiKey: supportSettings.geminiApiKey,
-          geminiModel: supportSettings.geminiModel || "gemini-1.5-flash"
+          geminiModel: supportSettings.geminiModel || "gemini-3.5-flash"
         })
       });
       const data = await res.json();
@@ -1394,11 +1394,21 @@ export default function AdminDashboard() {
         };
       } else if (modalAction === 'create_task') {
         endpoint = `/api/admin/tasks`;
-        body = taskForm;
+        let finalForm = { ...taskForm };
+        if (taskForm.adNetwork === "Monetag Mini App") {
+          (finalForm as any).provider = "monetag_mini";
+          (finalForm as any).adType = "rewarded_interstitial";
+        }
+        body = finalForm;
       } else if (modalAction === 'edit_task') {
         endpoint = `/api/admin/tasks/${(taskForm as any).id}`;
         method = 'PUT';
-        body = taskForm;
+        let finalForm = { ...taskForm };
+        if (taskForm.adNetwork === "Monetag Mini App") {
+          (finalForm as any).provider = "monetag_mini";
+          (finalForm as any).adType = "rewarded_interstitial";
+        }
+        body = finalForm;
       } else if (modalAction === 'create_ad') {
         if (!adForm.scriptCode?.trim()) {
           alert("Ad Script/URL cannot be empty.");
@@ -5065,13 +5075,13 @@ export default function AdminDashboard() {
                           <div>
                             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Gemini Model</label>
                             <select
-                              value={supportSettings.geminiModel || "gemini-1.5-flash"}
+                              value={supportSettings.geminiModel || "gemini-3.5-flash"}
                               onChange={(e) => setSupportSettings({ ...supportSettings, geminiModel: e.target.value })}
                               className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
                             >
-                              <option value="gemini-1.5-flash">gemini-1.5-flash (Standard)</option>
-                              <option value="gemini-2.0-flash">gemini-2.0-flash (Fast)</option>
-                              <option value="gemini-1.5-pro">gemini-1.5-pro (Highest Reasoning)</option>
+                              <option value="gemini-3.5-flash">gemini-3.5-flash (Standard)</option>
+                              <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fast)</option>
+                              <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Highest Reasoning)</option>
                             </select>
                           </div>
 
@@ -5111,7 +5121,7 @@ export default function AdminDashboard() {
                             </div>
                             <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
                               <span className="text-slate-400 font-medium">Model Name</span>
-                              <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{supportSettings.geminiModel || "gemini-1.5-flash"}</span>
+                              <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{supportSettings.geminiModel || "gemini-3.5-flash"}</span>
                             </div>
                             <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
                               <span className="text-slate-400 font-medium">Last Response Time</span>
@@ -6516,6 +6526,7 @@ export default function AdminDashboard() {
                         <option value="">-- No Ad Network --</option>
                         <option value="Adsterra">Adsterra</option>
                         <option value="Monetag">Monetag</option>
+                        <option value="Monetag Mini App">Monetag Mini App</option>
                       </select>
                     </div>
                   </div>

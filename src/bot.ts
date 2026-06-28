@@ -2667,7 +2667,7 @@ Please describe your problem.`;
     } else {
         try {
             const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
-            const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
+            const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
             
             const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
             if (!apiKey) {
@@ -2718,7 +2718,7 @@ The user you are speaking with is authenticated in Telegram.
                     }
                 });
 
-                const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
+                const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
 
                 const systemInstruction = `
 You are Sarah, a highly professional, polite, and helpful human support representative at RoyShare.
@@ -2753,9 +2753,9 @@ ${userContext}
 
                 const modelsToTry = [
                     selectedModel,
-                    "gemini-1.5-flash",
-                    "gemini-2.0-flash",
-                    "gemini-1.5-pro",
+                    "gemini-3.5-flash",
+                    "gemini-3.1-flash-lite",
+                    "gemini-3.1-pro-preview",
                     "gemini-flash-latest"
                 ];
                 const uniqueModels = [...new Set(modelsToTry)].filter(m => m && (m.startsWith("gemini-") || m.startsWith("models/gemini-")));
@@ -4481,7 +4481,7 @@ Thank you for chatting with us. Let us know if you need anything else!`;
 
             try {
                 const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
-                const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
+                const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
                 const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
 
                 if (apiKey) {
@@ -4491,7 +4491,7 @@ Thank you for chatting with us. Let us know if you need anything else!`;
                             headers: { 'User-Agent': 'aistudio-build' }
                         }
                     });
-                    const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
+                    const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
 
                     const analysisPrompt = `
 You are an advanced support automation assistant for RoyShare.

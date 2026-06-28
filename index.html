@@ -7,6 +7,16 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Load Monetag SDK only inside Telegram Mini App environment
+      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
+        const script = document.createElement('script');
+        script.src = "//libtl.com/sdk.js";
+        script.setAttribute('data-zone', '11210088');
+        script.setAttribute('data-sdk', 'show_11210088');
+        document.head.appendChild(script);
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -4,21 +4,19 @@ import { GoogleGenAI } from "@google/genai";
  * Robust Gemini content generation with model fallback and error handling.
  */
 export async function safeGenerateContent(ai: any, params: any) {
-  const baseModel = params.model || "gemini-1.5-flash";
+  const baseModel = params.model || "gemini-3.5-flash";
   const modelsToTry = [
     baseModel,
-    "gemini-1.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-pro",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-pro-preview",
     "gemini-flash-latest"
   ];
   
   // Clean up models: remove duplicates and ensure correct format
   const uniqueModels = [...new Set(modelsToTry)].filter(m => 
     m && 
-    (m.startsWith("gemini-") || m.startsWith("models/gemini-")) &&
-    !m.includes("3.1") && 
-    !m.includes("3.5")
+    (m.startsWith("gemini-") || m.startsWith("models/gemini-"))
   );
 
   let lastError: any = null;

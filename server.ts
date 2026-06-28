@@ -284,7 +284,7 @@ async function startServer() {
         apiKey: apiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
-      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
+      const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
 
       const prompt = `
 You are an advanced support automation assistant for RoyShare.
@@ -360,7 +360,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         apiKey: apiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
-      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
+      const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
 
       const prompt = `
 You are a highly professional support assistant at RoyShare, a file hosting and link shortening monetization platform.
@@ -412,7 +412,7 @@ Output ONLY the text of the reply. Do not include subject lines, placeholders li
         apiKey: apiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
-      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
+      const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
 
       const prompt = `
 You are an advanced communication specialist for RoyShare, a link sharing and monetization platform.
@@ -700,7 +700,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         return res.status(400).json({ error: "Gemini API Key is not configured." });
       }
 
-      const modelToUse = geminiModel || "gemini-1.5-flash";
+      const modelToUse = geminiModel || "gemini-3.5-flash";
 
       const ai = new GoogleGenAI({
         apiKey: apiKeyToUse,
@@ -771,7 +771,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       
       const supportSettingsRef = doc(db, "settings", "support");
       const supportSettingsSnap = await getDoc(supportSettingsRef);
-      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
       
       if (supportData.aiEnabled === false) {
         return res.status(403).json({ error: "Support is currently offline." });
@@ -833,8 +833,8 @@ The user you are speaking with is authenticated.
         }
       });
       
-      // Prefer modern gemini-1.5-flash for text tasks
-      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
+      // Prefer modern gemini-3.5-flash for text tasks
+      const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
       
       const systemInstruction = `
 You are Sarah, a highly professional, polite, and helpful human support representative at RoyShare.
@@ -852,7 +852,7 @@ ${userContext}
 `;
 
       const chat = ai.chats.create({
-        model: selectedModel || "gemini-1.5-flash",
+        model: selectedModel || "gemini-3.5-flash",
         config: {
           systemInstruction: systemInstruction
         },
@@ -880,9 +880,9 @@ ${userContext}
       
       // Load Gemini Configuration for analysis
       const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
-      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
       const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
-      const modelToUse = supportData.geminiModel || "gemini-1.5-flash";
+      const modelToUse = supportData.geminiModel || "gemini-3.5-flash";
 
       let aiAnalysis = {
         category: "Other",
@@ -2029,7 +2029,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         return res.status(400).json({ error: "No Gemini API Key configured in settings/support." });
       }
 
-      const model = supportData.geminiModel || "gemini-1.5-flash";
+      const model = supportData.geminiModel || "gemini-3.5-flash";
 
       const ai = new GoogleGenAI({
         apiKey,
@@ -2546,7 +2546,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           const { GoogleGenAI } = await import("@google/genai");
           const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
           const response = await safeGenerateContent(ai, {
-            model: "gemini-1.5-flash",
+            model: "gemini-3.5-flash",
             contents: "ping",
           });
           if (response && response.text) {
@@ -3598,6 +3598,8 @@ Bonus added successfully.`;
         taskId,
         rewardAmount: amount,
         status: "completed",
+        taskCompleted: true,
+        rewardGranted: true,
         completedPages: 3,
         completedAt
       });
@@ -4491,7 +4493,7 @@ Bonus added successfully.`;
       `;
 
       const result = await safeGenerateContent(ai, {
-        model: "gemini-1.5-flash",
+        model: "gemini-3.5-flash",
         contents: prompt,
         config: {
           systemInstruction: "You are a professional copywriter specialized in UX and instruction writing for web applications. Generate short, clear, and engaging instructions. Use bullet points and emojis where appropriate.",
@@ -4560,7 +4562,7 @@ Bonus added successfully.`;
       `;
 
       const result = await safeGenerateContent(ai, {
-        model: "gemini-1.5-flash",
+        model: "gemini-3.5-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
