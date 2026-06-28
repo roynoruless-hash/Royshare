@@ -572,6 +572,7 @@ async function ensureSettings() {
 
 async function processStart(botToken: string, chatId: number, user: any, startText?: string) {
     console.log(`[USER LOG] START RECEIVED: ${user.id}`);
+    console.log("CHANNEL CHECK START");
     const db = getDb();
     
     // Check deep link parameter
@@ -629,19 +630,37 @@ async function processStart(botToken: string, chatId: number, user: any, startTe
     }
 
     // MANDATORY JOIN VERIFICATION (STEP 3)
-    const channelId = -1003385031126;
-    const groupId = -1003929156200;
+    let channelId = -1003385031126;
+    let groupId = -1003929156200;
+
+    try {
+        const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+        if (settingsDoc.exists()) {
+            const sData = settingsDoc.data();
+            if (sData.channelId) channelId = Number(sData.channelId);
+            if (sData.groupId) groupId = Number(sData.groupId);
+        }
+    } catch (err) {
+        console.error("Error loading chat IDs from settings:", err);
+    }
 
     const checkMemberById = async (cId: number, uId: number) => {
         try {
+            console.log(`[DEBUG] Checking membership for user ${uId} in chat ${cId}`);
             const res = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${cId}&user_id=${uId}`);
             const data = await res.json();
             if (data.ok && data.result) {
                 const status = data.result.status;
-                return status === 'member' || status === 'administrator' || status === 'creator';
+                const isJoined = status === 'member' || status === 'administrator' || status === 'creator';
+                console.log(`[DEBUG] Chat ${cId} Status: ${status}, Joined: ${isJoined}`);
+                return isJoined;
             }
+            console.warn(`[DEBUG] getChatMember failed for ${cId}:`, data.description);
             return false;
-        } catch { return false; }
+        } catch (err) { 
+            console.error(`[DEBUG] checkMemberById Error for ${cId}:`, err);
+            return false; 
+        }
     };
 
     const isChannelJoined = await checkMemberById(channelId, user.id);
@@ -668,7 +687,7 @@ After joining, click the button below to verify.`;
         return;
     }
 
-    console.log(`[USER LOG] CHANNEL VERIFIED: ${user.id}`);
+    console.log("CHANNEL VERIFIED");
 
     // CONTACT VERIFICATION (STEP 4)
     const userDocRef = doc(db, "users", String(user.id));
@@ -677,7 +696,7 @@ After joining, click the button below to verify.`;
 
     // Check if phone verification is required (enabled by default if not set)
     const phoneRequired = true; // Hardcoded as per request for "if enabled" logic, we assume it is.
-    const hasPhone = userData?.phone || userData?.contactVerified;
+    const hasPhone = userData?.phone || userData?.contactVerified || userData?.phoneVerified;
 
     if (phoneRequired && !hasPhone) {
         console.log(`[USER LOG] CONTACT REQUESTED: ${user.id}`);
@@ -692,6 +711,7 @@ After joining, click the button below to verify.`;
     }
 
     // ALL VERIFIED -> DASHBOARD (STEP 5)
+    console.log("ONBOARDING COMPLETED");
     console.log(`[USER LOG] DASHBOARD OPENED: ${user.id}`);
     
     // Update membershipVerified if not set
@@ -5250,6 +5270,9 @@ This feature is currently under maintenance and will be implemented soon.`;
 }
 
 async function processContact(botToken: string, chatId: number, user: any, contact: any) {
+    console.log("CONTACT RECEIVED");
+    console.log("CONTACT USER ID", contact.user_id);
+    console.log("SENDER USER ID", user.id);
     console.log(`[USER LOG] CONTACT SAVED: ${user.id}`);
     
     try {
@@ -5261,14 +5284,27 @@ async function processContact(botToken: string, chatId: number, user: any, conta
                 firstName: user.first_name,
                 lastName: user.last_name,
                 phone: contact.phone_number,
-                contactVerified: true
+                contactVerified: true,
+                phoneVerified: true,
+                lastSeen: new Date().toISOString(),
+                lastActive: new Date().toISOString()
             }, { merge: true });
             
+            console.log("PHONE SAVED");
+            console.log("PHONE VERIFIED");
+
+            // Remove the keyboard
+            await sendTelegramMessage(botToken, chatId, "✅ Contact verified successfully!", {
+                reply_markup: { remove_keyboard: true }
+            });
+
             // After contact, check if membership is already verified.
             // If yes, show dashboard. If no, show verification.
             await processStart(botToken, chatId, user);
         } else {
-            await sendTelegramMessage(botToken, chatId, "❌ Error: Please share your OWN contact.");
+            await sendTelegramMessage(botToken, chatId, "❌ Error: Please share your OWN contact. Manually forwarded contacts are rejected.", {
+                reply_markup: { remove_keyboard: true }
+            });
         }
     } catch (e) {
         console.error("Error in processContact:", e);
