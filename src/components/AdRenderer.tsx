@@ -33,14 +33,14 @@ export default function AdRenderer({ placementKey, targetPage = 'All Pages', fal
       const matched = ads.filter(a => 
         isAdActive(a) && 
         matchesPage(a.targetPage, targetPage) && 
-        a.placement === placementKey
+        a.placement === placementKey &&
+        a.adSource !== 'Monetag'
       );
 
       // Sort according to Fallback Priority Order:
       // 1. Adsterra
-      // 2. Monetag
       const sorted = [...matched].sort((x, y) => {
-        const order: Record<string, number> = { 'Adsterra': 1, 'Monetag': 2 };
+        const order: Record<string, number> = { 'Adsterra': 1 };
         const valX = order[x.adSource] || 99;
         const valY = order[y.adSource] || 99;
         return valX - valY;
@@ -135,13 +135,14 @@ export function useDirectLink(placementKey: string = 'Direct Link Slot', targetP
     const matchAd = (a: any) => 
       a.placement === placementKey && 
       isAdActive(a) && 
-      matchesPage(a.targetPage, targetPage);
+      matchesPage(a.targetPage, targetPage) &&
+      a.adSource !== 'Monetag';
 
     const selectLink = (ads: any[]) => {
       const matched = ads.filter(matchAd);
-      // Fallback Priority sorting: Adsterra -> Monetag
+      // Fallback Priority sorting: Adsterra
       const sorted = [...matched].sort((x, y) => {
-        const order: Record<string, number> = { 'Adsterra': 1, 'Monetag': 2 };
+        const order: Record<string, number> = { 'Adsterra': 1 };
         const valX = order[x.adSource] || 99;
         const valY = order[y.adSource] || 99;
         return valX - valY;

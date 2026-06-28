@@ -5210,7 +5210,7 @@ Bonus added successfully.`;
         - Reward: User gets this amount (e.g. 1-100)
         - Timer: User must stay on page for X seconds (e.g. 5-60)
         - Pages: User must visit N pages (e.g. 1-5)
-        - Ad Network: Adsterra, Monetag, Monetag Mini App, or Direct
+        - Ad Network: Adsterra, Monetag Mini App, or Direct
         
         ${currentTask?.adNetwork ? `The current selected Ad Network is: "${currentTask.adNetwork}". Please generate details that match this network.` : ''}
         ${field ? `The user only wants to update the "${field}" field specifically.` : `Generate a complete optimized task.`}

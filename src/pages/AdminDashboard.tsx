@@ -3105,7 +3105,6 @@ export default function AdminDashboard() {
                       >
                         <option value="All">All Networks</option>
                         <option value="Adsterra">Adsterra</option>
-                        <option value="Monetag">Monetag</option>
                       </select>
                     </div>
                     <div>
@@ -6978,7 +6977,6 @@ export default function AdminDashboard() {
                       >
                         <option value="">-- No Ad Network --</option>
                         <option value="Adsterra">Adsterra</option>
-                        <option value="Monetag">Monetag</option>
                         <option value="Monetag Mini App">Monetag Mini App</option>
                       </select>
                     </div>
@@ -7437,7 +7435,6 @@ export default function AdminDashboard() {
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
                       >
                         <option value="Adsterra">Adsterra</option>
-                        <option value="Monetag">Monetag</option>
                       </select>
                     </div>
                     <div>

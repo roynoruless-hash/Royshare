@@ -220,7 +220,7 @@ export default function RewardTasksPage() {
           });
           ((resolvedTask as Task).selectedAdIds || []).forEach((id, index) => {
             const matchedAd = adsMap[id];
-            if (matchedAd) {
+            if (matchedAd && matchedAd.adSource !== 'Monetag') {
               taskSelectedAds.push({
                 ...matchedAd,
                 uniqueId: `${matchedAd.id}-${index}`
@@ -251,19 +251,12 @@ export default function RewardTasksPage() {
             (ad.placement === "Video Slot" || ad.placement === "Video Slot")
           );
 
-          // Fallback Order: Adsterra -> Monetag
+          // Fallback Order: Adsterra
           activeVideoAds.forEach(ad => {
             if (ad.adSource === "Adsterra" && !chosenAd) {
               chosenAd = ad;
             }
           });
-          if (!chosenAd) {
-            activeVideoAds.forEach(ad => {
-              if (ad.adSource === "Monetag" && !chosenAd) {
-                chosenAd = ad;
-              }
-            });
-          }
         }
 
         if (chosenAd) {
