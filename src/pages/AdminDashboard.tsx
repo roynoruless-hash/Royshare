@@ -5106,8 +5106,14 @@ export default function AdminDashboard() {
                                 <div className="text-slate-500">Reward: <span className="text-emerald-400 font-bold">{event.rewardAmount || 0}</span></div>
                                 <div className="text-slate-500">Rev: <span className="text-blue-400 font-bold">${event.params?.estimated_price || 0}</span></div>
                               </div>
-                              <div className="mt-2 pt-2 border-t border-slate-800/50 hidden group-hover:block">
-                                <p className="text-[8px] text-slate-600 break-all">YMID: {event.params?.ymid}</p>
+                              <div className="mt-2 pt-2 border-t border-slate-800/50">
+                                <p className="text-[8px] text-slate-500 font-mono mb-1">Payload:</p>
+                                <pre className="text-[8px] text-slate-400 bg-black/40 p-2 rounded overflow-x-auto">
+                                  {JSON.stringify(event.params, null, 2)}
+                                </pre>
+                                {event.error && (
+                                  <p className="text-[8px] text-red-500 mt-1 font-bold">Error: {event.error}</p>
+                                )}
                               </div>
                             </div>
                           ))

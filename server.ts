@@ -3864,7 +3864,7 @@ Bonus added successfully.`;
     const params = method === "GET" ? req.query : req.body;
     
     console.log(`[MONETAG POSTBACK] Received ${method} request at ${new Date().toISOString()}`);
-    console.log(`[MONETAG POSTBACK] Params:`, JSON.stringify(params, null, 2));
+    console.log(`[MONETAG POSTBACK] Full Raw Params:`, JSON.stringify(params, null, 2));
 
     // Support multiple macro names for common fields
     const telegram_id = params.telegram_id || params.ext_id || params.subid || params.click_id;
@@ -3886,20 +3886,37 @@ Bonus added successfully.`;
       method,
       ip: req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown",
       params: { ...params },
-      status: "pending"
+      status: "pending",
+      identified_tg_id: telegram_id || "MISSING",
+      identified_ymid: ymid || "MISSING"
     };
 
     try {
       // Basic validation
-      if (!telegram_id || !ymid) {
-        console.error(`[MONETAG POSTBACK] Error: Missing telegram_id (${telegram_id}) or ymid (${ymid})`);
+      if (!telegram_id || telegram_id === "{ext_id}" || telegram_id === "Unknown" || telegram_id === "null") {
+        console.error(`[MONETAG POSTBACK] CRITICAL ERROR: Missing or Invalid telegram_id. Value received: ${telegram_id}`);
+        console.error(`[MONETAG POSTBACK] Full Payload for failure:`, JSON.stringify(params));
+        
         logEntry.status = "failed";
-        logEntry.error = "Missing telegram_id or ymid";
+        logEntry.error = `Invalid telegram_id: ${telegram_id}`;
         await addDoc(postbackRef, logEntry);
-        return res.status(400).send("Missing telegram_id or ymid");
+        
+        return res.status(400).json({ 
+          error: "Missing telegram_id", 
+          received: telegram_id,
+          hint: "Ensure ext_id is passed in the frontend show() call" 
+        });
       }
 
-      console.log(`[MONETAG POSTBACK] Incoming Postback: TG=${telegram_id}, YMID=${ymid}, Zone=${zone_id}, Event=${event_type}`);
+      if (!ymid || ymid === "{ymid}") {
+        console.error(`[MONETAG POSTBACK] Error: Missing or macro-placeholder ymid. Value: ${ymid}`);
+        logEntry.status = "failed";
+        logEntry.error = "Missing ymid";
+        await addDoc(postbackRef, logEntry);
+        return res.status(400).send("Missing ymid");
+      }
+
+      console.log(`[MONETAG POSTBACK] Validated Postback: TG=${telegram_id}, YMID=${ymid}, Zone=${zone_id}, Event=${event_type}`);
 
       // Replay Protection: Check if this YMID was already processed successfully
       const duplicateQuery = query(

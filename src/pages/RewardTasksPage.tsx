@@ -369,12 +369,27 @@ export default function RewardTasksPage() {
 
     setIsMonetagAdRunning(true);
     setMonetagError(null);
+    
+    // Log for debugging
+    console.log(`[MONETAG] Preparing ad request for User: ${userId}, Task: ${taskId}`);
+
+    if (!userId || userId === 'null' || userId === 'undefined') {
+      setIsMonetagAdRunning(false);
+      setMonetagError("Telegram User ID not found. Please restart the bot and try again.");
+      console.error("[MONETAG] Blocked ad request: Missing User ID");
+      return;
+    }
+
     try {
-      // Pass the taskId as request_var to Monetag for server-side verification
+      // Pass the userId and taskId to Monetag for server-side verification
+      // Using both ext_id and request_var to ensure maximum compatibility with postback macros
       if (typeof (window as any).show_11210088 === 'function') {
-        await (window as any).show_11210088({ request_var: taskId });
+        await (window as any).show_11210088({ 
+          request_var: taskId,
+          ext_id: userId 
+        });
       } else {
-        await (window as any).show_11210088();
+        throw new Error("Monetag SDK show function not found");
       }
       
       setAdWatchedSuccessfully(true);
@@ -383,7 +398,7 @@ export default function RewardTasksPage() {
       setTimeout(() => setShowSuccessPopup(false), 3000);
     } catch (err: any) {
       console.error("Monetag ad error:", err);
-      setMonetagError("Please watch the complete advertisement to unlock your reward.");
+      setMonetagError("Advertisement interrupted. Please watch completely to earn rewards.");
     } finally {
       setIsMonetagAdRunning(false);
     }
