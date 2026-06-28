@@ -1232,6 +1232,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
   app.post("/api/admin/tasks", async (req, res) => {
     try {
       const payload = req.body;
+      console.log("Admin creating task:", payload);
       const docRef = await addDoc(collection(db, "tasks"), {
         ...payload,
         createdAt: new Date().toISOString(),
@@ -1239,10 +1240,11 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         completedUsers: 0,
         totalRewardsDistributed: 0
       });
+      console.log("Admin task created successfully, ID:", docRef.id);
       res.json({ success: true, id: docRef.id });
     } catch (e: any) {
       console.error("Admin task create error:", e);
-      res.status(500).json({ error: "Server error" });
+      res.status(500).json({ error: "Server error: " + e.message });
     }
   });
 
@@ -1250,11 +1252,13 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     try {
       const { id } = req.params;
       const payload = req.body;
+      console.log(`Admin updating task ${id}:`, payload);
       await setDoc(doc(db, "tasks", id), payload, { merge: true });
+      console.log(`Admin task ${id} updated successfully`);
       res.json({ success: true });
     } catch (e: any) {
       console.error("Admin task update error:", e);
-      res.status(500).json({ error: "Server error" });
+      res.status(500).json({ error: "Server error: " + e.message });
     }
   });
 

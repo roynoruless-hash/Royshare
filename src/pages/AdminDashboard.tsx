@@ -1330,12 +1330,20 @@ export default function AdminDashboard() {
   }, [activeTab, taskView, bonusView, adView, analyticsView, broadcastTab]);
 
   const handleActionSubmit = async () => {
-    if (modalAction.endsWith('_ticket') && !selectedTicket) return;
-    if (modalAction.endsWith('_announcement') && !announcementForm) return;
-    if (modalAction.endsWith('_task') && !taskForm) return;
-    if (modalAction.endsWith('_ad') && !adForm) return;
-    if (['add_balance', 'deduct_balance', 'ban_user', 'unban_user', 'message_user'].includes(modalAction) && !selectedUser) return;
-    if (!modalAction.endsWith('_ticket') && !modalAction.endsWith('_announcement') && !modalAction.endsWith('_task') && !modalAction.endsWith('_ad') && !['add_balance', 'deduct_balance', 'ban_user', 'unban_user', 'message_user'].includes(modalAction) && !selectedWithdrawal) return;
+    // Simplified guard logic
+    const isTicketAction = modalAction.endsWith('_ticket');
+    const isAnnouncementAction = modalAction.endsWith('_announcement');
+    const isTaskAction = modalAction.endsWith('_task');
+    const isAdAction = modalAction.endsWith('_ad');
+    const isUserAction = ['add_balance', 'deduct_balance', 'ban_user', 'unban_user', 'message_user'].includes(modalAction);
+    const isWithdrawalAction = !isTicketAction && !isAnnouncementAction && !isTaskAction && !isAdAction && !isUserAction;
+
+    if (isTicketAction && !selectedTicket) return;
+    if (isAnnouncementAction && !announcementForm) return;
+    if (isTaskAction && !taskForm) return;
+    if (isAdAction && !adForm) return;
+    if (isUserAction && !selectedUser) return;
+    if (isWithdrawalAction && !selectedWithdrawal) return;
     setModalLoading(true);
     try {
       let endpoint = '';
@@ -1393,17 +1401,29 @@ export default function AdminDashboard() {
           customAlias: smartLinkForm.autoGenerateAlias ? "" : smartLinkForm.customAlias
         };
       } else if (modalAction === 'create_task') {
+        console.log("Creating task with form:", taskForm);
         endpoint = `/api/admin/tasks`;
-        let finalForm = { ...taskForm };
+        let finalForm = { 
+          ...taskForm,
+          rewardAmount: Number(taskForm.rewardAmount) || 0,
+          timerDuration: Number(taskForm.timerDuration) || 0,
+          totalPages: Number(taskForm.totalPages) || 0
+        };
         if (taskForm.adNetwork === "Monetag Mini App") {
           (finalForm as any).provider = "monetag_mini";
           (finalForm as any).adType = "rewarded_interstitial";
         }
         body = finalForm;
       } else if (modalAction === 'edit_task') {
+        console.log("Editing task with form:", taskForm);
         endpoint = `/api/admin/tasks/${(taskForm as any).id}`;
         method = 'PUT';
-        let finalForm = { ...taskForm };
+        let finalForm = { 
+          ...taskForm,
+          rewardAmount: Number(taskForm.rewardAmount) || 0,
+          timerDuration: Number(taskForm.timerDuration) || 0,
+          totalPages: Number(taskForm.totalPages) || 0
+        };
         if (taskForm.adNetwork === "Monetag Mini App") {
           (finalForm as any).provider = "monetag_mini";
           (finalForm as any).adType = "rewarded_interstitial";
@@ -1451,7 +1471,13 @@ export default function AdminDashboard() {
         headers: { "Content-Type": "application/json" },
         body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined
       });
-      if (!res.ok) throw new Error("Action failed");
+      
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch (e) {}
+
+      if (!res.ok) throw new Error(data.error || "Action failed");
       
       setModalAction('none');
       setModalInput("");
@@ -1464,6 +1490,7 @@ export default function AdminDashboard() {
         alert("Smart Link saved successfully!");
       } else if (modalAction.endsWith('_task')) {
         fetchTasks();
+        alert("Task saved successfully!");
       } else if (modalAction.endsWith('_ad')) {
         fetchAds();
         alert("Ad saved successfully!");
