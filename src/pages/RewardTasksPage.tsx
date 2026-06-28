@@ -345,6 +345,9 @@ export default function RewardTasksPage() {
             setIsVerified(true);
             setMonetagError(null);
             clearInterval(interval);
+          } else if (data.reason === "Postback failed") {
+            setMonetagError(`Verification failed: ${data.error || "Invalid user ID recorded"}`);
+            clearInterval(interval);
           }
         } catch (e) {
           console.error("Polling error:", e);
@@ -382,14 +385,24 @@ export default function RewardTasksPage() {
 
     try {
       // Pass the userId and taskId to Monetag for server-side verification
-      // Using both ext_id and request_var to ensure maximum compatibility with postback macros
+      // Using multiple parameters to ensure maximum compatibility with postback macros
       if (typeof (window as any).show_11210088 === 'function') {
+        console.log(`[MONETAG] Calling show_11210088 with userId: ${userId} and taskId: ${taskId}`);
+        
+        // Monetag SDK for rewarded ads usually accepts an options object
         await (window as any).show_11210088({ 
           request_var: taskId,
-          ext_id: userId 
+          ext_id: userId,
+          subid: userId,
+          subid1: taskId
+        }).then((result: any) => {
+          console.log("[MONETAG] Ad Show Success Callback Result:", result);
+        }).catch((error: any) => {
+          console.error("[MONETAG] Ad Show Promise Catch:", error);
+          // Don't throw here if it's just a user-closed-early error
         });
       } else {
-        throw new Error("Monetag SDK show function not found");
+        throw new Error("Monetag SDK show function not found (show_11210088)");
       }
       
       setAdWatchedSuccessfully(true);
@@ -397,7 +410,7 @@ export default function RewardTasksPage() {
       // Automatically hide popup after 3 seconds
       setTimeout(() => setShowSuccessPopup(false), 3000);
     } catch (err: any) {
-      console.error("Monetag ad error:", err);
+      console.error("[MONETAG] Ad error:", err);
       setMonetagError("Advertisement interrupted. Please watch completely to earn rewards.");
     } finally {
       setIsMonetagAdRunning(false);

@@ -3866,18 +3866,16 @@ Bonus added successfully.`;
     console.log(`[MONETAG POSTBACK] Received ${method} request at ${new Date().toISOString()}`);
     console.log(`[MONETAG POSTBACK] Full Raw Params:`, JSON.stringify(params, null, 2));
 
-    // Support multiple macro names for common fields
-    const telegram_id = params.telegram_id || params.ext_id || params.subid || params.click_id;
-    const ymid = params.ymid || params.visitor_id || params.clickid;
-    const request_var = params.request_var || params.custom_var || params.taskId;
+    // Support multiple macro names for common fields from various Monetag configurations
+    const telegram_id = params.telegram_id || params.ext_id || params.subid || params.click_id || params.sub_id || params.visitor_id;
+    const ymid = params.ymid || params.clickid || params.transaction_id || params.visitor_id || params.click_id;
+    const request_var = params.request_var || params.custom_var || params.taskId || params.subid1;
     
-    const {
-      zone_id,
-      sub_zone_id,
-      event_type,
-      reward_event_type,
-      estimated_price
-    } = params;
+    const zone_id = params.zone_id || params.zoneid;
+    const sub_zone_id = params.sub_zone_id || params.subzoneid || "unknown";
+    const event_type = params.event_type || params.event;
+    const reward_event_type = params.reward_event_type || params.reward;
+    const estimated_price = params.estimated_price || params.price || params.revenue || 0;
 
     // Log entry for the postback
     const postbackRef = collection(db, "monetag_postbacks");
@@ -3888,30 +3886,29 @@ Bonus added successfully.`;
       params: { ...params },
       status: "pending",
       identified_tg_id: telegram_id || "MISSING",
-      identified_ymid: ymid || "MISSING"
+      identified_ymid: ymid || "MISSING",
+      identified_task: request_var || "DEFAULT"
     };
 
     try {
       // Basic validation
-      if (!telegram_id || telegram_id === "{ext_id}" || telegram_id === "Unknown" || telegram_id === "null") {
-        console.error(`[MONETAG POSTBACK] CRITICAL ERROR: Missing or Invalid telegram_id. Value received: ${telegram_id}`);
-        console.error(`[MONETAG POSTBACK] Full Payload for failure:`, JSON.stringify(params));
-        
+      if (!telegram_id || telegram_id === "{ext_id}" || telegram_id === "Unknown" || telegram_id === "null" || telegram_id === "{subid}") {
+        console.error(`[MONETAG POSTBACK] FAILURE: Missing or macro-placeholder telegram_id. Value: ${telegram_id}`);
         logEntry.status = "failed";
-        logEntry.error = `Invalid telegram_id: ${telegram_id}`;
+        logEntry.error = `Invalid telegram_id: ${telegram_id}. Check if ext_id or subid was passed to show()`;
         await addDoc(postbackRef, logEntry);
         
         return res.status(400).json({ 
           error: "Missing telegram_id", 
           received: telegram_id,
-          hint: "Ensure ext_id is passed in the frontend show() call" 
+          hint: "Ensure ext_id or subid is passed in the frontend SDK call" 
         });
       }
 
-      if (!ymid || ymid === "{ymid}") {
-        console.error(`[MONETAG POSTBACK] Error: Missing or macro-placeholder ymid. Value: ${ymid}`);
+      if (!ymid || ymid === "{ymid}" || ymid === "{clickid}") {
+        console.error(`[MONETAG POSTBACK] FAILURE: Missing or macro-placeholder ymid. Value: ${ymid}`);
         logEntry.status = "failed";
-        logEntry.error = "Missing ymid";
+        logEntry.error = "Missing ymid (transaction id)";
         await addDoc(postbackRef, logEntry);
         return res.status(400).send("Missing ymid");
       }
@@ -4316,6 +4313,23 @@ Bonus added successfully.`;
           return res.json({ completed: true });
         }
         
+        // Check for recent failed postbacks to provide better feedback
+        const failedPostbacksQuery = query(
+          collection(db, "monetag_postbacks"),
+          where("identified_tg_id", "==", String(userId)),
+          where("status", "==", "failed"),
+          limit(1)
+        );
+        const failedSnapshot = await getDocs(failedPostbacksQuery);
+        if (!failedSnapshot.empty) {
+          const failedData = failedSnapshot.docs[0].data();
+          return res.json({ 
+            completed: false, 
+            reason: "Postback failed", 
+            error: failedData.error || "Unknown error" 
+          });
+        }
+
         console.log(`[STATUS CHECK] Pending: No verified completion found for userId: ${userId}, taskId: ${taskId}`);
         return res.json({ completed: false, reason: "Verification pending..." });
       }
