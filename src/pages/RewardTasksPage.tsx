@@ -305,7 +305,7 @@ export default function RewardTasksPage() {
     if (isMonetagAdRunning || videoCompleted || submitting) return;
 
     if (typeof (window as any).show_11210088 !== 'function') {
-      alert("Ad is temporarily unavailable. Please try again.");
+      setMonetagError("Please watch the complete advertisement to receive your reward.");
       return;
     }
 
@@ -319,7 +319,7 @@ export default function RewardTasksPage() {
       submitTaskCompletion();
     } catch (err: any) {
       console.error("Monetag ad error:", err);
-      setMonetagError("Please watch the complete ad to receive your reward.");
+      setMonetagError("Please watch the complete advertisement to receive your reward.");
     } finally {
       setIsMonetagAdRunning(false);
     }

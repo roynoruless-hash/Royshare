@@ -193,7 +193,7 @@ export default function EarnRewardsPage() {
     if (isMonetagAdRunning || isCompletedSuccess || submitting) return;
 
     if (typeof (window as any).show_11210088 !== 'function') {
-      setMonetagError("Ad service unavailable. Please refresh or try later.");
+      setMonetagError("Please watch the complete advertisement to receive your reward.");
       return;
     }
 
@@ -205,7 +205,7 @@ export default function EarnRewardsPage() {
       submitTaskCompletion();
     } catch (err: any) {
       console.error("Monetag ad error:", err);
-      setMonetagError("Please watch the complete ad to receive your reward.");
+      setMonetagError("Please watch the complete advertisement to receive your reward.");
     } finally {
       setIsMonetagAdRunning(false);
     }
