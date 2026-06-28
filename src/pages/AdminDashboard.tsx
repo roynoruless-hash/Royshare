@@ -47,6 +47,9 @@ export default function AdminDashboard() {
   const [tasksError, setTasksError] = useState("");
   const [taskLogs, setTaskLogs] = useState<any[]>([]);
   const [taskLogsLoading, setTaskLogsLoading] = useState(false);
+  const [verifiedTasks, setVerifiedTasks] = useState<any[]>([]);
+  const [verifiedTasksLoading, setVerifiedTasksLoading] = useState(false);
+  const [verifiedTasksSearch, setVerifiedTasksSearch] = useState("");
   const [taskForm, setTaskForm] = useState({
     title: "", description: "", rewardAmount: "", timerDuration: "", totalPages: "", imageUrl: "", status: "🟢 Active", adNetwork: "", selectedAdIds: [] as string[]
   });
@@ -669,6 +672,21 @@ export default function AdminDashboard() {
       console.error(err);
     } finally {
       setTaskLogsLoading(false);
+    }
+  };
+
+  const fetchVerifiedTasks = async () => {
+    setVerifiedTasksLoading(true);
+    try {
+      const res = await fetch("/api/admin/verified-tasks");
+      if (res.ok) {
+        const json = await res.json();
+        setVerifiedTasks(json);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setVerifiedTasksLoading(false);
     }
   };
 
@@ -1715,16 +1733,89 @@ export default function AdminDashboard() {
         <div className="space-y-8 max-w-7xl mx-auto">
           {/* Navigation Buttons */}
           <div className="flex flex-wrap gap-3">
-            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "🔗 Smart URL Shortener", "📈 Analytics", "📢 Broadcast", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "💰 Monetag Postback", "⚙️ System Settings"].map((btn) => (
+            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "🔗 Smart URL Shortener", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "💰 Monetag Postback", "⚙️ System Settings"].map((btn) => (
               <button 
                 key={btn} 
-                onClick={() => setActiveTab(btn)}
+                onClick={() => {
+                  setActiveTab(btn);
+                  if (btn === '💰 Verified Tasks') fetchVerifiedTasks();
+                }}
                 className={`px-4 py-2 hover:bg-slate-800 border border-slate-800 rounded-xl text-sm font-medium transition-colors ${activeTab === btn ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-900 text-slate-300'}`}
               >
                 {btn}
               </button>
             ))}
           </div>
+
+          {activeTab === '💰 Verified Tasks' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  💰 Verified Task Completions
+                </h2>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Search Telegram ID..."
+                    value={verifiedTasksSearch}
+                    onChange={(e) => setVerifiedTasksSearch(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 w-64"
+                  />
+                  <button
+                    onClick={fetchVerifiedTasks}
+                    disabled={verifiedTasksLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all disabled:opacity-50 border border-slate-700"
+                  >
+                    🔄 Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm text-slate-300">
+                    <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+                      <tr>
+                        <th className="px-4 py-3">Telegram ID</th>
+                        <th className="px-4 py-3">Task ID</th>
+                        <th className="px-4 py-3">Reward</th>
+                        <th className="px-4 py-3">Network</th>
+                        <th className="px-4 py-3">Claimed</th>
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3">YMID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {verifiedTasks
+                        .filter(t => t.telegram_id?.includes(verifiedTasksSearch) || t.userId?.includes(verifiedTasksSearch))
+                        .map((t: any) => (
+                        <tr key={t.id} className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+                          <td className="px-4 py-3 font-medium text-white">{t.telegram_id || t.userId}</td>
+                          <td className="px-4 py-3 text-xs text-slate-400">{t.taskId}</td>
+                          <td className="px-4 py-3 text-emerald-400 font-bold">₹{t.rewardAmount || 0.56}</td>
+                          <td className="px-4 py-3 text-xs text-slate-500">{t.adNetwork || 'Monetag'}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${t.claimed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                              {t.claimed ? 'YES (Claimed)' : 'NO (Verified)'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-slate-500">
+                            {new Date(t.created_at || t.completedAt).toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-[10px] font-mono text-slate-600">{t.ymid}</td>
+                        </tr>
+                      ))}
+                      {verifiedTasks.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="px-4 py-10 text-center text-slate-500">No verified tasks found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
 
           {activeTab === 'Overview' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

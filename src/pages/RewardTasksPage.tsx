@@ -39,6 +39,7 @@ export default function RewardTasksPage() {
   const [videoCompleted, setVideoCompleted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isCompletedSuccess, setIsCompletedSuccess] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
 
   const [videoSrc, setVideoSrc] = useState("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4");
   const [fallbackAttempts, setFallbackAttempts] = useState(0);
@@ -335,24 +336,23 @@ export default function RewardTasksPage() {
   // Automatically poll for completion once ad is watched
   useEffect(() => {
     let interval: any;
-    if (adWatchedSuccessfully && !isCompletedSuccess && !submitting) {
+    if (adWatchedSuccessfully && !isCompletedSuccess && !isVerified && !submitting) {
       interval = setInterval(async () => {
         try {
           const res = await fetch(`/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
           const data = await res.json();
           if (data.completed) {
-            setVideoCompleted(true);
-            setCurrentTime(duration);
-            setIsCompletedSuccess(true);
+            setIsVerified(true);
+            setMonetagError(null);
             clearInterval(interval);
           }
         } catch (e) {
           console.error("Polling error:", e);
         }
-      }, 5000); // Check every 5 seconds
+      }, 4000); // Check every 4 seconds
     }
     return () => clearInterval(interval);
-  }, [adWatchedSuccessfully, isCompletedSuccess, submitting, userId, taskId, duration]);
+  }, [adWatchedSuccessfully, isCompletedSuccess, isVerified, submitting, userId, taskId]);
 
   const handleWatchMonetagAd = async () => {
     if (isMonetagAdRunning || adWatchedSuccessfully || submitting) return;
@@ -392,23 +392,26 @@ export default function RewardTasksPage() {
   const handleClaimMonetagReward = async () => {
     if (!adWatchedSuccessfully || videoCompleted || submitting) return;
     
-    // Instead of directly crediting, we check if the postback has arrived
     setSubmitting(true);
     setMonetagError(null);
     
     try {
-      const res = await fetch(`/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
+      const res = await fetch(`/api/monetag/claim-reward`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ telegram_id: userId, taskId: taskId })
+      });
       const data = await res.json();
       
-      if (data.completed) {
+      if (data.success) {
         setVideoCompleted(true);
         setCurrentTime(duration);
         setIsCompletedSuccess(true);
       } else {
-        setMonetagError(`Verification pending: ${data.reason || "Waiting for Monetag postback"}`);
+        setMonetagError(`Claim failed: ${data.message || "Verification still pending"}`);
       }
     } catch (err) {
-      setMonetagError("Failed to check verification status.");
+      setMonetagError("Failed to connect to claim service.");
     } finally {
       setSubmitting(false);
     }
@@ -605,7 +608,9 @@ export default function RewardTasksPage() {
                 className={`w-full py-6 rounded-[2rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden ${
                   videoCompleted 
                     ? "bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 cursor-default" 
-                    : "bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-amber-900/40"
+                    : isVerified
+                      ? "bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white shadow-emerald-900/40"
+                      : "bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-amber-900/40"
                 }`}
               >
                 {videoCompleted ? (
@@ -640,6 +645,7 @@ export default function RewardTasksPage() {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
+                    key="error"
                     className="text-red-400 text-sm font-bold flex items-center justify-center gap-1.5"
                   >
                     <AlertCircle size={14} /> {monetagError}
@@ -648,20 +654,31 @@ export default function RewardTasksPage() {
                   <motion.p 
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
+                    key="completed"
                     className="text-emerald-400 text-sm font-bold"
                   >
                     Reward Credited Successfully
+                  </motion.p>
+                ) : isVerified ? (
+                  <motion.p 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    key="verified"
+                    className="text-emerald-400 text-sm font-bold"
+                  >
+                    ✅ Reward Verified Amount: ₹0.56
                   </motion.p>
                 ) : adWatchedSuccessfully ? (
                   <motion.p 
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
+                    key="watched"
                     className="text-blue-400 text-sm font-bold"
                   >
-                    Ready to Claim!
+                    Ready to Claim! (Verification pending...)
                   </motion.p>
                 ) : (
-                  <p className="text-slate-500 text-xs font-medium uppercase tracking-widest opacity-60">
+                  <p key="waiting" className="text-slate-500 text-xs font-medium uppercase tracking-widest opacity-60">
                     Watch complete ad to unlock
                   </p>
                 )}

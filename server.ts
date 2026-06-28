@@ -3899,7 +3899,7 @@ Bonus added successfully.`;
         return res.status(400).send("Missing telegram_id or ymid");
       }
 
-      console.log(`[MONETAG POSTBACK] Processing for telegram_id: ${telegram_id}, ymid: ${ymid}`);
+      console.log(`[MONETAG POSTBACK] Incoming Postback: TG=${telegram_id}, YMID=${ymid}, Zone=${zone_id}, Event=${event_type}`);
 
       // Replay Protection: Check if this YMID was already processed successfully
       const duplicateQuery = query(
@@ -3918,7 +3918,7 @@ Bonus added successfully.`;
 
       // Check reward eligibility
       if (reward_event_type !== "yes") {
-        console.log(`[MONETAG POSTBACK] Info: Event ignored because reward_event_type is '${reward_event_type}'`);
+        console.log(`[MONETAG POSTBACK] Event ignored: reward_event_type is '${reward_event_type}'`);
         logEntry.status = "ignored";
         logEntry.reason = "reward_event_type is not 'yes'";
         await addDoc(postbackRef, logEntry);
@@ -3935,24 +3935,26 @@ Bonus added successfully.`;
       let tgIdNum = Number(telegram_id);
 
       if (!userSnap.exists()) {
-        console.warn(`[MONETAG POSTBACK] User with telegramId ${telegram_id} not found by ID. Trying query...`);
+        console.warn(`[MONETAG POSTBACK] User ${telegram_id} not found by ID. Querying...`);
         // Fallback to query in case doc ID is different for some reason
         const userQuery = query(usersRef, where("telegramId", "==", tgIdNum));
         const userSnapshot = await getDocs(userQuery);
         
         if (userSnapshot.empty) {
-          console.warn(`[MONETAG POSTBACK] User not found by query either. Creating automatic record.`);
+          console.warn(`[MONETAG POSTBACK] User not found. Creating auto-record for TG=${telegram_id}`);
           userData = {
             telegramId: isNaN(tgIdNum) ? telegram_id : tgIdNum,
             username: params.username || "monetag_auto_user",
             firstName: params.firstName || "Monetag",
             lastName: params.lastName || "User",
             balance: 0,
+            availableBalance: 0,
             totalEarnings: 0,
             createdAt: new Date().toISOString(),
             lastActive: new Date().toISOString(),
             membershipVerified: false,
-            contactVerified: false,
+            verified: false,
+            registrationStep: 'completed',
             monetag_auto_created: true
           };
           await setDoc(userDocRef, userData);
@@ -3966,11 +3968,12 @@ Bonus added successfully.`;
       } else {
         userData = userSnap.data();
         userId = userSnap.id;
-        console.log(`[MONETAG POSTBACK] Found user by ID: ${userId}`);
       }
 
+      console.log(`[MONETAG POSTBACK] User Validated: ${userId} (${userData.username || 'No Username'})`);
+
       // Determine reward amount
-      let rewardAmount = 5; 
+      let rewardAmount = 0.56; 
       
       // We use request_var as the taskId if passed from frontend ad call
       const taskId = request_var || "monetag_default_task";
@@ -3982,47 +3985,34 @@ Bonus added successfully.`;
         }
       }
 
-      // Process Reward
-      const currentBalance = Number(userData.balance || 0);
-      const currentTotalEarnings = Number(userData.totalEarnings || 0);
-      const newBalance = currentBalance + rewardAmount;
-      const newTotalEarnings = currentTotalEarnings + rewardAmount;
+      console.log(`[MONETAG POSTBACK] Reward Amount determined: ${rewardAmount}`);
 
-      console.log(`[MONETAG POSTBACK] Crediting reward: ${rewardAmount} to user ${userId}. New balance: ${newBalance}`);
+      // Create Task Completion Record (Verified but not yet claimed)
+      const completionsRef = collection(db, "task_completions");
+      const completionId = `${userId}_${taskId}_${ymid}`;
+      
+      const completionData = {
+        telegram_id: String(telegram_id),
+        userId: userId,
+        taskId: taskId,
+        ymid: String(ymid),
+        zone_id: zone_id || "unknown",
+        sub_zone_id: sub_zone_id || "unknown",
+        event_type: event_type || "unknown",
+        reward_event_type: reward_event_type,
+        estimated_price: Number(estimated_price || 0),
+        rewardAmount: rewardAmount,
+        status: "verified",
+        verified: true,
+        reward_credited: false,
+        claimed: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        adNetwork: "Monetag"
+      };
 
-      await updateDoc(userDocRef, {
-        balance: newBalance,
-        totalEarnings: newTotalEarnings,
-        lastEarningAt: new Date().toISOString()
-      });
-
-      // Log Reward History
-      await addDoc(collection(db, "reward_history"), {
-        userId,
-        telegramId: tgIdNum,
-        amount: rewardAmount,
-        type: "monetag_postback",
-        description: `Monetag Ad Completion (Zone: ${zone_id})`,
-        timestamp: new Date().toISOString(),
-        ymid,
-        zone_id
-      });
-
-      // Mark Task as Completed
-      if (taskId && taskId !== "monetag_default_task") {
-        console.log(`[MONETAG POSTBACK] Marking task ${taskId} as verified for user ${userId}`);
-        const completionsRef = collection(db, "task_completions");
-        // Use setDoc with a composite ID to prevent duplicates if postbacks arrive multiple times for same task
-        const completionId = `${userId}_${taskId}_${ymid}`;
-        await setDoc(doc(completionsRef, completionId), {
-          userId,
-          taskId,
-          completedAt: new Date().toISOString(),
-          adNetwork: "Monetag Mini App",
-          ymid,
-          status: "verified"
-        });
-      }
+      await setDoc(doc(completionsRef, completionId), completionData);
+      console.log(`[MONETAG POSTBACK] Task Completion Created: ID=${completionId}, Status=verified`);
 
       // Update Postback Analytics
       const today = new Date().toISOString().split("T")[0];
@@ -4036,16 +4026,14 @@ Bonus added successfully.`;
         await updateDoc(analyticsRef, {
           totalPostbacks: (existing.totalPostbacks || 0) + 1,
           successCount: (existing.successCount || 0) + 1,
-          totalRevenue: (existing.totalRevenue || 0) + revenue,
-          totalRewards: (existing.totalRewards || 0) + rewardAmount
+          totalRevenue: (existing.totalRevenue || 0) + revenue
         });
       } else {
         await setDoc(analyticsRef, {
           date: today,
           totalPostbacks: 1,
           successCount: 1,
-          totalRevenue: revenue,
-          totalRewards: rewardAmount
+          totalRevenue: revenue
         });
       }
 
@@ -4058,7 +4046,6 @@ Bonus added successfully.`;
           totalPostbacks: (existing.totalPostbacks || 0) + 1,
           successCount: (existing.successCount || 0) + 1,
           totalRevenue: (existing.totalRevenue || 0) + revenue,
-          totalRewards: (existing.totalRewards || 0) + rewardAmount,
           lastPostbackAt: new Date().toISOString()
         });
       } else {
@@ -4066,7 +4053,6 @@ Bonus added successfully.`;
           totalPostbacks: 1,
           successCount: 1,
           totalRevenue: revenue,
-          totalRewards: rewardAmount,
           lastPostbackAt: new Date().toISOString()
         });
       }
@@ -4077,10 +4063,10 @@ Bonus added successfully.`;
       logEntry.rewardAmount = rewardAmount;
       await addDoc(postbackRef, logEntry);
 
-      console.log(`[MONETAG POSTBACK] Success: Reward credited for telegram_id ${telegram_id}`);
-      return res.status(200).send("Reward credited successfully");
+      console.log(`[MONETAG POSTBACK] Verification Success for TG=${telegram_id}`);
+      return res.status(200).send("Reward verified successfully");
     } catch (e: any) {
-      console.error("Monetag Postback Processing Error:", e);
+      console.error("[MONETAG POSTBACK] Fatal Error:", e);
       logEntry.status = "failed";
       logEntry.error = e.message || "Unknown internal error";
       await addDoc(postbackRef, logEntry);
@@ -4088,7 +4074,145 @@ Bonus added successfully.`;
     }
   });
 
+  app.post("/api/monetag/claim-reward", async (req, res) => {
+    try {
+      const { telegram_id, taskId } = req.body;
+      if (!telegram_id || !taskId) {
+        return res.status(400).json({ success: false, message: "Missing telegram_id or taskId" });
+      }
+
+      console.log(`[CLAIM REWARD] Incoming: TG=${telegram_id}, Task=${taskId}`);
+
+      const completionsRef = collection(db, "task_completions");
+      const q = query(
+        completionsRef,
+        where("telegram_id", "==", String(telegram_id)),
+        where("taskId", "==", taskId),
+        where("status", "==", "verified"),
+        where("claimed", "==", false)
+      );
+
+      const snapshot = await getDocs(q);
+      let targetDoc: any = null;
+
+      if (snapshot.empty) {
+        // Try fallback query with userId for older records
+        const qFallback = query(
+          completionsRef,
+          where("userId", "==", String(telegram_id)),
+          where("taskId", "==", taskId),
+          where("status", "==", "verified"),
+          where("claimed", "==", false)
+        );
+        const fallbackSnap = await getDocs(qFallback);
+        if (fallbackSnap.empty) {
+          console.warn(`[CLAIM REWARD] No claimable record for TG=${telegram_id}`);
+          return res.status(404).json({ success: false, message: "Verification pending or already claimed. Please refresh." });
+        }
+        targetDoc = fallbackSnap.docs[0];
+      } else {
+        targetDoc = snapshot.docs[0];
+      }
+
+      const data = targetDoc.data();
+      const rewardAmount = Number(data.rewardAmount || 0.56);
+      const ymid = data.ymid;
+
+      // Find User
+      const usersRef = collection(db, "users");
+      const userDocRef = doc(usersRef, String(telegram_id));
+      const userSnap = await getDoc(userDocRef);
+
+      if (!userSnap.exists()) {
+        return res.status(404).json({ success: false, message: "User record not found." });
+      }
+
+      const userData = userSnap.data();
+      const currentBalance = Number(userData.availableBalance || userData.balance || 0);
+      const currentTotalEarnings = Number(userData.totalEarnings || 0);
+      
+      const newBalance = currentBalance + rewardAmount;
+      const newTotalEarnings = currentTotalEarnings + rewardAmount;
+
+      console.log(`[CLAIM REWARD] Crediting reward: ₹${rewardAmount} to TG=${telegram_id}`);
+
+      // 1. Update User
+      await updateDoc(userDocRef, {
+        availableBalance: newBalance,
+        balance: newBalance,
+        totalEarnings: newTotalEarnings,
+        lastEarningAt: new Date().toISOString()
+      });
+
+      // 2. Mark as Claimed
+      await updateDoc(targetDoc.ref, {
+        claimed: true,
+        reward_credited: true,
+        claimed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+
+      // 3. Log History
+      await addDoc(collection(db, "reward_history"), {
+        userId: String(telegram_id),
+        telegramId: Number(telegram_id),
+        amount: rewardAmount,
+        type: "monetag_claim",
+        description: `Monetag Ad Reward Claimed (YMID: ${ymid})`,
+        timestamp: new Date().toISOString(),
+        ymid
+      });
+
+      // 4. Transaction log
+      await addDoc(collection(db, "transactions"), {
+        userId: String(telegram_id),
+        type: "reward",
+        amount: rewardAmount,
+        status: "success",
+        description: "Monetag Ad Reward",
+        timestamp: new Date().toISOString()
+      });
+
+      console.log(`[CLAIM REWARD] Success for TG=${telegram_id}`);
+      return res.json({ 
+        success: true, 
+        message: "Reward claimed successfully.",
+        amount: rewardAmount
+      });
+
+    } catch (e: any) {
+      console.error("[CLAIM REWARD] Fatal Error:", e);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
   // 2. Admin: Get Monetag Settings and Stats
+  app.get("/api/admin/verified-tasks", async (req, res) => {
+    try {
+      const completionsRef = collection(db, "task_completions");
+      // Basic query for verified tasks
+      const q = query(
+        completionsRef,
+        where("status", "==", "verified"),
+        limit(200)
+      );
+      const snapshot = await getDocs(q);
+      let tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      // Sort in memory if created_at exists
+      tasks.sort((a: any, b: any) => {
+        const dateA = new Date(a.created_at || a.completedAt || 0).getTime();
+        const dateB = new Date(b.created_at || b.completedAt || 0).getTime();
+        return dateB - dateA;
+      });
+
+      res.json(tasks);
+    } catch (e: any) {
+      console.error("Error fetching verified tasks:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/admin/monetag/stats", async (req, res) => {
     try {
       const today = new Date().toISOString().split("T")[0];
@@ -4153,7 +4277,7 @@ Bonus added successfully.`;
 
       const q = query(
         collection(db, "task_completions"),
-        where("userId", "==", userId),
+        where("telegram_id", "==", String(userId)),
         where("taskId", "==", taskId),
         where("status", "==", "verified")
       );
@@ -4163,8 +4287,20 @@ Bonus added successfully.`;
         console.log(`[STATUS CHECK] Success: Task ${taskId} found verified for user ${userId}`);
         return res.json({ completed: true });
       } else {
+        // Fallback for older records using userId
+        const q2 = query(
+          collection(db, "task_completions"),
+          where("userId", "==", String(userId)),
+          where("taskId", "==", taskId),
+          where("status", "==", "verified")
+        );
+        const snapshot2 = await getDocs(q2);
+        if (!snapshot2.empty) {
+          return res.json({ completed: true });
+        }
+        
         console.log(`[STATUS CHECK] Pending: No verified completion found for userId: ${userId}, taskId: ${taskId}`);
-        return res.json({ completed: false, reason: "No verified record found in task_completions collection with status 'verified'." });
+        return res.json({ completed: false, reason: "Verification pending..." });
       }
     } catch (e: any) {
       console.error("[STATUS CHECK] Error:", e);
