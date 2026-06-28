@@ -3,7 +3,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { getDb } from "./src/lib/firebase";
-import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit } from "firebase/firestore";
 import { REWARD_TASKS } from "./src/lib/tasks";
 import { GoogleGenAI } from "@google/genai";
 import { safeGenerateContent } from "./src/lib/gemini";
@@ -3574,7 +3574,14 @@ Bonus added successfully.`;
         const dbTaskRef = doc(db, "tasks", taskId);
         const dbTaskSnap = await getDoc(dbTaskRef);
         if (dbTaskSnap.exists()) {
-          amount = Number(dbTaskSnap.data()?.rewardAmount) || 0;
+          const tData = dbTaskSnap.data();
+          
+          // Security: Block direct completion for Monetag ads
+          if (tData.adNetwork === "Monetag Mini App" || tData.provider === "monetag_mini") {
+            return res.status(403).json({ error: "Monetag rewards are processed automatically via Server-Side Postback. Please wait for verification." });
+          }
+
+          amount = Number(tData.rewardAmount) || 0;
           isDbTask = true;
           
           // Increment participants, completedUsers, and totalRewardsDistributed on dynamic task
@@ -3701,6 +3708,278 @@ Bonus added successfully.`;
     } catch (e: any) {
       console.error("Error in /api/earn-rewards/complete:", e);
       res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // ========================================
+  // MONETAG SERVER-SIDE POSTBACK SYSTEM
+  // ========================================
+
+  // 1. Postback Handler (Supports both GET and POST)
+  app.all("/api/monetag/postback", async (req, res) => {
+    const method = req.method;
+    const params = method === "GET" ? req.query : req.body;
+    
+    const {
+      telegram_id,
+      zone_id,
+      sub_zone_id,
+      event_type,
+      reward_event_type,
+      estimated_price,
+      ymid,
+      request_var
+    } = params;
+
+    // Log entry for the postback
+    const postbackRef = collection(db, "monetag_postbacks");
+    const logEntry: any = {
+      timestamp: new Date().toISOString(),
+      method,
+      ip: req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown",
+      params: { ...params },
+      status: "pending"
+    };
+
+    try {
+      // Basic validation
+      if (!telegram_id || !ymid) {
+        logEntry.status = "failed";
+        logEntry.error = "Missing telegram_id or ymid";
+        await addDoc(postbackRef, logEntry);
+        return res.status(400).send("Missing telegram_id or ymid");
+      }
+
+      // Replay Protection: Check if this YMID was already processed successfully
+      const duplicateQuery = query(
+        postbackRef, 
+        where("params.ymid", "==", ymid), 
+        where("status", "==", "success")
+      );
+      const duplicateSnapshot = await getDocs(duplicateQuery);
+      if (!duplicateSnapshot.empty) {
+        logEntry.status = "failed";
+        logEntry.error = "Duplicate YMID detected (Replay Attack prevented)";
+        await addDoc(postbackRef, logEntry);
+        // Return 200 to Monetag so they stop retrying, even though we didn't process it again
+        return res.status(200).send("Duplicate postback already processed");
+      }
+
+      // Check reward eligibility
+      if (reward_event_type !== "yes") {
+        logEntry.status = "ignored";
+        logEntry.reason = "reward_event_type is not 'yes'";
+        await addDoc(postbackRef, logEntry);
+        return res.status(200).send("Event ignored (no reward requested)");
+      }
+
+      // Find User by Telegram ID
+      const usersRef = collection(db, "users");
+      const userQuery = query(usersRef, where("telegramId", "==", Number(telegram_id)));
+      const userSnapshot = await getDocs(userQuery);
+
+      if (userSnapshot.empty) {
+        logEntry.status = "failed";
+        logEntry.error = `User with Telegram ID ${telegram_id} not found in database`;
+        await addDoc(postbackRef, logEntry);
+        return res.status(404).send("User not found");
+      }
+
+      const userDoc = userSnapshot.docs[0];
+      const userData = userDoc.data();
+      const userId = userDoc.id;
+
+      // Determine reward amount
+      // Default fallback reward
+      let rewardAmount = 5; 
+      
+      // We use request_var as the taskId if passed from frontend ad call
+      const taskId = request_var || "monetag_default_task";
+      
+      if (taskId && taskId !== "monetag_default_task") {
+        const taskDoc = await getDoc(doc(db, "tasks", taskId));
+        if (taskDoc.exists()) {
+          rewardAmount = Number(taskDoc.data().rewardAmount) || rewardAmount;
+        }
+      }
+
+      // Process Reward
+      const currentBalance = Number(userData.balance || 0);
+      const currentTotalEarnings = Number(userData.totalEarnings || 0);
+      const newBalance = currentBalance + rewardAmount;
+      const newTotalEarnings = currentTotalEarnings + rewardAmount;
+
+      await updateDoc(userDoc.ref, {
+        balance: newBalance,
+        totalEarnings: newTotalEarnings,
+        lastEarningAt: new Date().toISOString()
+      });
+
+      // Log Reward History
+      await addDoc(collection(db, "reward_history"), {
+        userId,
+        telegramId: Number(telegram_id),
+        amount: rewardAmount,
+        type: "monetag_postback",
+        description: `Monetag Ad Completion (Zone: ${zone_id})`,
+        timestamp: new Date().toISOString(),
+        ymid,
+        zone_id
+      });
+
+      // Mark Task as Completed
+      if (taskId && taskId !== "monetag_default_task") {
+        const completionsRef = collection(db, "task_completions");
+        // Use setDoc with a composite ID to prevent duplicates if postbacks arrive multiple times for same task
+        const completionId = `${userId}_${taskId}_${ymid}`;
+        await setDoc(doc(completionsRef, completionId), {
+          userId,
+          taskId,
+          completedAt: new Date().toISOString(),
+          adNetwork: "Monetag Mini App",
+          ymid,
+          status: "verified"
+        });
+      }
+
+      // Update Postback Analytics
+      const today = new Date().toISOString().split("T")[0];
+      const analyticsRef = doc(db, "monetag_analytics", today);
+      const analyticsSnap = await getDoc(analyticsRef);
+      
+      const revenue = Number(estimated_price || 0);
+      
+      if (analyticsSnap.exists()) {
+        const existing = analyticsSnap.data();
+        await updateDoc(analyticsRef, {
+          totalPostbacks: (existing.totalPostbacks || 0) + 1,
+          successCount: (existing.successCount || 0) + 1,
+          totalRevenue: (existing.totalRevenue || 0) + revenue,
+          totalRewards: (existing.totalRewards || 0) + rewardAmount
+        });
+      } else {
+        await setDoc(analyticsRef, {
+          date: today,
+          totalPostbacks: 1,
+          successCount: 1,
+          totalRevenue: revenue,
+          totalRewards: rewardAmount
+        });
+      }
+
+      // Global Stats update
+      const globalStatsRef = doc(db, "monetag_analytics", "global_stats");
+      const globalStatsSnap = await getDoc(globalStatsRef);
+      if (globalStatsSnap.exists()) {
+        const existing = globalStatsSnap.data();
+        await updateDoc(globalStatsRef, {
+          totalPostbacks: (existing.totalPostbacks || 0) + 1,
+          successCount: (existing.successCount || 0) + 1,
+          totalRevenue: (existing.totalRevenue || 0) + revenue,
+          totalRewards: (existing.totalRewards || 0) + rewardAmount,
+          lastPostbackAt: new Date().toISOString()
+        });
+      } else {
+        await setDoc(globalStatsRef, {
+          totalPostbacks: 1,
+          successCount: 1,
+          totalRevenue: revenue,
+          totalRewards: rewardAmount,
+          lastPostbackAt: new Date().toISOString()
+        });
+      }
+
+      // Update status in log entry
+      logEntry.status = "success";
+      logEntry.userId = userId;
+      logEntry.rewardAmount = rewardAmount;
+      await addDoc(postbackRef, logEntry);
+
+      return res.status(200).send("Reward credited successfully");
+    } catch (e: any) {
+      console.error("Monetag Postback Processing Error:", e);
+      logEntry.status = "failed";
+      logEntry.error = e.message || "Unknown internal error";
+      await addDoc(postbackRef, logEntry);
+      return res.status(500).send("Internal processing error");
+    }
+  });
+
+  // 2. Admin: Get Monetag Settings and Stats
+  app.get("/api/admin/monetag/stats", async (req, res) => {
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      
+      const globalStatsSnap = await getDoc(doc(db, "monetag_analytics", "global_stats"));
+      const todayStatsSnap = await getDoc(doc(db, "monetag_analytics", today));
+      
+      // Recent postbacks
+      const recentQuery = query(collection(db, "monetag_postbacks"), orderBy("timestamp", "desc"), limit(20));
+      const recentSnapshot = await getDocs(recentQuery);
+      const recentEvents = recentSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+      const postbackUrl = `${appUrl}/api/monetag/postback?telegram_id={telegram_id}&zone_id={zone_id}&sub_zone_id={sub_zone_id}&event_type={event_type}&reward_event_type={reward_event_type}&estimated_price={estimated_price}&ymid={ymid}&request_var={request_var}`;
+
+      res.json({
+        success: true,
+        postbackUrl,
+        globalStats: globalStatsSnap.exists() ? globalStatsSnap.data() : { totalPostbacks: 0, successCount: 0, totalRevenue: 0, totalRewards: 0 },
+        todayStats: todayStatsSnap.exists() ? todayStatsSnap.data() : { totalPostbacks: 0, successCount: 0, totalRevenue: 0, totalRewards: 0 },
+        recentEvents
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 3. Admin: Test Postback Endpoint
+  app.post("/api/admin/monetag/test-postback", async (req, res) => {
+    try {
+      const { telegramId } = req.body;
+      if (!telegramId) return res.status(400).json({ success: false, message: "Missing telegramId" });
+
+      const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+      const testYmid = "test_" + Math.random().toString(36).substring(7);
+      
+      const testUrl = `${appUrl}/api/monetag/postback?telegram_id=${telegramId}&zone_id=12345&sub_zone_id=67890&event_type=ad_completed&reward_event_type=yes&estimated_price=0.01&ymid=${testYmid}&request_var=monetag_default_task`;
+
+      console.log("Simulating Monetag Postback:", testUrl);
+      
+      const response = await fetch(testUrl, { method: "GET" });
+      const text = await response.text();
+
+      res.json({
+        success: response.ok,
+        status: response.status,
+        response: text,
+        testUrl
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.get("/api/earn-rewards/check-status", async (req, res) => {
+    try {
+      const { userId, taskId } = req.query;
+      if (!userId || !taskId) return res.status(400).json({ error: "Missing params" });
+      
+      const q = query(
+        collection(db, "task_completions"),
+        where("userId", "==", userId),
+        where("taskId", "==", taskId),
+        where("status", "==", "verified")
+      );
+      
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        return res.json({ completed: true });
+      } else {
+        return res.json({ completed: false });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 
@@ -4575,8 +4854,9 @@ Bonus added successfully.`;
         - Reward: User gets this amount (e.g. 1-100)
         - Timer: User must stay on page for X seconds (e.g. 5-60)
         - Pages: User must visit N pages (e.g. 1-5)
-        - Ad Network: Adsterra or Monetag or Direct
+        - Ad Network: Adsterra, Monetag, Monetag Mini App, or Direct
         
+        ${currentTask?.adNetwork ? `The current selected Ad Network is: "${currentTask.adNetwork}". Please generate details that match this network.` : ''}
         ${field ? `The user only wants to update the "${field}" field specifically.` : `Generate a complete optimized task.`}
         
         For the "imageUrl", always suggest a high-quality, relevant, royalty-free placeholder image URL from Unsplash (e.g. https://images.unsplash.com/photo-...) that matches the task type perfectly.
@@ -4590,7 +4870,7 @@ Bonus added successfully.`;
             "timerDuration": "...",
             "totalPages": "...",
             "imageUrl": "...",
-            "adNetwork": "Adsterra|Monetag|Direct"
+            "adNetwork": "${currentTask?.adNetwork || "Adsterra"}"
           },
           "analytics": {
             "completionRate": "85%",

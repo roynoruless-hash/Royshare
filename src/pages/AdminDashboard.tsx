@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from "motion/react";
 import { 
   Zap, Play, CheckCircle2, AlertTriangle, Timer, Tv, 
   Target, ShieldAlert, Award, Clock, AlertCircle, Info,
-  Smartphone, MousePointer2, ClipboardCheck, Sparkles
+  Smartphone, MousePointer2, ClipboardCheck, Sparkles,
+  Copy, ExternalLink, Eye, EyeOff
 } from "lucide-react";
 import AdScriptRenderer from "../components/AdScriptRenderer";
 
@@ -452,7 +453,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleGenerateAiTask = async (field?: string, overrideType?: string) => {
+  const handleGenerateAiTask = async (field?: string, overrideType?: string, overrideAdNetwork?: string) => {
     const typeToUse = overrideType || aiTaskType;
     setAiGeneratingTask(true);
     setAiError("");
@@ -462,8 +463,11 @@ export default function AdminDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           taskType: typeToUse,
-          field, // Optional: if generating for a specific field
-          currentTask: taskForm
+          field, 
+          currentTask: {
+            ...taskForm,
+            adNetwork: overrideAdNetwork || taskForm.adNetwork // Use override if provided
+          }
         })
       });
       const data = await res.json();
@@ -473,10 +477,17 @@ export default function AdminDashboard() {
           setTaskForm(prev => ({ ...prev, [field]: data.task[field] }));
         } else {
           // If full generation, fill all fields automatically and also show suggestion panel for analytics
+          // Ensure suggestion also reflects the current ad network if it's set
+          if (data.task && (overrideAdNetwork || taskForm.adNetwork)) {
+            data.task.adNetwork = overrideAdNetwork || taskForm.adNetwork;
+          }
+          
           setTaskForm(prev => ({
             ...prev,
             ...data.task,
-            adNetwork: data.task.adNetwork || prev.adNetwork
+            // STRONGLY PRESERVE these fields - user's selection is the source of truth
+            adNetwork: prev.adNetwork || data.task.adNetwork,
+            status: prev.status
           }));
           setAiTaskSuggestion(data);
         }
@@ -494,9 +505,16 @@ export default function AdminDashboard() {
     if (aiTaskSuggestion && aiTaskSuggestion.task) {
       setTaskForm(prev => ({
         ...prev,
-        ...aiTaskSuggestion.task,
-        // Preserve selectedAdIds if they were already set, or use what AI suggested if it matches existing ads
-        adNetwork: aiTaskSuggestion.task.adNetwork || prev.adNetwork
+        // Only update these fields, NOT the ad network or status
+        title: aiTaskSuggestion.task.title || prev.title,
+        description: aiTaskSuggestion.task.description || prev.description,
+        rewardAmount: aiTaskSuggestion.task.rewardAmount || prev.rewardAmount,
+        timerDuration: aiTaskSuggestion.task.timerDuration || prev.timerDuration,
+        totalPages: aiTaskSuggestion.task.totalPages || prev.totalPages,
+        imageUrl: aiTaskSuggestion.task.imageUrl || prev.imageUrl,
+        // Keep existing selections as source of truth
+        adNetwork: prev.adNetwork,
+        status: prev.status
       }));
       setAiTaskSuggestion(null);
     }
@@ -506,6 +524,49 @@ export default function AdminDashboard() {
     if (suggestedInstructions) {
       setUserShortenerSettings((prev: any) => ({ ...prev, instructions: suggestedInstructions }));
       setSuggestedInstructions(null);
+    }
+  };
+
+  const [monetagStats, setMonetagStats] = useState<any>(null);
+  const [monetagStatsLoading, setMonetagStatsLoading] = useState(false);
+  const [monetagTestResult, setMonetagTestResult] = useState<any>(null);
+  const [monetagTesting, setMonetagTesting] = useState(false);
+
+  const fetchMonetagStats = async () => {
+    setMonetagStatsLoading(true);
+    try {
+      const res = await fetch("/api/admin/monetag/stats");
+      const data = await res.json();
+      if (data.success) {
+        setMonetagStats(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch Monetag stats:", e);
+    } finally {
+      setMonetagStatsLoading(false);
+    }
+  };
+
+  const testMonetagPostback = async () => {
+    setMonetagTesting(true);
+    setMonetagTestResult(null);
+    try {
+      // Use the first user found or a dummy ID for testing
+      const telegramId = data?.topEarners?.[0]?.telegramId || "123456789";
+      const res = await fetch("/api/admin/monetag/test-postback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ telegramId })
+      });
+      const result = await res.json();
+      setMonetagTestResult(result);
+      if (result.success) {
+        fetchMonetagStats(); // Refresh stats
+      }
+    } catch (e: any) {
+      setMonetagTestResult({ success: false, error: e.message });
+    } finally {
+      setMonetagTesting(false);
     }
   };
 
@@ -1327,6 +1388,8 @@ export default function AdminDashboard() {
       fetchActivityLogs();
     } else if (activeTab === '📥 Backup & Restore') {
       fetchBackups();
+    } else if (activeTab === '💰 Monetag Postback') {
+      fetchMonetagStats();
     }
 
     return () => {
@@ -1561,7 +1624,7 @@ export default function AdminDashboard() {
         <div className="space-y-8 max-w-7xl mx-auto">
           {/* Navigation Buttons */}
           <div className="flex flex-wrap gap-3">
-            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "🔗 Smart URL Shortener", "📈 Analytics", "📢 Broadcast", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "⚙️ System Settings"].map((btn) => (
+            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "🔗 Smart URL Shortener", "📈 Analytics", "📢 Broadcast", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "💰 Monetag Postback", "⚙️ System Settings"].map((btn) => (
               <button 
                 key={btn} 
                 onClick={() => setActiveTab(btn)}
@@ -2162,9 +2225,9 @@ export default function AdminDashboard() {
                                     <button 
                                       onClick={() => {
                                         setTaskForm({
-                                          adNetwork: "",
-                                          selectedAdIds: [],
-                                          ...t
+                                          ...t,
+                                          adNetwork: t.adNetwork || "",
+                                          selectedAdIds: t.selectedAdIds || []
                                         });
                                         setModalAction('view_task');
                                       }}
@@ -2176,9 +2239,9 @@ export default function AdminDashboard() {
                                     <button 
                                       onClick={() => {
                                         setTaskForm({
-                                          adNetwork: "",
-                                          selectedAdIds: [],
-                                          ...t
+                                          ...t,
+                                          adNetwork: t.adNetwork || "",
+                                          selectedAdIds: t.selectedAdIds || []
                                         });
                                         setModalAction('edit_task');
                                       }}
@@ -4489,6 +4552,213 @@ export default function AdminDashboard() {
               )}
             </div>
           )}
+          {activeTab === '💰 Monetag Postback' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-blue-500/10 rounded-2xl">
+                    <Zap className="w-6 h-6 text-blue-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Monetag Postback Settings</h2>
+                    <p className="text-sm text-slate-400">Manage your Server-Side Postback integration</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={testMonetagPostback} 
+                    disabled={monetagTesting}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50"
+                  >
+                    {monetagTesting ? '⏳ Testing...' : '🚀 Test Endpoint'}
+                  </button>
+                  <button 
+                    onClick={fetchMonetagStats} 
+                    disabled={monetagStatsLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700"
+                  >
+                    🔄 Refresh Stats
+                  </button>
+                </div>
+              </div>
+
+              {monetagStatsLoading && !monetagStats ? (
+                <div className="flex justify-center py-20">
+                   <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Left Column: Stats & Settings */}
+                  <div className="lg:col-span-2 space-y-6">
+                    {/* URL Card */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl relative overflow-hidden group">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/5 blur-3xl -mr-16 -mt-16 group-hover:bg-blue-600/10 transition-colors"></div>
+                      
+                      <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        🔗 Server-Side Postback URL
+                      </h3>
+                      <p className="text-sm text-slate-400 mb-4">
+                        Copy this URL and paste it into your Monetag Dashboard under <span className="text-blue-400 font-mono">Settings → Postback</span>.
+                      </p>
+                      
+                      <div className="relative group">
+                        <div className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 pr-12 text-blue-400 font-mono text-xs break-all leading-relaxed h-32 overflow-y-auto scrollbar-hide">
+                          {monetagStats?.postbackUrl || 'Loading postback URL...'}
+                        </div>
+                        <button 
+                          onClick={() => {
+                            navigator.clipboard.writeText(monetagStats?.postbackUrl || "");
+                            alert("Postback URL copied to clipboard!");
+                          }}
+                          className="absolute top-3 right-3 p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors border border-slate-700 shadow-xl"
+                        >
+                          <Copy size={16} />
+                        </button>
+                      </div>
+
+                      <div className="mt-6 flex flex-wrap gap-4">
+                        <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+                          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                          <span className="text-xs font-bold text-emerald-500 uppercase tracking-wider">Live & Ready</span>
+                        </div>
+                        <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full">
+                          <ShieldAlert size={14} className="text-blue-400" />
+                          <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">Secure Verification</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 hover:border-blue-500/30 transition-colors">
+                        <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Total Postbacks</p>
+                        <p className="text-2xl font-bold text-white">{monetagStats?.globalStats?.totalPostbacks || 0}</p>
+                      </div>
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 hover:border-emerald-500/30 transition-colors">
+                        <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Successful</p>
+                        <p className="text-2xl font-bold text-emerald-400">{monetagStats?.globalStats?.successCount || 0}</p>
+                      </div>
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 hover:border-blue-500/30 transition-colors">
+                        <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Today's Revenue</p>
+                        <p className="text-2xl font-bold text-blue-400">${(monetagStats?.todayStats?.totalRevenue || 0).toFixed(4)}</p>
+                      </div>
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 hover:border-amber-500/30 transition-colors">
+                        <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Today's Rewards</p>
+                        <p className="text-2xl font-bold text-amber-400">{monetagStats?.todayStats?.totalRewards || 0}</p>
+                      </div>
+                    </div>
+
+                    {/* Test Result Section */}
+                    <AnimatePresence>
+                      {monetagTestResult && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 10 }}
+                          className={`p-6 border rounded-3xl ${monetagTestResult.success ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}
+                        >
+                          <div className="flex justify-between items-start mb-4">
+                            <h4 className={`font-bold ${monetagTestResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {monetagTestResult.success ? '✅ Test Successful' : '❌ Test Failed'}
+                            </h4>
+                            <button onClick={() => setMonetagTestResult(null)} className="text-slate-500 hover:text-white transition-colors">
+                              <Zap className="w-4 h-4 rotate-45" />
+                            </button>
+                          </div>
+                          <div className="bg-black/40 rounded-xl p-4 font-mono text-xs space-y-2 overflow-x-auto">
+                            <p><span className="text-slate-500">Status:</span> <span className={monetagTestResult.success ? 'text-emerald-400' : 'text-red-400'}>{monetagTestResult.status}</span></p>
+                            <p><span className="text-slate-500">Response:</span> <span className="text-blue-300">{monetagTestResult.response}</span></p>
+                            <p className="text-[10px] opacity-50"><span className="text-slate-500">Test URL:</span> {monetagTestResult.testUrl}</p>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Macros Table */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
+                      <h3 className="text-lg font-bold text-white mb-4">Processed Macros</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {[
+                          { name: 'telegram_id', desc: 'User Unique ID from Telegram' },
+                          { name: 'ymid', desc: 'Monetag Unique Click/Event ID' },
+                          { name: 'zone_id', desc: 'Advertising Zone ID' },
+                          { name: 'event_type', desc: 'Type of event (ad_completed)' },
+                          { name: 'reward_event_type', desc: 'Verification status (yes/no)' },
+                          { name: 'estimated_price', desc: 'Estimated revenue generated' },
+                          { name: 'request_var', desc: 'Custom variable (Task ID)' },
+                        ].map((m) => (
+                          <div key={m.name} className="flex items-center gap-3 p-3 bg-slate-950 border border-slate-800/50 rounded-xl">
+                            <div className="bg-blue-500/10 p-2 rounded-lg">
+                              <CheckCircle2 size={14} className="text-blue-400" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-white">{m.name}</p>
+                              <p className="text-[10px] text-slate-500">{m.desc}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Recent Events */}
+                  <div className="space-y-6">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col h-full max-h-[800px]">
+                      <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        🕒 Recent Postback Events
+                      </h3>
+                      <div className="flex-1 overflow-y-auto pr-2 space-y-4 scrollbar-hide">
+                        {monetagStats?.recentEvents?.length > 0 ? (
+                          monetagStats.recentEvents.map((event: any) => (
+                            <div key={event.id} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl hover:border-blue-500/30 transition-all group">
+                              <div className="flex justify-between items-start mb-2">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                  event.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
+                                  event.status === 'failed' ? 'bg-red-500/10 text-red-400' :
+                                  'bg-slate-800 text-slate-400'
+                                }`}>
+                                  {event.status}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  {new Date(event.timestamp).toLocaleTimeString()}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-300 font-bold mb-1">
+                                User: {event.params?.telegram_id || 'Unknown'}
+                              </p>
+                              <div className="grid grid-cols-2 gap-2 text-[10px] mt-2">
+                                <div className="text-slate-500">Reward: <span className="text-emerald-400 font-bold">{event.rewardAmount || 0}</span></div>
+                                <div className="text-slate-500">Rev: <span className="text-blue-400 font-bold">${event.params?.estimated_price || 0}</span></div>
+                              </div>
+                              <div className="mt-2 pt-2 border-t border-slate-800/50 hidden group-hover:block">
+                                <p className="text-[8px] text-slate-600 break-all">YMID: {event.params?.ymid}</p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-center py-10">
+                            <p className="text-slate-500 text-sm italic">No events received yet</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-3xl p-6 text-white shadow-xl shadow-blue-900/20">
+                      <h4 className="font-bold mb-2 flex items-center gap-2">
+                        <Info size={16} /> Integration Help
+                      </h4>
+                      <p className="text-xs text-indigo-100 leading-relaxed mb-4">
+                        Server-Side Postback (SSP) is the most secure way to verify user rewards. It prevents users from bypassing ads using browser scripts.
+                      </p>
+                      <button className="w-full py-2 bg-white/20 hover:bg-white/30 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2">
+                        <ExternalLink size={14} /> Documentation
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {activeTab === '⚙️ System Settings' && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
@@ -6319,7 +6589,7 @@ export default function AdminDashboard() {
                           });
                           if (val === "Monetag Mini App") {
                             setAiTaskType("Watch Ads");
-                            handleGenerateAiTask(undefined, "Watch Ads");
+                            handleGenerateAiTask(undefined, "Watch Ads", val);
                           }
                         }}
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 font-bold"

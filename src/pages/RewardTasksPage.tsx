@@ -348,7 +348,13 @@ export default function RewardTasksPage() {
     setIsMonetagAdRunning(true);
     setMonetagError(null);
     try {
-      await (window as any).show_11210088();
+      // Pass the taskId as request_var to Monetag for server-side verification
+      if (typeof (window as any).show_11210088 === 'function') {
+        await (window as any).show_11210088({ request_var: taskId });
+      } else {
+        await (window as any).show_11210088();
+      }
+      
       setAdWatchedSuccessfully(true);
       setShowSuccessPopup(true);
       // Automatically hide popup after 3 seconds
@@ -364,11 +370,26 @@ export default function RewardTasksPage() {
   const handleClaimMonetagReward = async () => {
     if (!adWatchedSuccessfully || videoCompleted || submitting) return;
     
-    // Set video states to trigger existing logic if needed
-    setVideoCompleted(true);
-    setCurrentTime(duration);
+    // Instead of directly crediting, we check if the postback has arrived
+    setSubmitting(true);
+    setMonetagError(null);
     
-    submitTaskCompletion();
+    try {
+      const res = await fetch(`/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
+      const data = await res.json();
+      
+      if (data.completed) {
+        setVideoCompleted(true);
+        setCurrentTime(duration);
+        setIsCompletedSuccess(true);
+      } else {
+        setMonetagError("Verification pending. Please wait a few seconds and try again.");
+      }
+    } catch (err) {
+      setMonetagError("Failed to check verification status.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const submitTaskCompletion = async () => {

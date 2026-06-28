@@ -231,7 +231,17 @@ export default function EarnRewardsPage() {
     setIsMonetagAdRunning(true);
     setMonetagError(null);
     try {
-      await (window as any).show_11210088();
+      // Pass the taskId as request_var to Monetag for server-side verification
+      if (typeof (window as any).show_11210088 === 'function') {
+        // Set request_var if the SDK supports it via global or params
+        // For Monetag Mini App, passing it to the function or setting a data attribute is common.
+        // We'll assume the SDK uses the data-ext-id we set in index.html for user, 
+        // and we can try passing taskId in the call.
+        await (window as any).show_11210088({ request_var: taskId });
+      } else {
+        await (window as any).show_11210088();
+      }
+      
       setAdWatchedSuccessfully(true);
       setShowSuccessPopup(true);
       setTimeout(() => setShowSuccessPopup(false), 3000);
@@ -245,7 +255,25 @@ export default function EarnRewardsPage() {
 
   const handleClaimMonetagReward = async () => {
     if (!adWatchedSuccessfully || isCompletedSuccess || submitting) return;
-    submitTaskCompletion();
+    
+    // Instead of directly crediting, we check if the postback has arrived
+    setSubmitting(true);
+    setMonetagError(null);
+    
+    try {
+      const res = await fetch(`/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
+      const data = await res.json();
+      
+      if (data.completed) {
+        setIsCompletedSuccess(true);
+      } else {
+        setMonetagError("Verification pending. Please wait a few seconds and try again.");
+      }
+    } catch (err) {
+      setMonetagError("Failed to check verification status.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // Currency Formatter
