@@ -52,12 +52,20 @@ async function cleanupDemoTasks() {
   }
 }
 
+// Global Error Handlers
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🔴 UNHANDLED REJECTION:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('🔴 UNCAUGHT EXCEPTION:', err);
+});
+
 async function startServer() {
   // Run cleanup on startup
   await cleanupDemoTasks();
   
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
 
   const PORT = 3000;
 
@@ -344,7 +352,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
         apiKey: apiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
-      const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
+      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
 
       const prompt = `
 You are an advanced support automation assistant for RoyShare.
@@ -420,7 +428,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         apiKey: apiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
-      const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
+      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
 
       const prompt = `
 You are a highly professional support assistant at RoyShare, a file hosting and link shortening monetization platform.
@@ -472,7 +480,7 @@ Output ONLY the text of the reply. Do not include subject lines, placeholders li
         apiKey: apiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
-      const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
+      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
 
       const prompt = `
 You are an advanced communication specialist for RoyShare, a link sharing and monetization platform.
@@ -760,7 +768,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
         return res.status(400).json({ error: "Gemini API Key is not configured." });
       }
 
-      const modelToUse = geminiModel || "gemini-3.5-flash";
+      const modelToUse = geminiModel || "gemini-1.5-flash";
 
       const ai = new GoogleGenAI({
         apiKey: apiKeyToUse,
@@ -831,7 +839,7 @@ Do NOT include markdown formatting like \`\`\`json or any other text before or a
       
       const supportSettingsRef = doc(db, "settings", "support");
       const supportSettingsSnap = await getDoc(supportSettingsRef);
-      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
       
       if (supportData.aiEnabled === false) {
         return res.status(403).json({ error: "Support is currently offline." });
@@ -893,8 +901,8 @@ The user you are speaking with is authenticated.
         }
       });
       
-      // Prefer modern gemini-3.5-flash for text tasks
-      const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
+      // Prefer modern gemini-1.5-flash for text tasks
+      const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
       
       const systemInstruction = `
 You are Sarah, a highly professional, polite, and helpful human support representative at RoyShare.
@@ -912,7 +920,7 @@ ${userContext}
 `;
 
       const chat = ai.chats.create({
-        model: selectedModel || "gemini-3.5-flash",
+        model: selectedModel || "gemini-1.5-flash",
         config: {
           systemInstruction: systemInstruction
         },
@@ -940,9 +948,9 @@ ${userContext}
       
       // Load Gemini Configuration for analysis
       const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
-      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
+      const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
       const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
-      const modelToUse = supportData.geminiModel || "gemini-3.5-flash";
+      const modelToUse = supportData.geminiModel || "gemini-1.5-flash";
 
       let aiAnalysis = {
         category: "Other",
@@ -2266,7 +2274,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         return res.status(400).json({ error: "No Gemini API Key configured in settings/support." });
       }
 
-      const model = supportData.geminiModel || "gemini-3.5-flash";
+      const model = supportData.geminiModel || "gemini-1.5-flash";
 
       const ai = new GoogleGenAI({
         apiKey,
@@ -2783,7 +2791,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           const { GoogleGenAI } = await import("@google/genai");
           const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
           const response = await safeGenerateContent(ai, {
-            model: "gemini-3.5-flash",
+            model: "gemini-1.5-flash",
             contents: "ping",
           });
           if (response && response.text) {
@@ -3212,131 +3220,95 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
   // Incoming Telegram Webhook handler endpoint
   app.post("/api/telegram/webhook", async (req, res) => {
-    console.log("-----------------------------------------");
-    console.log("📥 Incoming Telegram Webhook Request Received");
-    
-    // 5. Verify all environment variables are loaded
-    const envStatus = {
-      GEMINI_API_KEY: process.env.GEMINI_API_KEY ? "LOADED" : "MISSING",
-      APP_URL: process.env.APP_URL ? "LOADED" : "MISSING",
-      NODE_ENV: process.env.NODE_ENV || "development"
-    };
-    console.log("🔍 Webhook Environment Verification:", JSON.stringify(envStatus));
-
     try {
-      // 6. Verify Firestore/database access
-      console.log("🔍 Webhook: Verifying Firestore database access...");
-      const settingsDocRef = doc(db, "settings", "telegram");
-      const settingsSnap = await getDoc(settingsDocRef);
+      console.log("-----------------------------------------");
+      console.log("📥 Incoming Telegram Webhook Request Received");
       
-      if (!settingsSnap.exists()) {
-        throw new Error("Firestore access failed: settings/telegram document does not exist in the database.");
-      }
-      console.log("✅ Webhook: Firestore database access verified successfully.");
-
-      const data = settingsSnap.data();
-      const botToken = data?.botToken;
-      
-      if (!botToken) {
-        throw new Error("Validation Error: botToken is missing or empty in Firestore settings/telegram document.");
-      }
-      console.log("✅ Webhook: Telegram Bot Token loaded from database.");
-
-      // 7. Verify every Telegram API request (Check if request body is valid)
       const update = req.body;
       if (!update || typeof update !== "object") {
         console.warn("⚠️ Webhook received invalid/empty body payload.");
-        return res.status(400).json({ error: "Invalid payload: body is empty or not an object" });
-      }
-
-      // Check for manual webhook diagnostics ping
-      if (update.test_webhook === true) {
-        console.log("ℹ️ Webhook manual verification/test request processed successfully.");
-        return res.status(200).json({
-          ok: true,
-          status: "alive",
-          envStatus,
-          databaseAccess: "verified",
-          message: "Telegram webhook endpoint is online and functioning perfectly!"
-        });
-      }
-
-      if (update.update_id === undefined) {
-        console.warn("⚠️ Webhook payload lacks 'update_id'. Skipping processing.");
-        return res.status(200).json({ ok: true, message: "Payload lacks update_id, no action taken." });
+        return res.status(200).json({ ok: true, message: "Invalid payload ignored" });
       }
 
       console.log(`📥 Processing Update ID: ${update.update_id}`);
-      console.log("RAW UPDATE JSON:", JSON.stringify(update, null, 2));
+      
+      // Log update type
+      const updateType = update.message ? "message" : (update.callback_query ? "callback_query" : "unknown");
+      console.log(`🔍 Update Type: ${updateType}`);
 
-      // 8. Ensure the webhook always returns HTTP 200 immediately after processing
-      // We will spawn the processing promise and respond with HTTP 200 immediately
-      handleUpdate(botToken, update)
-        .then(() => {
-          console.log(`✅ Successfully processed update ID ${update.update_id}`);
-        })
-        .catch(async (err: any) => {
-          // 2. Catch every exception with try/catch
-          // 3. Log the complete stack trace
-          console.error(`🔴 Exception inside handleUpdate for Update ID ${update.update_id}:`);
-          console.error(err.stack || err);
+      // Manual webhook diagnostics ping
+      if (update.test_webhook === true) {
+        console.log("ℹ️ Webhook manual verification processed.");
+        return res.status(200).json({ ok: true, status: "alive" });
+      }
 
-          // 4. Extract and log exact file name and line number
-          let errSource = "unknown source";
-          if (err.stack) {
-            const lines = err.stack.split("\n");
-            for (const l of lines) {
-              if (l.includes("at ") && !l.includes("node_modules") && !l.includes("node:internal")) {
-                const match = l.match(/at\s+(?:.*\s+\()?([^)]+)\)?/);
-                if (match && match[1]) {
-                  errSource = match[1].trim();
-                  break;
-                }
-              }
-            }
-          }
-          console.error(`🔴 Exact source of failure: ${errSource}`);
+      // Load Bot Token from Firestore
+      console.log("🔍 Fetching Bot Token from Firestore...");
+      const settingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      if (!settingsSnap.exists()) {
+        throw new Error("Firestore settings/telegram document missing");
+      }
+      const botToken = settingsSnap.data()?.botToken;
+      if (!botToken) {
+        throw new Error("Bot Token missing in Firestore");
+      }
+      console.log("✅ Bot Token Loaded.");
 
-          // Update Firestore settings document with the error detail so it displays on UI
-          try {
-            await setDoc(doc(db, "settings", "telegram"), {
-              lastWebhookError: err.message || String(err),
-              lastWebhookErrorSource: errSource,
-              lastWebhookErrorStack: err.stack || "",
-              lastWebhookErrorTime: new Date().toISOString()
-            }, { merge: true });
-            console.log("💾 Error state persisted in settings/telegram doc.");
-          } catch (dbErr) {
-            console.error("Failed to write webhook error to Firestore settings/telegram:", dbErr);
-          }
-        });
-
-      // Send immediate HTTP 200 OK back to Telegram
-      return res.status(200).json({ ok: true, status: "processing" });
-
-    } catch (e: any) {
-      // 2. Catch every exception with try/catch inside outer webhook route
-      // 3. Log the complete stack trace
-      console.error("🔴 Webhook Outer Handler Exception Caught:");
-      console.error(e.stack || e);
-
-      // 4. Display the exact file name and line number causing the failure
-      let errorSource = "unknown source";
-      if (e.stack) {
-        const stackLines = e.stack.split("\n");
-        for (const line of stackLines) {
-          if (line.includes("at ") && !line.includes("node_modules") && !line.includes("node:internal") && !line.includes("express")) {
-            const match = line.match(/at\s+(?:.*\s+\()?([^)]+)\)?/);
-            if (match && match[1]) {
-              errorSource = match[1].trim();
+      // Spawn background processing
+      handleUpdate(botToken, update).catch(async (err: any) => {
+        console.error("🔴 Background handleUpdate Exception:");
+        
+        let errSource = "unknown source";
+        if (err.stack) {
+          const lines = err.stack.split("\n");
+          for (const l of lines) {
+            if (l.includes("at ") && !l.includes("node_modules") && !l.includes("node:internal")) {
+              errSource = l.trim();
               break;
             }
           }
         }
-      }
-      console.error(`🔴 Exact source of failure: ${errorSource}`);
+        console.error(`🔴 Error Source: ${errSource}`);
+        console.error(`🔴 Error Message: ${err.message || err}`);
+        console.error("🔴 Full Stack Trace:");
+        console.error(err.stack || err);
+        
+        // Persist error for UI visibility
+        try {
+          await setDoc(doc(db, "settings", "telegram"), {
+            lastWebhookError: err.message || String(err),
+            lastWebhookErrorSource: errSource,
+            lastWebhookErrorStack: err.stack || "",
+            lastWebhookErrorTime: new Date().toISOString()
+          }, { merge: true });
+        } catch (dbErr) {
+          console.error("Failed to persist background error:", dbErr);
+        }
+      });
 
-      // Persistent log of the error to settings/telegram Firestore doc
+      // ALWAYS return 200 immediately to Telegram
+      console.log("📤 Returning 200 OK to Telegram");
+      return res.status(200).json({ ok: true });
+
+    } catch (e: any) {
+      console.error("🔴 Webhook Handler Fatal Exception:");
+      
+      let errorSource = "unknown source";
+      if (e.stack) {
+        const stackLines = e.stack.split("\n");
+        for (const line of stackLines) {
+          if (line.includes("at ") && !line.includes("node_modules") && !line.includes("node:internal")) {
+            errorSource = line.trim();
+            break;
+          }
+        }
+      }
+      console.error(`🔴 Error Source: ${errorSource}`);
+      console.error(`🔴 Error Message: ${e.message || e}`);
+      console.error("🔴 Full Stack Trace:");
+      console.error(e.stack || e);
+      
+      // Even on fatal error, return 200 to stop retries
       try {
         await setDoc(doc(db, "settings", "telegram"), {
           lastWebhookError: e.message || String(e),
@@ -3344,18 +3316,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           lastWebhookErrorStack: e.stack || "",
           lastWebhookErrorTime: new Date().toISOString()
         }, { merge: true });
-        console.log("💾 Outer error state persisted in settings/telegram doc.");
-      } catch (dbErr) {
-        console.error("Failed to write outer webhook error to Firestore settings/telegram:", dbErr);
-      }
+      } catch (dbErr) {}
 
-      // 8. Ensure the webhook always returns HTTP 200 immediately after processing (even on failure to avoid Telegram retries)
-      return res.status(200).json({ 
-        ok: true, 
-        status: "failed", 
-        error: e.message || String(e), 
-        source: errorSource 
-      });
+      return res.status(200).json({ ok: true, error: "Caught Fatal", source: errorSource });
     }
   });
 
@@ -5060,7 +5023,7 @@ Bonus added successfully.`;
       `;
 
       const result = await safeGenerateContent(ai, {
-        model: "gemini-3.5-flash",
+        model: "gemini-1.5-flash",
         contents: prompt,
         config: {
           systemInstruction: "You are a professional copywriter specialized in UX and instruction writing for web applications. Generate short, clear, and engaging instructions. Use bullet points and emojis where appropriate.",
@@ -5130,7 +5093,7 @@ Bonus added successfully.`;
       `;
 
       const result = await safeGenerateContent(ai, {
-        model: "gemini-3.5-flash",
+        model: "gemini-1.5-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",

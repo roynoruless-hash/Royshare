@@ -88,76 +88,81 @@ async function shortenWithProvider(provider: string, apiKey: string, url: string
 }
 
 export async function handleUpdate(botToken: string, update: any) {
-    if (!update.message && !update.callback_query) return;
-    
-    console.log("handleUpdate received update:", JSON.stringify(update));
-
-    const db = getDb();
-    const userObj = update.message ? update.message.from : (update.callback_query ? update.callback_query.from : null);
-    const chatId = update.message ? update.message.chat.id : (update.callback_query ? update.callback_query.message.chat.id : null);
-
-    if (userObj && userObj.id) {
-        try {
-            const userDocRef = doc(db, "users", String(userObj.id));
-            const userSnap = await getDoc(userDocRef);
-            const nowIso = new Date().toISOString();
-            
-            if (userSnap.exists()) {
-                console.log(`[USER LOG] USER EXISTS: ${userObj.id}`);
-                const existingData = userSnap.data();
-                const uData: any = { lastActive: nowIso };
-                
-                // Update missing fields for existing users
-                if (!existingData.chatId && chatId) uData.chatId = chatId;
-                if (!existingData.username && userObj.username) uData.username = userObj.username;
-                if (!existingData.firstName && userObj.first_name) uData.firstName = userObj.first_name;
-                if (!existingData.lastName && userObj.last_name) uData.lastName = userObj.last_name;
-                if (!existingData.languageCode && userObj.language_code) uData.languageCode = userObj.language_code;
-                
-                await setDoc(userDocRef, uData, { merge: true });
-            } else {
-                console.log(`[USER LOG] NEW USER CREATED: ${userObj.id}`);
-                await setDoc(userDocRef, {
-                    telegramId: userObj.id,
-                    username: userObj.username || "",
-                    firstName: userObj.first_name || "",
-                    lastName: userObj.last_name || "",
-                    languageCode: userObj.language_code || "",
-                    chatId: chatId || 0,
-                    createdAt: nowIso,
-                    lastActive: nowIso,
-                    joinDate: nowIso,
-                    balance: 0,
-                    rewards: 0,
-                    referrals: 0,
-                    availableBalance: 0,
-                    totalEarnings: 0,
-                    membershipVerified: false,
-                    contactVerified: false
-                });
-            }
-        } catch (dbErr) {
-            console.error("Failed to update user session:", dbErr);
-        }
-    }
-
     try {
+        if (!update.message && !update.callback_query) return;
+        
+        console.log("handleUpdate received update ID:", update.update_id);
+
+        const db = getDb();
+        const userObj = update.message ? update.message.from : (update.callback_query ? update.callback_query.from : null);
+        const chatId = update.message ? update.message.chat.id : (update.callback_query?.message?.chat?.id || null);
+
+        if (userObj && userObj.id) {
+            try {
+                const userDocRef = doc(db, "users", String(userObj.id));
+                const userSnap = await getDoc(userDocRef);
+                const nowIso = new Date().toISOString();
+                
+                if (userSnap.exists()) {
+                    console.log(`[USER LOG] USER EXISTS: ${userObj.id}`);
+                    const existingData = userSnap.data();
+                    const uData: any = { lastActive: nowIso };
+                    
+                    if (!existingData.chatId && chatId) uData.chatId = chatId;
+                    if (!existingData.username && userObj.username) uData.username = userObj.username;
+                    if (!existingData.firstName && userObj.first_name) uData.firstName = userObj.first_name;
+                    if (!existingData.lastName && userObj.last_name) uData.lastName = userObj.last_name;
+                    if (!existingData.languageCode && userObj.language_code) uData.languageCode = userObj.language_code;
+                    
+                    await setDoc(userDocRef, uData, { merge: true });
+                } else {
+                    console.log(`[USER LOG] NEW USER CREATED: ${userObj.id}`);
+                    await setDoc(userDocRef, {
+                        telegramId: userObj.id,
+                        username: userObj.username || "",
+                        firstName: userObj.first_name || "",
+                        lastName: userObj.last_name || "",
+                        languageCode: userObj.language_code || "",
+                        chatId: chatId || 0,
+                        createdAt: nowIso,
+                        lastActive: nowIso,
+                        joinDate: nowIso,
+                        balance: 0,
+                        rewards: 0,
+                        referrals: 0,
+                        availableBalance: 0,
+                        totalEarnings: 0,
+                        membershipVerified: false,
+                        contactVerified: false
+                    });
+                }
+            } catch (dbErr) {
+                console.error("Failed to update user session:", dbErr);
+            }
+        }
+
         if (update.message) {
             const msg = update.message;
             const chatId = msg.chat.id;
             const user = msg.from;
             
-            console.log("Message received:", msg.text, "from user:", user.id);
+            if (!user || !user.id) {
+                console.log("Message has no sender. Skipping processing.");
+                return;
+            }
+            
+            console.log("Message received:", msg.text || "[Non-text]", "from user:", user.id);
 
-            const db = getDb();
             const userDocRef = doc(db, "users", String(user.id));
             const userSnap = await getDoc(userDocRef);
             const userData = userSnap.exists() ? userSnap.data() : null;
 
-
             if (msg.text && msg.text.startsWith("/start")) {
                  console.log("Matched /start command");
                  await processStart(botToken, chatId, user, msg.text);
+            } else if (msg.contact) {
+                console.log("CONTACT UPDATE RECEIVED");
+                await processContact(botToken, chatId, user, msg.contact);
             } else if (msg.text === "/uploadtest") {
             const db = getDb();
             await setDoc(doc(db, "users", String(user.id)), { uploadTestMode: true }, { merge: true });
@@ -256,10 +261,6 @@ https://youtube.com`;
         } else if (msg.text && (msg.text.trim().startsWith("http://") || msg.text.trim().startsWith("https://"))) {
             console.log("Direct URL detected. Processing independent shortening.");
             await processShortenUrl(botToken, chatId, user, msg.text);
-        } else if (msg.contact) {
-            console.log("CONTACT UPDATE RECEIVED");
-            console.log("Matched contact share");
-            await processContact(botToken, chatId, user, msg.contact);
         } else if (msg.document || msg.photo || msg.video || msg.audio) {
             const db = getDb();
             const userDoc = await getDoc(doc(db, "users", String(user.id)));
@@ -396,10 +397,23 @@ ${msg.text}`;
         console.log("Callback query received");
         await processCallback(botToken, update.callback_query);
     }
-} catch (err: any) {
-    console.error("CRITICAL ERROR IN handleUpdate:");
-    console.error(err.stack || err);
-}
+    } catch (err: any) {
+        console.error("🔴 CRITICAL ERROR IN handleUpdate:");
+        let errSrc = "unknown";
+        if (err.stack) {
+            const lines = err.stack.split("\n");
+            for (const l of lines) {
+                if (l.includes("at ") && !l.includes("node_modules") && !l.includes("node:internal")) {
+                    errSrc = l.trim();
+                    break;
+                }
+            }
+        }
+        console.error(`🔴 Source: ${errSrc}`);
+        console.error(`🔴 Message: ${err.message || err}`);
+        console.error("🔴 Stack Trace:");
+        console.error(err.stack || err);
+    }
 }
 
 async function handleAdminReplyTextInput(botToken: string, adminChatId: number, adminUser: any, replyMessage: string, replyData: { docId: string, ticketId: string }) {
@@ -577,104 +591,105 @@ async function ensureSettings() {
 }
 
 async function processStart(botToken: string, chatId: number, user: any, startText?: string) {
-    console.log(`[USER LOG] START RECEIVED: ${user.id}`);
-    console.log("CHANNEL CHECK START");
-    const db = getDb();
-    
-    // Check deep link parameter
-    if (startText && startText.includes(" ref_")) {
-        const referrerId = startText.split(" ref_")[1]?.trim();
-        const referredUserId = String(user.id);
+    try {
+        console.log(`[USER LOG] START RECEIVED: ${user.id}`);
+        console.log("CHANNEL CHECK START");
+        const db = getDb();
         
-        try {
-            const userDocRef = doc(db, "users", referredUserId);
-            const userDoc = await getDoc(userDocRef);
-            const isExistingVerified = userDoc.exists() && userDoc.data()?.membershipVerified;
+        // Check deep link parameter
+        if (startText && startText.includes(" ref_")) {
+            const referrerId = startText.split(" ref_")[1]?.trim();
+            const referredUserId = String(user.id);
             
-            if (referredUserId === referrerId) {
-                console.log(`Referral Rejected: Self Referral (${referredUserId})`);
-            } else if (isExistingVerified) {
-                console.log(`Referral Rejected: Existing Registered User (${referredUserId})`);
-            } else {
-                const refDocRef = doc(db, "referrals", referredUserId);
-                const refDoc = await getDoc(refDocRef);
+            try {
+                const userDocRef = doc(db, "users", referredUserId);
+                const userDoc = await getDoc(userDocRef);
+                const isExistingVerified = userDoc.exists() && userDoc.data()?.membershipVerified;
                 
-                if (refDoc.exists()) {
-                    console.log(`Referral Rejected: User already linked`);
+                if (referredUserId === referrerId) {
+                    console.log(`Referral Rejected: Self Referral (${referredUserId})`);
+                } else if (isExistingVerified) {
+                    console.log(`Referral Rejected: Existing Registered User (${referredUserId})`);
                 } else {
-                    await setDoc(refDocRef, {
-                        referrerId: String(referrerId),
-                        referredUserId: referredUserId,
-                        referredUsername: user.username || "",
-                        referredFirstName: user.first_name || "",
-                        referredLastName: user.last_name || "",
-                        joinDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
-                        status: "pending",
-                        pendingCommission: 0,
-                        approvedCommission: 0,
-                        totalCommission: 0
-                    });
+                    const refDocRef = doc(db, "referrals", referredUserId);
+                    const refDoc = await getDoc(refDocRef);
                     
-                    await setDoc(userDocRef, {
-                        referredBy: String(referrerId)
-                    }, { merge: true });
-                    
-                    console.log(`Referral Linked: ${referredUserId} referred by ${referrerId}`);
+                    if (refDoc.exists()) {
+                        console.log(`Referral Rejected: User already linked`);
+                    } else {
+                        await setDoc(refDocRef, {
+                            referrerId: String(referrerId),
+                            referredUserId: referredUserId,
+                            referredUsername: user.username || "",
+                            referredFirstName: user.first_name || "",
+                            referredLastName: user.last_name || "",
+                            joinDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+                            status: "pending",
+                            pendingCommission: 0,
+                            approvedCommission: 0,
+                            totalCommission: 0
+                        });
+                        
+                        await setDoc(userDocRef, {
+                            referredBy: String(referrerId)
+                        }, { merge: true });
+                        
+                        console.log(`Referral Linked: ${referredUserId} referred by ${referrerId}`);
+                    }
                 }
+            } catch (err) {
+                console.error("Error setting up referral:", err);
+            }
+        }
+
+        // Check for download deep link
+        if (startText && startText.includes(" dl_")) {
+            const fileId = startText.split(" dl_")[1]?.trim();
+            await setDoc(doc(db, "users", String(user.id)), {
+                pendingDownloadId: fileId
+            }, { merge: true });
+        }
+
+        // MANDATORY JOIN VERIFICATION (STEP 3)
+        let channelId = -1003385031126;
+        let groupId = -1003929156200;
+
+        try {
+            const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+            if (settingsDoc.exists()) {
+                const sData = settingsDoc.data();
+                if (sData.channelId) channelId = Number(sData.channelId);
+                if (sData.groupId) groupId = Number(sData.groupId);
             }
         } catch (err) {
-            console.error("Error setting up referral:", err);
+            console.error("Error loading chat IDs from settings:", err);
         }
-    }
 
-    // Check for download deep link
-    if (startText && startText.includes(" dl_")) {
-        const fileId = startText.split(" dl_")[1]?.trim();
-        await setDoc(doc(db, "users", String(user.id)), {
-            pendingDownloadId: fileId
-        }, { merge: true });
-    }
-
-    // MANDATORY JOIN VERIFICATION (STEP 3)
-    let channelId = -1003385031126;
-    let groupId = -1003929156200;
-
-    try {
-        const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
-        if (settingsDoc.exists()) {
-            const sData = settingsDoc.data();
-            if (sData.channelId) channelId = Number(sData.channelId);
-            if (sData.groupId) groupId = Number(sData.groupId);
-        }
-    } catch (err) {
-        console.error("Error loading chat IDs from settings:", err);
-    }
-
-    const checkMemberById = async (cId: number, uId: number) => {
-        try {
-            console.log(`[DEBUG] Checking membership for user ${uId} in chat ${cId}`);
-            const res = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${cId}&user_id=${uId}`);
-            const data = await res.json();
-            if (data.ok && data.result) {
-                const status = data.result.status;
-                const isJoined = status === 'member' || status === 'administrator' || status === 'creator';
-                console.log(`[DEBUG] Chat ${cId} Status: ${status}, Joined: ${isJoined}`);
-                return isJoined;
+        const checkMemberById = async (cId: number, uId: number) => {
+            try {
+                console.log(`[DEBUG] Checking membership for user ${uId} in chat ${cId}`);
+                const res = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${cId}&user_id=${uId}`);
+                const data = await res.json();
+                if (data.ok && data.result) {
+                    const status = data.result.status;
+                    const isJoined = status === 'member' || status === 'administrator' || status === 'creator';
+                    console.log(`[DEBUG] Chat ${cId} Status: ${status}, Joined: ${isJoined}`);
+                    return isJoined;
+                }
+                console.warn(`[DEBUG] getChatMember failed for ${cId}:`, data.description);
+                return false;
+            } catch (err) { 
+                console.error(`[DEBUG] checkMemberById Error for ${cId}:`, err);
+                return false; 
             }
-            console.warn(`[DEBUG] getChatMember failed for ${cId}:`, data.description);
-            return false;
-        } catch (err) { 
-            console.error(`[DEBUG] checkMemberById Error for ${cId}:`, err);
-            return false; 
-        }
-    };
+        };
 
-    const isChannelJoined = await checkMemberById(channelId, user.id);
-    const isGroupJoined = await checkMemberById(groupId, user.id);
+        const isChannelJoined = await checkMemberById(channelId, user.id);
+        const isGroupJoined = await checkMemberById(groupId, user.id);
 
-    if (!isChannelJoined || !isGroupJoined) {
-        console.log(`[USER LOG] CHANNEL FAILED: ${user.id}`);
-        const message = `👋 Welcome to RoyShare!
+        if (!isChannelJoined || !isGroupJoined) {
+            console.log(`[USER LOG] CHANNEL FAILED: ${user.id}`);
+            const message = `👋 Welcome to RoyShare!
 
 To continue, you MUST join our channel and group for verification.
 
@@ -682,58 +697,75 @@ To continue, you MUST join our channel and group for verification.
 👥 Group: https://t.me/RoyShareCommunity
 
 After joining, click the button below to verify.`;
+            
+            await sendTelegramMessage(botToken, chatId, message, {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "✅ Verify Join", callback_data: "verify_join" }]
+                    ]
+                }
+            });
+            return;
+        }
+
+        console.log("CHANNEL VERIFIED");
+
+        // CONTACT VERIFICATION (STEP 4)
+        const userDocRef = doc(db, "users", String(user.id));
+        const userSnap = await getDoc(userDocRef);
+        const userData = userSnap.data();
+
+        // Check if phone verification is required (enabled by default if not set)
+        const phoneRequired = true; // Hardcoded as per request for "if enabled" logic, we assume it is.
+        const hasPhone = userData?.phone || userData?.contactVerified || userData?.phoneVerified;
+
+        if (phoneRequired && !hasPhone) {
+            console.log(`[USER LOG] CONTACT REQUESTED: ${user.id}`);
+            await sendTelegramMessage(botToken, chatId, "📱 Please share your contact to complete registration.", {
+                reply_markup: {
+                    keyboard: [[{ text: "📱 Share Contact", request_contact: true }]],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            });
+            return;
+        }
+
+        // ALL VERIFIED -> DASHBOARD (STEP 5)
+        console.log("ONBOARDING COMPLETED");
+        console.log("DASHBOARD OPENED");
+        console.log(`[USER LOG] DASHBOARD OPENED: ${user.id}`);
         
-        await sendTelegramMessage(botToken, chatId, message, {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "✅ Verify Join", callback_data: "verify_join" }]
-                ]
+        // Update membershipVerified if not set
+        if (!userData?.membershipVerified) {
+            await setDoc(userDocRef, { membershipVerified: true, contactVerified: true }, { merge: true });
+        }
+
+        // Welcome Message
+        const welcomeMsg = userData?.membershipVerified ? "Welcome back to RoyShare!" : "🎉 Welcome to RoyShare! Your account is now active.";
+        
+        if (userData?.pendingDownloadId) {
+            await fulfillDownload(botToken, chatId, userData.pendingDownloadId);
+            await setDoc(userDocRef, { pendingDownloadId: null }, { merge: true });
+        } else {
+            await sendTelegramMessage(botToken, chatId, welcomeMsg, { reply_markup: getMainMenuKeyboard() });
+        }
+    } catch (err: any) {
+        console.error("🔴 ERROR STACK TRACE IN processStart:");
+        let errSrc = "unknown";
+        if (err.stack) {
+            const lines = err.stack.split("\n");
+            for (const l of lines) {
+                if (l.includes("at ") && !l.includes("node_modules") && !l.includes("node:internal")) {
+                    errSrc = l.trim();
+                    break;
+                }
             }
-        });
-        return;
-    }
-
-    console.log("CHANNEL VERIFIED");
-
-    // CONTACT VERIFICATION (STEP 4)
-    const userDocRef = doc(db, "users", String(user.id));
-    const userSnap = await getDoc(userDocRef);
-    const userData = userSnap.data();
-
-    // Check if phone verification is required (enabled by default if not set)
-    const phoneRequired = true; // Hardcoded as per request for "if enabled" logic, we assume it is.
-    const hasPhone = userData?.phone || userData?.contactVerified || userData?.phoneVerified;
-
-    if (phoneRequired && !hasPhone) {
-        console.log(`[USER LOG] CONTACT REQUESTED: ${user.id}`);
-        await sendTelegramMessage(botToken, chatId, "📱 Please share your contact to complete registration.", {
-            reply_markup: {
-                keyboard: [[{ text: "📱 Share Contact", request_contact: true }]],
-                one_time_keyboard: true,
-                resize_keyboard: true
-            }
-        });
-        return;
-    }
-
-    // ALL VERIFIED -> DASHBOARD (STEP 5)
-    console.log("ONBOARDING COMPLETED");
-    console.log("DASHBOARD OPENED");
-    console.log(`[USER LOG] DASHBOARD OPENED: ${user.id}`);
-    
-    // Update membershipVerified if not set
-    if (!userData?.membershipVerified) {
-        await setDoc(userDocRef, { membershipVerified: true, contactVerified: true }, { merge: true });
-    }
-
-    // Welcome Message
-    const welcomeMsg = userData?.membershipVerified ? "Welcome back to RoyShare!" : "🎉 Welcome to RoyShare! Your account is now active.";
-    
-    if (userData?.pendingDownloadId) {
-        await fulfillDownload(botToken, chatId, userData.pendingDownloadId);
-        await setDoc(userDocRef, { pendingDownloadId: null }, { merge: true });
-    } else {
-        await sendTelegramMessage(botToken, chatId, welcomeMsg, { reply_markup: getMainMenuKeyboard() });
+        }
+        console.error(`🔴 Source: ${errSrc}`);
+        console.error(`🔴 Message: ${err.message || err}`);
+        console.error("🔴 Full Stack Trace:");
+        console.error(err.stack || err);
     }
 }
 
@@ -2770,7 +2802,7 @@ Please describe your problem.`;
     } else {
         try {
             const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
-            const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
+            const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
             
             const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
             if (!apiKey) {
@@ -2821,7 +2853,7 @@ The user you are speaking with is authenticated in Telegram.
                     }
                 });
 
-                const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
+                const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
 
                 const systemInstruction = `
 You are Sarah, a highly professional, polite, and helpful human support representative at RoyShare.
@@ -2856,9 +2888,9 @@ ${userContext}
 
                 const modelsToTry = [
                     selectedModel,
-                    "gemini-3.5-flash",
-                    "gemini-3.1-flash-lite",
-                    "gemini-3.1-pro-preview",
+                    "gemini-1.5-flash",
+                    "gemini-1.5-pro",
+                    "gemini-1.0-pro",
                     "gemini-flash-latest"
                 ];
                 const uniqueModels = [...new Set(modelsToTry)].filter(m => m && (m.startsWith("gemini-") || m.startsWith("models/gemini-")));
@@ -4068,9 +4100,11 @@ ${featureName}`;
 }
 
 async function processCallback(botToken: string, callbackQuery: any) {
-    const chatId = callbackQuery.message.chat.id;
-    const userId = callbackQuery.from.id;
-    const db = getDb();
+    try {
+        if (!callbackQuery || !callbackQuery.message) return;
+        const chatId = callbackQuery.message.chat.id;
+        const userId = callbackQuery.from.id;
+        const db = getDb();
     
     // Default settings with user-provided links
     let settings: any = {
@@ -4495,7 +4529,7 @@ Thank you for chatting with us. Let us know if you need anything else!`;
 
             try {
                 const supportSettingsSnap = await getDoc(doc(db, "settings", "support"));
-                const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-3.5-flash" };
+                const supportData = supportSettingsSnap.exists() ? supportSettingsSnap.data() : { aiEnabled: true, geminiApiKey: "", geminiModel: "gemini-1.5-flash" };
                 const apiKey = supportData.geminiApiKey || process.env.GEMINI_API_KEY;
 
                 if (apiKey) {
@@ -4505,7 +4539,7 @@ Thank you for chatting with us. Let us know if you need anything else!`;
                             headers: { 'User-Agent': 'aistudio-build' }
                         }
                     });
-                    const selectedModel = supportData.geminiModel || "gemini-3.5-flash";
+                    const selectedModel = supportData.geminiModel || "gemini-1.5-flash";
 
                     const analysisPrompt = `
 You are an advanced support automation assistant for RoyShare.
@@ -5183,9 +5217,13 @@ https://youtube.com`;
             } catch (e) {}
             await processSettingsMenu(botToken, chatId, callbackQuery.from, callbackQuery.message.message_id);
         }
-    } catch (e) {
-        // Silent error, do not show in chat
-        console.error("Callback processing error:", e);
+    } catch (e: any) {
+        console.error("🔴 Error in processCallback:", e.message);
+        console.error(e.stack);
+    }
+    } catch (e: any) {
+        console.error("🔴 Critical Outer Error in processCallback:", e.message);
+        console.error(e.stack);
     }
 }
 
@@ -5330,9 +5368,21 @@ async function processContact(botToken: string, chatId: number, user: any, conta
             });
         }
     } catch (e: any) {
-        console.error("ERROR STACK TRACE:");
+        console.error("🔴 ERROR IN processContact:");
+        let errSrc = "unknown";
+        if (e.stack) {
+            const lines = e.stack.split("\n");
+            for (const l of lines) {
+                if (l.includes("at ") && !l.includes("node_modules") && !l.includes("node:internal")) {
+                    errSrc = l.trim();
+                    break;
+                }
+            }
+        }
+        console.error(`🔴 Source: ${errSrc}`);
+        console.error(`🔴 Message: ${e.message || e}`);
+        console.error("🔴 Full Stack Trace:");
         console.error(e.stack || e);
-        console.error("Error in processContact:", e.message);
     }
 }
 
