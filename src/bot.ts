@@ -2,7 +2,7 @@ import { getDb } from "./lib/firebase";
 import { REWARD_TASKS } from "./lib/tasks";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, deleteDoc, limit } from "firebase/firestore";
 import { GoogleGenAI } from "@google/genai";
-import { safeGenerateContent } from "./lib/gemini";
+import { safeGenerateContent, safeSendMessage } from "./lib/gemini";
 
 function formatCurrency(amount: number, currency: string = "INR", includeSymbol: boolean = true): string {
     if (currency === "USD") {
@@ -160,9 +160,56 @@ export async function handleUpdate(botToken: string, update: any) {
             if (msg.text && msg.text.startsWith("/start")) {
                  console.log("Matched /start command");
                  await processStart(botToken, chatId, user, msg.text);
+            } else if (userData?.registrationStep === 'mobile' && msg.text) {
+                const mobile = msg.text.trim();
+                const isNumeric = /^\d+$/.test(mobile);
+                if (isNumeric && mobile.length === 10) {
+                    await setDoc(userDocRef, { 
+                        phone: mobile,
+                        registrationStep: 'name'
+                    }, { merge: true });
+                    await sendTelegramMessage(botToken, chatId, "👤 Please enter your Full Name.\n\nExample\nRitik Rai");
+                } else {
+                    await sendTelegramMessage(botToken, chatId, "❌ Invalid mobile number.\n\nPlease enter a valid 10 digit number.");
+                }
+            } else if (userData?.registrationStep === 'name' && msg.text) {
+                const fullName = msg.text.trim();
+                const now = new Date().toISOString();
+                
+                await setDoc(userDocRef, { 
+                    enteredName: fullName,
+                    registrationStep: 'completed',
+                    membershipVerified: true,
+                    contactVerified: true,
+                    verified: true,
+                    registrationDate: now,
+                    lastActive: now
+                }, { merge: true });
+
+                const successMsg = `✅ Registration Successful
+
+👤 Name:
+${fullName}
+
+📱 Mobile:
+${userData.phone || "Not set"}
+
+🆔 Telegram ID:
+${user.id}
+
+👤 Username:
+@${user.username || "None"}
+
+Welcome to Roy Share Earn ❤️`;
+
+                await sendTelegramMessage(botToken, chatId, successMsg, {
+                    reply_markup: {
+                        inline_keyboard: [[{ text: "🚀 Continue", callback_data: "registration_continue" }]]
+                    }
+                });
             } else if (msg.contact) {
-                console.log("CONTACT UPDATE RECEIVED");
-                await processContact(botToken, chatId, user, msg.contact);
+                // Disabled as per request
+                await sendTelegramMessage(botToken, chatId, "⚠️ Direct contact sharing is no longer supported. Please follow the registration flow.");
             } else if (msg.text === "/uploadtest") {
             const db = getDb();
             await setDoc(doc(db, "users", String(user.id)), { uploadTestMode: true }, { merge: true });
@@ -650,106 +697,48 @@ async function processStart(botToken: string, chatId: number, user: any, startTe
             }, { merge: true });
         }
 
-        // MANDATORY JOIN VERIFICATION (STEP 3)
-        let channelId = -1003385031126;
-        let groupId = -1003929156200;
-
-        try {
-            const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
-            if (settingsDoc.exists()) {
-                const sData = settingsDoc.data();
-                if (sData.channelId) channelId = Number(sData.channelId);
-                if (sData.groupId) groupId = Number(sData.groupId);
-            }
-        } catch (err) {
-            console.error("Error loading chat IDs from settings:", err);
-        }
-
-        const checkMemberById = async (cId: number, uId: number) => {
-            try {
-                console.log(`[DEBUG] Checking membership for user ${uId} in chat ${cId}`);
-                const res = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${cId}&user_id=${uId}`);
-                const data = await res.json();
-                if (data.ok && data.result) {
-                    const status = data.result.status;
-                    const isJoined = status === 'member' || status === 'administrator' || status === 'creator';
-                    console.log(`[DEBUG] Chat ${cId} Status: ${status}, Joined: ${isJoined}`);
-                    return isJoined;
-                }
-                console.warn(`[DEBUG] getChatMember failed for ${cId}:`, data.description);
-                return false;
-            } catch (err) { 
-                console.error(`[DEBUG] checkMemberById Error for ${cId}:`, err);
-                return false; 
-            }
-        };
-
-        const isChannelJoined = await checkMemberById(channelId, user.id);
-        const isGroupJoined = await checkMemberById(groupId, user.id);
-
-        if (!isChannelJoined || !isGroupJoined) {
-            console.log(`[USER LOG] CHANNEL FAILED: ${user.id}`);
-            const message = `👋 Welcome to RoyShare!
-
-To continue, you MUST join our channel and group for verification.
-
-📢 Channel: https://t.me/royshare_official
-👥 Group: https://t.me/RoyShareCommunity
-
-After joining, click the button below to verify.`;
-            
-            await sendTelegramMessage(botToken, chatId, message, {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: "✅ Verify Join", callback_data: "verify_join" }]
-                    ]
-                }
-            });
-            return;
-        }
-
-        console.log("CHANNEL VERIFIED");
-
-        // CONTACT VERIFICATION (STEP 4)
+        // ALL VERIFIED -> DASHBOARD (STEP 5)
         const userDocRef = doc(db, "users", String(user.id));
         const userSnap = await getDoc(userDocRef);
         const userData = userSnap.data();
 
-        // Check if phone verification is required (enabled by default if not set)
-        const phoneRequired = true; // Hardcoded as per request for "if enabled" logic, we assume it is.
-        const hasPhone = userData?.phone || userData?.contactVerified || userData?.phoneVerified;
-
-        if (phoneRequired && !hasPhone) {
-            console.log(`[USER LOG] CONTACT REQUESTED: ${user.id}`);
-            await sendTelegramMessage(botToken, chatId, "📱 Please share your contact to complete registration.", {
-                reply_markup: {
-                    keyboard: [[{ text: "📱 Share Contact", request_contact: true }]],
-                    one_time_keyboard: true,
-                    resize_keyboard: true
-                }
-            });
+        if (userData?.registrationStep === 'completed') {
+            console.log("DASHBOARD OPENED");
+            console.log(`[USER LOG] DASHBOARD OPENED: ${user.id}`);
+            
+            const welcomeMsg = "Welcome back to Roy Share Earn!";
+            
+            if (userData?.pendingDownloadId) {
+                await fulfillDownload(botToken, chatId, userData.pendingDownloadId);
+                await setDoc(userDocRef, { pendingDownloadId: null }, { merge: true });
+            } else {
+                await sendTelegramMessage(botToken, chatId, welcomeMsg, { reply_markup: getMainMenuKeyboard() });
+            }
             return;
         }
 
-        // ALL VERIFIED -> DASHBOARD (STEP 5)
-        console.log("ONBOARDING COMPLETED");
-        console.log("DASHBOARD OPENED");
-        console.log(`[USER LOG] DASHBOARD OPENED: ${user.id}`);
-        
-        // Update membershipVerified if not set
-        if (!userData?.membershipVerified) {
-            await setDoc(userDocRef, { membershipVerified: true, contactVerified: true }, { merge: true });
-        }
+        // START NEW REGISTRATION FLOW
+        const message = `👋 Welcome to Roy Share Earn
 
-        // Welcome Message
-        const welcomeMsg = userData?.membershipVerified ? "Welcome back to RoyShare!" : "🎉 Welcome to RoyShare! Your account is now active.";
+Before using the platform you must complete registration.
+
+Please complete the following steps.
+
+1️⃣ Join Channel
+2️⃣ Join Group
+3️⃣ Verify
+4️⃣ Complete Registration`;
         
-        if (userData?.pendingDownloadId) {
-            await fulfillDownload(botToken, chatId, userData.pendingDownloadId);
-            await setDoc(userDocRef, { pendingDownloadId: null }, { merge: true });
-        } else {
-            await sendTelegramMessage(botToken, chatId, welcomeMsg, { reply_markup: getMainMenuKeyboard() });
-        }
+        await sendTelegramMessage(botToken, chatId, message, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "📢 Join Channel", url: "https://t.me/royshare_official" }],
+                    [{ text: "👥 Join Group", url: "https://t.me/RoyShareCommunity" }],
+                    [{ text: "✅ Verify", callback_data: "verify_membership" }]
+                ]
+            }
+        });
+
     } catch (err: any) {
         console.error("🔴 ERROR STACK TRACE IN processStart:");
         let errSrc = "unknown";
@@ -2886,45 +2875,21 @@ User Account Context:
 ${userContext}
 `;
 
-                const modelsToTry = [
-                    selectedModel,
-                    "gemini-1.5-flash",
-                    "gemini-1.5-pro",
-                    "gemini-1.0-pro",
-                    "gemini-flash-latest"
-                ];
-                const uniqueModels = [...new Set(modelsToTry)].filter(m => m && (m.startsWith("gemini-") || m.startsWith("models/gemini-")));
-
                 let success = false;
-                
-                const tryChatModels = async (aiInstance: any) => {
-                    for (const modelName of uniqueModels) {
-                        try {
-                            const chat = aiInstance.chats.create({
-                                model: modelName,
-                                config: { systemInstruction },
-                                history: updatedHistory.slice(0, -1).map((m: any) => ({
-                                    role: m.sender === "user" ? "user" : "model",
-                                    parts: [{ text: m.text }]
-                                }))
-                            });
+                const response = await safeSendMessage(ai, {
+                    model: selectedModel || "gemini-1.5-flash",
+                    message: text,
+                    config: { systemInstruction },
+                    history: updatedHistory.slice(0, -1).map((m: any) => ({
+                        role: m.sender === "user" ? "user" : "model",
+                        parts: [{ text: m.text }]
+                    }))
+                });
 
-                            const response = await chat.sendMessage({ message: text });
-                            const chatReply = response.text || "";
-                            if (chatReply) {
-                                reply = chatReply;
-                                success = true;
-                                break;
-                            }
-                        } catch (err: any) {
-                            console.warn(`[Bot Chat Fallback] Model ${modelName} failed: ${err.message}.`);
-                            continue;
-                        }
-                    }
-                };
-
-                // Try default (usually v1beta)
-                await tryChatModels(ai);
+                if (response && response.text) {
+                    reply = response.text;
+                    success = true;
+                }
 
                 if (!success) {
                     throw new Error("All Gemini models failed to generate a response in the support chat.");
@@ -4134,55 +4099,55 @@ async function processCallback(botToken: string, callbackQuery: any) {
     try {
         const data = callbackQuery.data;
 
-        if (data === "verify_join") {
+        if (data === "verify_membership") {
             try {
-                const channelId = -1003385031126;
-                const groupId = -1003929156200;
-                
-                const checkMemberById = async (chatId: number, uId: number) => {
-                    const response = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${chatId}&user_id=${uId}`);
-                    const data = await response.json();
-                    if (data.ok && data.result) {
-                        const status = data.result.status;
-                        return status === 'member' || status === 'administrator' || status === 'creator';
+                let channelId = -1003385031126;
+                let groupId = -1003929156200;
+
+                try {
+                    const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+                    if (settingsDoc.exists()) {
+                        const sData = settingsDoc.data();
+                        if (sData.channelId) channelId = Number(sData.channelId);
+                        if (sData.groupId) groupId = Number(sData.groupId);
                     }
-                    return false;
+                } catch (err) {}
+
+                const checkMemberById = async (chatId: number, uId: number) => {
+                    try {
+                        const response = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${chatId}&user_id=${uId}`);
+                        const data = await response.json();
+                        if (data.ok && data.result) {
+                            const status = data.result.status;
+                            return status === 'member' || status === 'administrator' || status === 'creator';
+                        }
+                        return false;
+                    } catch (err) { return false; }
                 };
 
                 const isChannelJoined = await checkMemberById(channelId, userId);
                 const isGroupJoined = await checkMemberById(groupId, userId);
 
                 if (isChannelJoined && isGroupJoined) {
-                    console.log(`[USER LOG] CHANNEL VERIFIED: ${userId}`);
-                    
-                    // Answer callback
                     await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "✅ Membership Verified!" })
                     });
 
-                    // Delete verification message
-                    await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ chat_id: chatId, message_id: callbackQuery.message.message_id })
-                    });
-
                     await setDoc(doc(db, "users", String(userId)), {
-                        membershipVerified: true
+                        membershipVerified: true,
+                        registrationStep: 'mobile'
                     }, { merge: true });
 
-                    // Re-run start to check contact or show dashboard
-                    await processStart(botToken, chatId, callbackQuery.from);
+                    await sendTelegramMessage(botToken, chatId, "📱 Please enter your Mobile Number.\n\nExample:\n9876543210");
                 } else {
-                    console.log(`[USER LOG] CHANNEL FAILED: ${userId}`);
                     await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ 
                             callback_query_id: callbackQuery.id, 
-                            text: "❌ Verification Failed! Please join both Channel and Group first.",
+                            text: "❌ Please join both Channel and Group first.",
                             show_alert: true
                         })
                     });
@@ -4192,6 +4157,20 @@ async function processCallback(botToken: string, callbackQuery: any) {
                 console.error("DEBUG: Verification error", err);
                 await sendTelegramMessage(botToken, chatId, `❌ Verification error: ${err.message}`);
             }
+        } else if (data === "registration_continue") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await processStart(botToken, chatId, callbackQuery.from);
+            return;
+        } else if (data === "verify_join") {
+            // Keep legacy support or just ignore it, but the user wants to remove old stuff.
+            // I'll redirect it to verify_membership for safety or just leave it if I'm replacing it.
+            // I'll just remove the verify_join block since I'm replacing it with verify_membership.
         } else if (data === "withdraw_continue") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
@@ -5312,78 +5291,6 @@ This feature is currently under maintenance and will be implemented soon.`;
     };
 
     await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
-}
-
-async function processContact(botToken: string, chatId: number, user: any, contact: any) {
-    console.log("CONTACT RECEIVED");
-    console.log("CONTACT USER ID", contact.user_id);
-    console.log("SENDER USER ID", user.id);
-    
-    try {
-        if (!contact || !contact.phone_number) {
-            console.warn("CONTACT PARSED - FAILED: Missing contact data or phone number");
-            return;
-        }
-        
-        console.log("CONTACT PARSED - SUCCESS");
-        console.log(`[USER LOG] CONTACT ATTEMPT: ${user.id}`);
-        
-        const db = getDb();
-        
-        // 2. Verify that contact.user_id matches the sender's Telegram ID
-        // 3. Reject manually forwarded contacts (they won't have user_id or it won't match)
-        if (contact.user_id && Number(contact.user_id) === Number(user.id)) {
-            console.log("USER FOUND - MATCHED");
-            
-            // 4. Save the phone number in Firestore
-            // 5. Mark phoneVerified = true
-            // 6. Update lastSeen
-            await setDoc(doc(db, "users", String(user.id)), {
-                telegramId: user.id,
-                username: user.username || "",
-                firstName: user.first_name || "",
-                lastName: user.last_name || "",
-                phone: contact.phone_number,
-                contactVerified: true,
-                phoneVerified: true,
-                lastSeen: new Date().toISOString(),
-                lastActive: new Date().toISOString()
-            }, { merge: true });
-            
-            console.log("PHONE SAVED");
-            console.log("PHONE VERIFIED");
-
-            // Remove the keyboard
-            await sendTelegramMessage(botToken, chatId, "✅ Contact verified successfully!", {
-                reply_markup: { remove_keyboard: true }
-            });
-
-            // 7. Continue the onboarding flow automatically
-            console.log("JOIN CHECK");
-            await processStart(botToken, chatId, user);
-        } else {
-            console.warn("USER FOUND - MISMATCH OR FORWARDED");
-            await sendTelegramMessage(botToken, chatId, "❌ Error: Please share your OWN contact using the button provided. Manually forwarded contacts are rejected.", {
-                reply_markup: { remove_keyboard: true }
-            });
-        }
-    } catch (e: any) {
-        console.error("🔴 ERROR IN processContact:");
-        let errSrc = "unknown";
-        if (e.stack) {
-            const lines = e.stack.split("\n");
-            for (const l of lines) {
-                if (l.includes("at ") && !l.includes("node_modules") && !l.includes("node:internal")) {
-                    errSrc = l.trim();
-                    break;
-                }
-            }
-        }
-        console.error(`🔴 Source: ${errSrc}`);
-        console.error(`🔴 Message: ${e.message || e}`);
-        console.error("🔴 Full Stack Trace:");
-        console.error(e.stack || e);
-    }
 }
 
 async function normalizeUsername(username: string): Promise<string> {

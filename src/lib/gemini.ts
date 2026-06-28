@@ -8,7 +8,9 @@ export async function safeGenerateContent(ai: any, params: any) {
   const modelsToTry = [
     baseModel,
     "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
     "gemini-1.5-pro",
+    "gemini-1.5-pro-latest",
     "gemini-1.0-pro",
     "gemini-pro"
   ];
@@ -23,10 +25,14 @@ export async function safeGenerateContent(ai: any, params: any) {
   
   for (const modelName of uniqueModels) {
     try {
-      // The @google/genai SDK defaults to v1beta, which is what we need.
+      // Try with the provided model name
+      // Some environments prefer 'models/' prefix, some don't.
+      // We will try both if the first fails.
+      const sanitizedModelName = modelName.includes("/") ? modelName : `models/${modelName}`;
+      
       return await ai.models.generateContent({
         ...params,
-        model: modelName
+        model: sanitizedModelName
       });
     } catch (err: any) {
       lastError = err;
@@ -76,4 +82,59 @@ export async function safeGenerateContent(ai: any, params: any) {
     throw friendlyError;
   }
   throw new Error("Gemini AI integration failed: No valid models were able to respond.");
+}
+
+/**
+ * Robust Gemini chat interaction with model fallback and error handling.
+ */
+export async function safeSendMessage(ai: any, params: any) {
+  const baseModel = params.model || "gemini-1.5-flash";
+  const modelsToTry = [
+    baseModel,
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro",
+    "gemini-1.5-pro-latest",
+    "gemini-1.0-pro"
+  ];
+  
+  const uniqueModels = [...new Set(modelsToTry)].filter(m => 
+    m && 
+    (m.startsWith("gemini-") || m.startsWith("models/gemini-"))
+  );
+
+  let lastError: any = null;
+  
+  for (const modelName of uniqueModels) {
+    try {
+      const sanitizedModelName = modelName.includes("/") ? modelName : `models/${modelName}`;
+      
+      const chat = ai.chats.create({
+        ...params.config,
+        model: sanitizedModelName,
+        history: params.history || []
+      });
+
+      const response = await chat.sendMessage({ message: params.message });
+      return response;
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = err.message || "";
+      console.warn(`[Gemini Chat Fallback] Model ${modelName} failed: ${errMsg.substring(0, 100)}`);
+
+      if (
+        errMsg.includes("404") || 
+        errMsg.includes("not found") || 
+        errMsg.includes("503") || 
+        errMsg.includes("UNAVAILABLE") ||
+        errMsg.includes("429") ||
+        errMsg.includes("RESOURCE_EXHAUSTED")
+      ) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastError || new Error("Gemini AI integration failed: No valid models were able to respond.");
 }

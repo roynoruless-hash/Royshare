@@ -138,7 +138,7 @@ export default function AdminDashboard() {
   const [supportSettings, setSupportSettings] = useState<any>({
     aiEnabled: true,
     geminiApiKey: "",
-    geminiModel: "gemini-3.5-flash",
+    geminiModel: "gemini-1.5-flash",
     liveChatEnabled: true,
     supportTelegram: "",
     supportEmail: "support@royshare.com"
@@ -206,7 +206,7 @@ export default function AdminDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           geminiApiKey: supportSettings.geminiApiKey,
-          geminiModel: supportSettings.geminiModel || "gemini-3.5-flash"
+          geminiModel: supportSettings.geminiModel || "gemini-1.5-flash"
         })
       });
       const data = await res.json();
@@ -729,10 +729,36 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDeleteAllUsers = async () => {
+    if (!confirm("🚨 CRITICAL WARNING: Are you sure you want to DELETE ALL USERS in the database?\n\nThis action is irreversible and will wipe the entire user directory.")) return;
+    if (!confirm("SECOND CONFIRMATION: You are about to delete EVERY registered account. Do you really want to proceed?")) return;
+    
+    setModalLoading(true);
+    try {
+      const res = await fetch("/api/admin/users/delete-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminId: "Admin" })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message);
+        fetchUsers();
+      } else {
+        alert(data.error);
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
   const handleUserAction = async (userId: string, action: string) => {
-    if (action === 'delete' && !confirm("⚠️ Are you sure you want to permanently delete this user?\n\nThis will remove their profile, wallet, referral data, and all history.")) return;
+    if (action === 'delete' && !confirm("⚠️ Are you sure you want to permanently delete this user?")) return;
     if (action === 'reset' && !confirm("Are you sure you want to reset this user? This will clear balance, rewards, and progress.")) return;
-    if (action === 're-register' && !confirm("Are you sure you want to set this user for re-registration?")) return;
+    if (action === 're-register' && !confirm("Are you sure you want to reset this user's registration? They will have to complete the flow again.")) return;
+    if (action === 'reset-balance' && !confirm("Are you sure you want to reset this user's balance to 0?")) return;
 
     setModalLoading(true);
     try {
@@ -2698,6 +2724,10 @@ export default function AdminDashboard() {
                         <Download size={14} />
                         EXPORT CSV
                       </button>
+                      <button onClick={handleDeleteAllUsers} className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-black rounded-xl transition-all shadow-lg shadow-red-900/40">
+                        <Trash2 size={14} />
+                        DELETE ALL
+                      </button>
                     </div>
                   </div>
 
@@ -2719,8 +2749,9 @@ export default function AdminDashboard() {
                             </div>
                           </th>
                           <th className="px-6 py-4 tracking-widest">👤 Identity</th>
-                          <th className="px-6 py-4 tracking-widest">💰 Wealth</th>
-                          <th className="px-6 py-4 tracking-widest">🛡️ Trust & Activity</th>
+                          <th className="px-6 py-4 tracking-widest">📱 Mobile & Registration</th>
+                          <th className="px-6 py-4 tracking-widest">💰 Wealth & Earnings</th>
+                          <th className="px-6 py-4 tracking-widest">🛡️ Verification & Status</th>
                           <th className="px-6 py-4 text-right tracking-widest">Command</th>
                         </tr>
                       </thead>
@@ -2743,7 +2774,7 @@ export default function AdminDashboard() {
                           if (filtered.length === 0) {
                             return (
                               <tr>
-                                <td colSpan={5} className="text-center py-20">
+                                <td colSpan={6} className="text-center py-20">
                                   <div className="flex flex-col items-center gap-3">
                                     <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center text-slate-600 mb-2">
                                       <Users size={32} />
@@ -5633,13 +5664,13 @@ export default function AdminDashboard() {
                           <div>
                             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Gemini Model</label>
                             <select
-                              value={supportSettings.geminiModel || "gemini-3.5-flash"}
+                              value={supportSettings.geminiModel || "gemini-1.5-flash"}
                               onChange={(e) => setSupportSettings({ ...supportSettings, geminiModel: e.target.value })}
                               className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
                             >
-                              <option value="gemini-3.5-flash">gemini-3.5-flash (Standard)</option>
-                              <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fast)</option>
-                              <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Highest Reasoning)</option>
+                              <option value="gemini-1.5-flash">gemini-1.5-flash (Balanced)</option>
+                              <option value="gemini-1.5-pro">gemini-1.5-pro (High Quality)</option>
+                              <option value="gemini-1.0-pro">gemini-1.0-pro (Fast)</option>
                             </select>
                           </div>
 
@@ -5679,7 +5710,7 @@ export default function AdminDashboard() {
                             </div>
                             <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
                               <span className="text-slate-400 font-medium">Model Name</span>
-                              <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{supportSettings.geminiModel || "gemini-3.5-flash"}</span>
+                              <span className="font-bold text-white font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{supportSettings.geminiModel || "gemini-1.5-flash"}</span>
                             </div>
                             <div className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-900">
                               <span className="text-slate-400 font-medium">Last Response Time</span>
@@ -7548,38 +7579,69 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               ) : modalAction === 'view_user' && selectedUser ? (
-                <div className="space-y-4">
-                  <div className="bg-slate-800/50 rounded-xl p-4 space-y-3">
-                    <p className="text-xs text-slate-400">👤 Name: <span className="text-white ml-1">{selectedUser.name}</span></p>
-                    <p className="text-xs text-slate-400">📛 Username: <span className="text-white ml-1">@{selectedUser.username || 'N/A'}</span></p>
-                    <p className="text-xs text-slate-400">🆔 User ID: <span className="font-mono text-white ml-1">{selectedUser.id}</span></p>
-                    <p className="text-xs text-slate-400">📱 Phone: <span className="text-white ml-1">{selectedUser.phone || 'N/A'}</span></p>
-                    <p className="text-xs text-slate-400">📅 Join Date: <span className="text-white ml-1">{selectedUser.joinDate ? new Date(selectedUser.joinDate).toLocaleString() : 'N/A'}</span></p>
-                    <p className="text-xs text-slate-400">🕒 Last Active: <span className="text-white ml-1">{selectedUser.lastActive ? new Date(selectedUser.lastActive).toLocaleString() : 'N/A'}</span></p>
+                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                  <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
+                    <h3 className="text-sm font-black text-indigo-400 uppercase tracking-widest border-b border-slate-700/50 pb-2 mb-2">👤 Identity Details</h3>
+                    <div className="grid grid-cols-2 gap-y-2">
+                      <p className="text-[10px] text-slate-400">Entered Name: <span className="text-white font-bold ml-1">{selectedUser.enteredName || 'N/A'}</span></p>
+                      <p className="text-[10px] text-slate-400">TG Username: <span className="text-indigo-400 ml-1">@{selectedUser.username || 'N/A'}</span></p>
+                      <p className="text-[10px] text-slate-400">TG First Name: <span className="text-white ml-1">{selectedUser.firstName || 'N/A'}</span></p>
+                      <p className="text-[10px] text-slate-400">TG Last Name: <span className="text-white ml-1">{selectedUser.lastName || 'N/A'}</span></p>
+                      <p className="text-[10px] text-slate-400">Telegram ID: <span className="font-mono text-white ml-1">{selectedUser.telegramId || selectedUser.id}</span></p>
+                      <p className="text-[10px] text-slate-400">Mobile Number: <span className="text-emerald-400 font-black ml-1">{selectedUser.phone || 'N/A'}</span></p>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">💰 Balance</p><p className="font-bold text-emerald-400">₹{Number(selectedUser.availableBalance || 0).toFixed(2)}</p></div>
-                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">🎁 Bonus</p><p className="font-bold text-yellow-400">₹{Number(selectedUser.bonusBalance || 0).toFixed(2)}</p></div>
-                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">📤 Uploads</p><p className="font-bold text-white">{selectedUser.uploads || 0}</p></div>
-                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">🔗 Links</p><p className="font-bold text-white">{selectedUser.links || 0}</p></div>
-                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">👥 Referrals</p><p className="font-bold text-white">{selectedUser.referrals || 0}</p></div>
-                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">💸 Withdrawals</p><p className="font-bold text-white">{selectedUser.withdrawals || 0}</p></div>
-                    <div className="bg-slate-800/50 rounded-xl p-3"><p className="text-xs text-slate-400 mb-1">🎫 Tickets</p><p className="font-bold text-white">{selectedUser.tickets || 0}</p></div>
+
+                  <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
+                    <h3 className="text-sm font-black text-emerald-400 uppercase tracking-widest border-b border-slate-700/50 pb-2 mb-2">💰 Financial Status</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/30">
+                        <p className="text-[9px] text-slate-500 uppercase font-black">Available Balance</p>
+                        <p className="text-lg font-black text-emerald-400">₹{Number(selectedUser.availableBalance || 0).toFixed(2)}</p>
+                      </div>
+                      <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/30">
+                        <p className="text-[9px] text-slate-500 uppercase font-black">Today's Earnings</p>
+                        <p className="text-lg font-black text-yellow-500">₹{Number(selectedUser.todayEarnings || 0).toFixed(2)}</p>
+                      </div>
+                      <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/30">
+                        <p className="text-[9px] text-slate-500 uppercase font-black">Total Earnings</p>
+                        <p className="text-lg font-black text-blue-400">₹{Number(selectedUser.totalEarnings || 0).toFixed(2)}</p>
+                      </div>
+                      <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/30">
+                        <p className="text-[9px] text-slate-500 uppercase font-black">Referral Count</p>
+                        <p className="text-lg font-black text-white">{selectedUser.referrals || 0}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 mt-4">
-                    <button onClick={() => setModalAction('add_balance')} className="py-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 rounded-xl text-xs font-bold transition-colors">💰 Add Balance</button>
-                    <button onClick={() => setModalAction('deduct_balance')} className="py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl text-xs font-bold transition-colors">➖ Deduct Balance</button>
+
+                  <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest border-b border-slate-700/50 pb-2 mb-2">⚙️ System Info</h3>
+                    <div className="grid grid-cols-2 gap-y-2">
+                      <p className="text-[10px] text-slate-400">Device: <span className="text-slate-200 ml-1">{selectedUser.device || 'Unknown'}</span></p>
+                      <p className="text-[10px] text-slate-400">IP Address: <span className="text-slate-200 ml-1">{selectedUser.ip || 'N/A'}</span></p>
+                      <p className="text-[10px] text-slate-400">Country: <span className="text-slate-200 ml-1">{selectedUser.country || 'N/A'}</span></p>
+                      <p className="text-[10px] text-slate-400">Verified: <span className={`${selectedUser.verified || selectedUser.registrationStep === 'completed' ? 'text-emerald-400' : 'text-red-400'} font-bold ml-1`}>{selectedUser.verified || selectedUser.registrationStep === 'completed' ? 'YES' : 'NO'}</span></p>
+                      <p className="text-[10px] text-slate-400">Registration: <span className="text-slate-200 ml-1">{selectedUser.registrationDate ? new Date(selectedUser.registrationDate).toLocaleString() : (selectedUser.joinDate ? new Date(selectedUser.joinDate).toLocaleString() : 'N/A')}</span></p>
+                      <p className="text-[10px] text-slate-400">Last Active: <span className="text-slate-200 ml-1">{selectedUser.lastActive ? new Date(selectedUser.lastActive).toLocaleString() : 'N/A'}</span></p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-800">
+                    <button onClick={() => setModalAction('add_balance')} className="py-2.5 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 rounded-xl text-xs font-black transition-all border border-emerald-500/20">💰 Add Balance</button>
+                    <button onClick={() => setModalAction('deduct_balance')} className="py-2.5 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl text-xs font-black transition-all border border-red-500/20">➖ Deduct Balance</button>
+                    <button onClick={() => handleUserAction(selectedUser.id, 'reset-balance')} className="py-2.5 bg-yellow-600/20 hover:bg-yellow-600/40 text-yellow-500 rounded-xl text-xs font-black transition-all border border-yellow-500/20">🔄 Reset Balance</button>
+                    <button onClick={() => setModalAction('message_user')} className="py-2.5 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 rounded-xl text-xs font-black transition-all border border-indigo-500/20">📨 Send Message</button>
                     {selectedUser.status === 'Banned' ? (
-                      <button onClick={() => setModalAction('unban_user')} className="py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-xl text-xs font-bold transition-colors">✅ Unban User</button>
+                      <button onClick={() => setModalAction('unban_user')} className="py-2.5 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-xl text-xs font-black transition-all border border-blue-500/20 col-span-2">✅ Unban User</button>
                     ) : (
-                      <button onClick={() => setModalAction('ban_user')} className="py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors">🚫 Ban User</button>
+                      <button onClick={() => setModalAction('ban_user')} className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black transition-all border border-slate-700 col-span-2">🚫 Ban User</button>
                     )}
-                    <button onClick={() => setModalAction('message_user')} className="py-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 rounded-xl text-xs font-bold transition-colors">📨 Send Message</button>
-                    <button onClick={() => handleUserAction(selectedUser.id, 'reset')} className="py-2 bg-yellow-600/20 hover:bg-yellow-600/40 text-yellow-500 rounded-xl text-xs font-bold transition-colors">🔄 Reset Progress</button>
-                    <button onClick={() => handleUserAction(selectedUser.id, 're-register')} className="py-2 bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 rounded-xl text-xs font-bold transition-colors">➕ Force Re-register</button>
-                    <button onClick={() => handleUserAction(selectedUser.id, 'delete')} className="py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl text-xs font-bold transition-colors">🗑 Delete User</button>
+                    <button onClick={() => handleUserAction(selectedUser.id, 'reset')} className="py-2.5 bg-yellow-600/20 hover:bg-yellow-600/40 text-yellow-500 rounded-xl text-xs font-black transition-all border border-yellow-500/20">🔄 Reset Progress</button>
+                    <button onClick={() => handleUserAction(selectedUser.id, 're-register')} className="py-2.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 rounded-xl text-xs font-black transition-all border border-purple-500/20">➕ Reset Registration</button>
+                    <button onClick={() => handleUserAction(selectedUser.id, 'delete')} className="py-2.5 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl text-xs font-black transition-all border border-red-500/20 col-span-2">🗑 Delete User Permanent</button>
                   </div>
                 </div>
+
               ) : (modalAction === 'add_balance' || modalAction === 'deduct_balance') ? (
                 <div className="space-y-4">
                   <div className="bg-slate-800/50 p-4 rounded-xl mb-4">

@@ -6,7 +6,7 @@ import { getDb } from "./src/lib/firebase";
 import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit } from "firebase/firestore";
 import { REWARD_TASKS } from "./src/lib/tasks";
 import { GoogleGenAI } from "@google/genai";
-import { safeGenerateContent } from "./src/lib/gemini";
+import { safeGenerateContent, safeSendMessage } from "./src/lib/gemini";
 
 // ...
 const db = getDb();
@@ -919,8 +919,9 @@ User Account Context:
 ${userContext}
 `;
 
-      const chat = ai.chats.create({
+      const response = await safeSendMessage(ai, {
         model: selectedModel || "gemini-1.5-flash",
+        message: newMessage,
         config: {
           systemInstruction: systemInstruction
         },
@@ -930,7 +931,6 @@ ${userContext}
         }))
       });
       
-      const response = await chat.sendMessage({ message: newMessage });
       res.json({ reply: response.text });
     } catch (e: any) {
       console.error("AI chat error:", e);
@@ -1564,7 +1564,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
-  // Re-register User
+  // Reset Registration (Re-register User)
   app.post("/api/admin/users/:id/re-register", async (req, res) => {
     try {
       const { id } = req.params;
@@ -1574,7 +1574,8 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const reRegisterData = {
         membershipVerified: false,
         contactVerified: false,
-        onboardingStep: 0,
+        verified: false,
+        registrationStep: 'joining',
         registrationCompleted: false,
         lastActive: new Date().toISOString()
       };
@@ -1585,11 +1586,51 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const sessions = await getDocs(sessionQuery);
       for (const d of sessions.docs) await deleteDoc(d.ref);
 
-      await logAdminActivity(adminId || "Admin", id, "Re-register User", req.ip || "unknown");
+      await logAdminActivity(adminId || "Admin", id, "Reset Registration", req.ip || "unknown");
 
-      res.json({ success: true, message: "User set for re-registration. They must follow onboarding flow again." });
+      res.json({ success: true, message: "User registration reset successfully." });
     } catch (e: any) {
       console.error("Admin user re-register error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Reset Balance
+  app.post("/api/admin/users/:id/reset-balance", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminId } = req.body;
+      const userRef = doc(db, "users", id);
+
+      await setDoc(userRef, {
+        balance: 0,
+        availableBalance: 0,
+        totalEarnings: 0,
+        rewards: 0
+      }, { merge: true });
+
+      await logAdminActivity(adminId || "Admin", id, "Reset Balance", req.ip || "unknown");
+
+      res.json({ success: true, message: "User balance reset successfully." });
+    } catch (e: any) {
+      console.error("Admin user reset balance error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Delete All Users
+  app.post("/api/admin/users/delete-all", async (req, res) => {
+    try {
+      const { adminId } = req.body;
+      const snapshot = await getDocs(collection(db, "users"));
+      const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
+      await Promise.all(deletePromises);
+
+      await logAdminActivity(adminId || "Admin", "ALL", "Delete All Users", req.ip || "unknown");
+
+      res.json({ success: true, message: `Successfully deleted ${snapshot.size} users.` });
+    } catch (e: any) {
+      console.error("Admin delete all users error:", e);
       res.status(500).json({ error: "Server error" });
     }
   });
@@ -1624,15 +1665,15 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
       const fields = [
-        "id", "telegramId", "username", "firstName", "lastName", "phone", 
-        "balance", "availableBalance", "rewards", "referrals", 
-        "membershipVerified", "contactVerified", "createdAt", "lastActive"
+        "telegramId", "username", "firstName", "lastName", "enteredName", "phone", 
+        "availableBalance", "totalEarnings", "referrals", 
+        "membershipVerified", "verified", "registrationDate", "lastActive", "device", "ip", "country"
       ];
 
       let csv = fields.join(",") + "\n";
       users.forEach((u: any) => {
         const row = fields.map(f => {
-          let val = u[f] || "";
+          let val = u[f] ?? "";
           if (typeof val === 'string' && val.includes(",")) val = `"${val}"`;
           return val;
         });
@@ -3219,107 +3260,47 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   });
 
   // Incoming Telegram Webhook handler endpoint
-  app.post("/api/telegram/webhook", async (req, res) => {
-    try {
-      console.log("-----------------------------------------");
-      console.log("📥 Incoming Telegram Webhook Request Received");
-      
-      const update = req.body;
-      if (!update || typeof update !== "object") {
-        console.warn("⚠️ Webhook received invalid/empty body payload.");
-        return res.status(200).json({ ok: true, message: "Invalid payload ignored" });
-      }
+  app.post("/api/telegram/webhook", (req, res) => {
+    // ALWAYS return 200 immediately to Telegram to prevent retries and timeouts
+    res.status(200).json({ ok: true });
 
-      console.log(`📥 Processing Update ID: ${update.update_id}`);
-      
-      // Log update type
-      const updateType = update.message ? "message" : (update.callback_query ? "callback_query" : "unknown");
-      console.log(`🔍 Update Type: ${updateType}`);
+    // Process in background
+    (async () => {
+      const db = getDb();
+      try {
+        const update = req.body;
+        if (!update || typeof update !== "object") return;
 
-      // Manual webhook diagnostics ping
-      if (update.test_webhook === true) {
-        console.log("ℹ️ Webhook manual verification processed.");
-        return res.status(200).json({ ok: true, status: "alive" });
-      }
+        console.log(`📥 Webhook Processing Update ID: ${update.update_id}`);
 
-      // Load Bot Token from Firestore
-      console.log("🔍 Fetching Bot Token from Firestore...");
-      const settingsSnap = await getDoc(doc(db, "settings", "telegram"));
-      if (!settingsSnap.exists()) {
-        throw new Error("Firestore settings/telegram document missing");
-      }
-      const botToken = settingsSnap.data()?.botToken;
-      if (!botToken) {
-        throw new Error("Bot Token missing in Firestore");
-      }
-      console.log("✅ Bot Token Loaded.");
-
-      // Spawn background processing
-      handleUpdate(botToken, update).catch(async (err: any) => {
-        console.error("🔴 Background handleUpdate Exception:");
-        
-        let errSource = "unknown source";
-        if (err.stack) {
-          const lines = err.stack.split("\n");
-          for (const l of lines) {
-            if (l.includes("at ") && !l.includes("node_modules") && !l.includes("node:internal")) {
-              errSource = l.trim();
-              break;
-            }
-          }
+        // Load Bot Token from Firestore
+        const settingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        if (!settingsSnap.exists()) {
+          console.error("🔴 Fatal: settings/telegram document missing in Firestore");
+          return;
         }
-        console.error(`🔴 Error Source: ${errSource}`);
-        console.error(`🔴 Error Message: ${err.message || err}`);
-        console.error("🔴 Full Stack Trace:");
+        const botToken = settingsSnap.data()?.botToken;
+        if (!botToken) {
+          console.error("🔴 Fatal: Bot Token missing in Firestore");
+          return;
+        }
+
+        // Handle the update
+        await handleUpdate(botToken, update);
+
+      } catch (err: any) {
+        console.error("🔴 Webhook Background Processing Fatal Error:");
         console.error(err.stack || err);
         
-        // Persist error for UI visibility
         try {
           await setDoc(doc(db, "settings", "telegram"), {
             lastWebhookError: err.message || String(err),
-            lastWebhookErrorSource: errSource,
-            lastWebhookErrorStack: err.stack || "",
-            lastWebhookErrorTime: new Date().toISOString()
+            lastWebhookErrorTime: new Date().toISOString(),
+            lastWebhookErrorStack: err.stack || ""
           }, { merge: true });
-        } catch (dbErr) {
-          console.error("Failed to persist background error:", dbErr);
-        }
-      });
-
-      // ALWAYS return 200 immediately to Telegram
-      console.log("📤 Returning 200 OK to Telegram");
-      return res.status(200).json({ ok: true });
-
-    } catch (e: any) {
-      console.error("🔴 Webhook Handler Fatal Exception:");
-      
-      let errorSource = "unknown source";
-      if (e.stack) {
-        const stackLines = e.stack.split("\n");
-        for (const line of stackLines) {
-          if (line.includes("at ") && !line.includes("node_modules") && !line.includes("node:internal")) {
-            errorSource = line.trim();
-            break;
-          }
-        }
+        } catch (dbErr) {}
       }
-      console.error(`🔴 Error Source: ${errorSource}`);
-      console.error(`🔴 Error Message: ${e.message || e}`);
-      console.error("🔴 Full Stack Trace:");
-      console.error(e.stack || e);
-      
-      // Even on fatal error, return 200 to stop retries
-      try {
-        await setDoc(doc(db, "settings", "telegram"), {
-          lastWebhookError: e.message || String(e),
-          lastWebhookErrorSource: errorSource,
-          lastWebhookErrorStack: e.stack || "",
-          lastWebhookErrorTime: new Date().toISOString()
-        }, { merge: true });
-      } catch (dbErr) {}
-
-      return res.status(200).json({ ok: true, error: "Caught Fatal", source: errorSource });
-    }
+    })();
   });
 
   // Polling infrastructure
@@ -3944,50 +3925,48 @@ Bonus added successfully.`;
         return res.status(200).send("Event ignored (no reward requested)");
       }
 
-      // Find User by Telegram ID
-      const tgIdNum = Number(telegram_id);
-      if (isNaN(tgIdNum)) {
-        console.error(`[MONETAG POSTBACK] Error: Invalid telegram_id (NaN): ${telegram_id}`);
-        logEntry.status = "failed";
-        logEntry.error = `Invalid Telegram ID: ${telegram_id}`;
-        await addDoc(postbackRef, logEntry);
-        return res.status(400).send("Invalid telegram_id");
-      }
-
+      // Find User by Telegram ID - Use direct document ID for reliability and speed
       const usersRef = collection(db, "users");
-      const userQuery = query(usersRef, where("telegramId", "==", tgIdNum));
-      const userSnapshot = await getDocs(userQuery);
+      let userDocRef = doc(usersRef, String(telegram_id));
+      const userSnap = await getDoc(userDocRef);
 
       let userId: string;
       let userData: any;
-      let userDocRef: any;
+      let tgIdNum = Number(telegram_id);
 
-      if (userSnapshot.empty) {
-        console.warn(`[MONETAG POSTBACK] User with telegramId ${tgIdNum} not found. Creating automatic record.`);
-        // Create minimal user record if not found
-        userDocRef = doc(usersRef, String(tgIdNum));
-        userData = {
-          telegramId: tgIdNum,
-          username: params.username || "monetag_auto_user",
-          firstName: params.firstName || "Monetag",
-          lastName: params.lastName || "User",
-          balance: 0,
-          totalEarnings: 0,
-          createdAt: new Date().toISOString(),
-          lastActive: new Date().toISOString(),
-          membershipVerified: false,
-          contactVerified: false,
-          monetag_auto_created: true
-        };
-        await setDoc(userDocRef, userData);
-        userId = String(tgIdNum);
-        console.log(`[MONETAG POSTBACK] Created automatic user record: ${userId}`);
+      if (!userSnap.exists()) {
+        console.warn(`[MONETAG POSTBACK] User with telegramId ${telegram_id} not found by ID. Trying query...`);
+        // Fallback to query in case doc ID is different for some reason
+        const userQuery = query(usersRef, where("telegramId", "==", tgIdNum));
+        const userSnapshot = await getDocs(userQuery);
+        
+        if (userSnapshot.empty) {
+          console.warn(`[MONETAG POSTBACK] User not found by query either. Creating automatic record.`);
+          userData = {
+            telegramId: isNaN(tgIdNum) ? telegram_id : tgIdNum,
+            username: params.username || "monetag_auto_user",
+            firstName: params.firstName || "Monetag",
+            lastName: params.lastName || "User",
+            balance: 0,
+            totalEarnings: 0,
+            createdAt: new Date().toISOString(),
+            lastActive: new Date().toISOString(),
+            membershipVerified: false,
+            contactVerified: false,
+            monetag_auto_created: true
+          };
+          await setDoc(userDocRef, userData);
+          userId = String(telegram_id);
+        } else {
+          const userDoc = userSnapshot.docs[0];
+          userData = userDoc.data();
+          userId = userDoc.id;
+          userDocRef = userDoc.ref as any;
+        }
       } else {
-        const userDoc = userSnapshot.docs[0];
-        userData = userDoc.data();
-        userId = userDoc.id;
-        userDocRef = userDoc.ref;
-        console.log(`[MONETAG POSTBACK] Found user: ${userId} (${userData.username || 'No username'})`);
+        userData = userSnap.data();
+        userId = userSnap.id;
+        console.log(`[MONETAG POSTBACK] Found user by ID: ${userId}`);
       }
 
       // Determine reward amount
