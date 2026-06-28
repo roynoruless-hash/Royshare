@@ -69,6 +69,7 @@ export default function EarnRewardsPage() {
   const [monetagError, setMonetagError] = useState<string | null>(null);
   const [adWatchedSuccessfully, setAdWatchedSuccessfully] = useState<boolean>(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState<boolean>(false);
+  const [isTelegramApp, setIsTelegramApp] = useState<boolean>(false);
 
   // Initialize Telegram WebApp and parse parameters
   useEffect(() => {
@@ -77,6 +78,7 @@ export default function EarnRewardsPage() {
     const queryTaskId = params.get("taskId");
 
     const tg = (window as any).Telegram?.WebApp;
+    setIsTelegramApp(!!tg?.initData);
     if (tg) {
       tg.expand();
     }
@@ -193,6 +195,11 @@ export default function EarnRewardsPage() {
 
   const handleWatchMonetagAd = async () => {
     if (isMonetagAdRunning || adWatchedSuccessfully || submitting) return;
+
+    if (!isTelegramApp) {
+      setMonetagError("This reward task is only available inside the Telegram Mini App.");
+      return;
+    }
 
     if (typeof (window as any).show_11210088 !== 'function') {
       setMonetagError("Please watch the complete advertisement to unlock your reward.");
@@ -348,6 +355,19 @@ export default function EarnRewardsPage() {
   }
 
   if (currentTask?.adNetwork === 'Monetag Mini App') {
+    if (!isTelegramApp) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1118] text-white p-6 text-center">
+          <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mb-6 text-amber-500">
+            <AlertCircle size={40} />
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-2">Mini App Required</h1>
+          <p className="text-gray-400 max-w-xs">
+            This reward task is only available inside the Telegram Mini App.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1118] text-white p-6 text-center">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-blue-600/10 blur-[120px] rounded-full pointer-events-none"></div>

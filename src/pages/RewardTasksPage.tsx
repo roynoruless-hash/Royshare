@@ -46,6 +46,12 @@ export default function RewardTasksPage() {
   const [monetagError, setMonetagError] = useState<string | null>(null);
   const [adWatchedSuccessfully, setAdWatchedSuccessfully] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [isTelegramApp, setIsTelegramApp] = useState(false);
+
+  useEffect(() => {
+    const isTg = !!(window as any).Telegram?.WebApp?.initData;
+    setIsTelegramApp(isTg);
+  }, []);
 
   const handleVideoError = () => {
     console.warn("Video failed to load in RewardTasksPage. Trying fallback...");
@@ -306,6 +312,11 @@ export default function RewardTasksPage() {
   const handleWatchMonetagAd = async () => {
     if (isMonetagAdRunning || adWatchedSuccessfully || submitting) return;
 
+    if (!isTelegramApp) {
+      setMonetagError("This reward task is only available inside the Telegram Mini App.");
+      return;
+    }
+
     if (typeof (window as any).show_11210088 !== 'function') {
       setMonetagError("Please watch the complete advertisement to unlock your reward.");
       return;
@@ -438,6 +449,19 @@ export default function RewardTasksPage() {
   const renderedAdIds = renderedAds.map(ad => ad.id);
 
   if (currentTask?.adNetwork === 'Monetag Mini App') {
+    if (!isTelegramApp) {
+      return (
+        <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col items-center justify-center py-6 px-4 text-center">
+          <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mb-6 text-amber-500">
+            <AlertCircle size={40} />
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-2">Telegram Only Task</h1>
+          <p className="text-slate-400 max-w-xs">
+            This reward task is only available inside the Telegram Mini App. Please open our bot to continue.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col items-center justify-center py-6 px-4">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-blue-500/10 blur-[100px] rounded-full pointer-events-none"></div>

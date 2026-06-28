@@ -1,4 +1,10 @@
 import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { 
+  Zap, Play, CheckCircle2, AlertTriangle, Timer, Tv, 
+  Target, ShieldAlert, Award, Clock, AlertCircle, Info,
+  Smartphone, MousePointer2, ClipboardCheck, Sparkles
+} from "lucide-react";
 import AdScriptRenderer from "../components/AdScriptRenderer";
 
 export default function AdminDashboard() {
@@ -446,7 +452,8 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleGenerateAiTask = async (field?: string) => {
+  const handleGenerateAiTask = async (field?: string, overrideType?: string) => {
+    const typeToUse = overrideType || aiTaskType;
     setAiGeneratingTask(true);
     setAiError("");
     try {
@@ -454,7 +461,7 @@ export default function AdminDashboard() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          taskType: aiTaskType,
+          taskType: typeToUse,
           field, // Optional: if generating for a specific field
           currentTask: taskForm
         })
@@ -6292,252 +6299,15 @@ export default function AdminDashboard() {
                       <button onClick={() => setAiError("")} className="text-red-400/50 hover:text-red-400 transition-colors">✖</button>
                     </div>
                   )}
-                  {/* AI Task Generator Bar */}
-                  <div className="flex flex-col sm:flex-row gap-2 mb-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800 shadow-xl">
-                    <div className="flex-1 space-y-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Task Context</label>
-                      <select 
-                        value={aiTaskType}
-                        onChange={(e) => setAiTaskType(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-medium"
-                      >
-                        <option value="Watch Ads">Watch Ads</option>
-                        <option value="Visit Website">Visit Website</option>
-                        <option value="App Install">App Install</option>
-                        <option value="Telegram Join">Telegram Join</option>
-                        <option value="YouTube Subscribe">YouTube Subscribe</option>
-                        <option value="YouTube Watch">YouTube Watch</option>
-                        <option value="Instagram Follow">Instagram Follow</option>
-                        <option value="Facebook Like">Facebook Like</option>
-                        <option value="Twitter/X Follow">Twitter/X Follow</option>
-                        <option value="Survey">Survey</option>
-                        <option value="URL Shortener">URL Shortener</option>
-                        <option value="Daily Bonus">Daily Bonus</option>
-                        <option value="Referral Task">Referral Task</option>
-                        <option value="Custom Task">Custom Task</option>
-                      </select>
-                    </div>
-                    <div className="flex items-end gap-2">
-                      <button
-                        onClick={() => handleGenerateAiTask()}
-                        disabled={aiGeneratingTask}
-                        className="flex-1 sm:flex-none px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center justify-center gap-2 transition-all h-[38px]"
-                      >
-                        {aiGeneratingTask ? "⏳" : "🚀"} Generate Complete Task
-                      </button>
-                      <button
-                        onClick={() => {
-                          const types = ["Watch Ads", "Visit Website", "App Install", "YouTube Subscribe", "Instagram Follow"];
-                          setAiTaskType(types[Math.floor(Math.random() * types.length)]);
-                          handleGenerateAiTask();
-                        }}
-                        disabled={aiGeneratingTask}
-                        className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-bold rounded-lg border border-slate-800 h-[38px]"
-                        title="Random Task"
-                      >
-                        🎲
-                      </button>
-                    </div>
-                  </div>
 
-                  {aiTaskSuggestion && (
-                    <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                      <div className="flex justify-between items-center pb-2 border-b border-indigo-500/10">
-                        <div className="flex items-center gap-2">
-                          <span className="flex h-2 w-2 rounded-full bg-indigo-500 animate-pulse"></span>
-                          <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">AI Optimised Proposal</span>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => handleGenerateAiTask()}
-                            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded transition-colors"
-                          >
-                            🔄 Regenerate
-                          </button>
-                          <button
-                            onClick={applyAiTask}
-                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded transition-colors shadow-lg shadow-indigo-500/20"
-                          >
-                            ✅ Apply Suggestion
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
-                          <div className="text-[10px] text-slate-500 font-bold uppercase">Completion Rate</div>
-                          <div className="text-sm font-bold text-emerald-400">{aiTaskSuggestion.analytics?.completionRate || "85%"}</div>
-                        </div>
-                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
-                          <div className="text-[10px] text-slate-500 font-bold uppercase">Recommended Reward</div>
-                          <div className="text-sm font-bold text-blue-400">₹{aiTaskSuggestion.task?.rewardAmount || "5"}</div>
-                        </div>
-                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
-                          <div className="text-[10px] text-slate-500 font-bold uppercase">Fraud Risk</div>
-                          <div className={`text-sm font-bold ${aiTaskSuggestion.analytics?.risk === 'Low' ? 'text-emerald-400' : 'text-amber-400'}`}>{aiTaskSuggestion.analytics?.risk || "Low"}</div>
-                        </div>
-                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
-                          <div className="text-[10px] text-slate-500 font-bold uppercase">User Difficulty</div>
-                          <div className="text-sm font-bold text-indigo-400">{aiTaskSuggestion.analytics?.difficulty || "Medium"}</div>
-                        </div>
-                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
-                          <div className="text-[10px] text-slate-500 font-bold uppercase">Time to Complete</div>
-                          <div className="text-sm font-bold text-slate-300">{aiTaskSuggestion.analytics?.estimatedTime || "45s"}</div>
-                        </div>
-                        <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
-                          <div className="text-[10px] text-slate-500 font-bold uppercase">Network</div>
-                          <div className="text-sm font-bold text-purple-400">{aiTaskSuggestion.task?.adNetwork || "Direct"}</div>
-                        </div>
-                      </div>
-
-                      {aiTaskSuggestion.analytics?.suggestions && (
-                        <div className="bg-slate-950/80 p-3 rounded-lg border border-indigo-500/10">
-                          <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Optimization Tips</div>
-                          <div className="text-[11px] text-slate-400 leading-relaxed italic">
-                            "{aiTaskSuggestion.analytics.suggestions}"
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="block text-sm font-medium text-slate-400">📝 Task Title</label>
-                      <button 
-                        onClick={() => handleGenerateAiTask('title')}
-                        disabled={aiGeneratingTask}
-                        className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors flex items-center gap-1"
-                      >
-                        ✨ AI Suggest
-                      </button>
-                    </div>
-                    <input 
-                      type="text" 
-                      value={taskForm.title}
-                      onChange={(e) => setTaskForm({...taskForm, title: e.target.value})}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
-                      placeholder="e.g. Follow on Twitter"
-                    />
-                  </div>
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="block text-sm font-medium text-slate-400">📄 Task Description</label>
-                      <button 
-                        onClick={() => handleGenerateAiTask('description')}
-                        disabled={aiGeneratingTask}
-                        className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors flex items-center gap-1"
-                      >
-                        ✨ AI Generate
-                      </button>
-                    </div>
-                    <textarea 
-                      value={taskForm.description}
-                      onChange={(e) => setTaskForm({...taskForm, description: e.target.value})}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 h-24 resize-none"
-                      placeholder="Task instructions..."
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label className="block text-sm font-medium text-slate-400">💰 Reward Amount</label>
-                        <button 
-                          onClick={() => handleGenerateAiTask('rewardAmount')}
-                          disabled={aiGeneratingTask}
-                          className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors"
-                        >
-                          ✨
-                        </button>
-                      </div>
-                      <input 
-                        type="number" 
-                        value={taskForm.rewardAmount}
-                        onChange={(e) => setTaskForm({...taskForm, rewardAmount: e.target.value})}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
-                        placeholder="e.g. 50"
-                      />
-                    </div>
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label className="block text-sm font-medium text-slate-400">🕒 Timer (s)</label>
-                        <button 
-                          onClick={() => handleGenerateAiTask('timerDuration')}
-                          disabled={aiGeneratingTask}
-                          className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors"
-                        >
-                          ✨
-                        </button>
-                      </div>
-                      <input 
-                        type="number" 
-                        value={taskForm.timerDuration}
-                        onChange={(e) => setTaskForm({...taskForm, timerDuration: e.target.value})}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
-                        placeholder="e.g. 15"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label className="block text-sm font-medium text-slate-400">📄 Total Pages</label>
-                        <button 
-                          onClick={() => handleGenerateAiTask('totalPages')}
-                          disabled={aiGeneratingTask}
-                          className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors"
-                        >
-                          ✨
-                        </button>
-                      </div>
-                      <input 
-                        type="number" 
-                        value={taskForm.totalPages}
-                        onChange={(e) => setTaskForm({...taskForm, totalPages: e.target.value})}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
-                        placeholder="e.g. 3"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-400 mb-1">Status</label>
-                      <select 
-                        value={taskForm.status}
-                        onChange={(e) => setTaskForm({...taskForm, status: e.target.value})}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
-                      >
-                        <option value="🟢 Active">🟢 Active</option>
-                        <option value="🔴 Disabled">🔴 Disabled</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="block text-sm font-medium text-slate-400">📷 Task Image URL</label>
-                      <button 
-                        onClick={() => handleGenerateAiTask('imageUrl')}
-                        disabled={aiGeneratingTask}
-                        className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors flex items-center gap-1"
-                      >
-                        ✨ AI Image
-                      </button>
-                    </div>
-                    <input 
-                      type="text" 
-                      value={taskForm.imageUrl}
-                      onChange={(e) => setTaskForm({...taskForm, imageUrl: e.target.value})}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
-                      placeholder="https://..."
-                    />
-                  </div>
-
-                  {/* Step 1: Ad Network selection */}
-                  <div className="border-t border-slate-800 pt-4 mt-4 space-y-3">
-                    <h4 className="text-sm font-bold text-slate-300 flex items-center gap-2">
-                      🔌 Ad Network Integration (Step 1)
+                  {/* Step 1: Ad Network selection (MOVED TO TOP FOR MONETAG LOGIC) */}
+                  <div className="bg-slate-900/40 p-4 border border-slate-800 rounded-xl space-y-3">
+                    <h4 className="text-xs font-bold text-slate-300 flex items-center gap-2 uppercase tracking-widest">
+                      🔌 Ad Network Integration
                     </h4>
                     
                     <div>
-                      <label className="block text-sm font-medium text-slate-400 mb-1">Select Network</label>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Select Provider</label>
                       <select 
                         value={taskForm.adNetwork || ""}
                         onChange={(e) => {
@@ -6545,10 +6315,14 @@ export default function AdminDashboard() {
                           setTaskForm({
                             ...taskForm,
                             adNetwork: val,
-                            selectedAdIds: [] // reset selected ads when changing network
+                            selectedAdIds: [] 
                           });
+                          if (val === "Monetag Mini App") {
+                            setAiTaskType("Watch Ads");
+                            handleGenerateAiTask(undefined, "Watch Ads");
+                          }
                         }}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 font-bold"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 font-bold"
                       >
                         <option value="">-- No Ad Network --</option>
                         <option value="Adsterra">Adsterra</option>
@@ -6558,8 +6332,357 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  {/* Step 2: Add Ads (Select Ads based on network and type) */}
-                  {taskForm.adNetwork && (
+                  {/* AI Task Generator Bar - Hidden for Monetag Mini App as it auto-triggers */}
+                  {taskForm.adNetwork !== "Monetag Mini App" && (
+                    <div className="flex flex-col sm:flex-row gap-2 mb-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800 shadow-xl">
+                      <div className="flex-1 space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Task Context</label>
+                        <select 
+                          value={aiTaskType}
+                          onChange={(e) => setAiTaskType(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-medium"
+                        >
+                          <option value="Watch Ads">Watch Ads</option>
+                          <option value="Visit Website">Visit Website</option>
+                          <option value="App Install">App Install</option>
+                          <option value="Telegram Join">Telegram Join</option>
+                          <option value="YouTube Subscribe">YouTube Subscribe</option>
+                          <option value="YouTube Watch">YouTube Watch</option>
+                          <option value="Instagram Follow">Instagram Follow</option>
+                          <option value="Facebook Like">Facebook Like</option>
+                          <option value="Twitter/X Follow">Twitter/X Follow</option>
+                          <option value="Survey">Survey</option>
+                          <option value="URL Shortener">URL Shortener</option>
+                          <option value="Daily Bonus">Daily Bonus</option>
+                          <option value="Referral Task">Referral Task</option>
+                          <option value="Custom Task">Custom Task</option>
+                        </select>
+                      </div>
+                      <div className="flex items-end gap-2">
+                        <button
+                          onClick={() => handleGenerateAiTask()}
+                          disabled={aiGeneratingTask}
+                          className="flex-1 sm:flex-none px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center justify-center gap-2 transition-all h-[38px]"
+                        >
+                          {aiGeneratingTask ? "⏳" : "🚀"} Generate Complete Task
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <AnimatePresence>
+                    {aiTaskSuggestion && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4 space-y-4 shadow-2xl overflow-hidden relative"
+                      >
+                        <div className="absolute top-0 right-0 p-1 opacity-20">
+                          <Sparkles size={40} className="text-indigo-400" />
+                        </div>
+                        <div className="flex justify-between items-center pb-2 border-b border-indigo-500/10">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-2 w-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                            <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">AI Optimised Proposal</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleGenerateAiTask()}
+                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded transition-colors"
+                            >
+                              🔄 Regenerate
+                            </button>
+                            <button
+                              onClick={applyAiTask}
+                              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded transition-colors shadow-lg shadow-indigo-500/20"
+                            >
+                              ✅ Apply Suggestion
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                            <div className="text-[10px] text-slate-500 font-bold uppercase">Completion Rate</div>
+                            <div className="text-sm font-bold text-emerald-400">{aiTaskSuggestion.analytics?.completionRate || "85%"}</div>
+                          </div>
+                          <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                            <div className="text-[10px] text-slate-500 font-bold uppercase">Recommended Reward</div>
+                            <div className="text-sm font-bold text-blue-400">₹{aiTaskSuggestion.task?.rewardAmount || "5"}</div>
+                          </div>
+                          <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                            <div className="text-[10px] text-slate-500 font-bold uppercase">Fraud Risk</div>
+                            <div className={`text-sm font-bold ${aiTaskSuggestion.analytics?.risk === 'Low' ? 'text-emerald-400' : 'text-amber-400'}`}>{aiTaskSuggestion.analytics?.risk || "Low"}</div>
+                          </div>
+                          <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                            <div className="text-[10px] text-slate-500 font-bold uppercase">User Difficulty</div>
+                            <div className="text-sm font-bold text-indigo-400">{aiTaskSuggestion.analytics?.difficulty || "Medium"}</div>
+                          </div>
+                          <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                            <div className="text-[10px] text-slate-500 font-bold uppercase">Time to Complete</div>
+                            <div className="text-sm font-bold text-slate-300">{aiTaskSuggestion.analytics?.estimatedTime || "45s"}</div>
+                          </div>
+                          <div className="bg-slate-950/50 p-2 rounded-lg border border-indigo-500/10">
+                            <div className="text-[10px] text-slate-500 font-bold uppercase">Network</div>
+                            <div className="text-sm font-bold text-purple-400">{aiTaskSuggestion.task?.adNetwork || "Direct"}</div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-sm font-medium text-slate-400">📝 Task Title</label>
+                      <button 
+                        onClick={() => handleGenerateAiTask('title')}
+                        disabled={aiGeneratingTask}
+                        className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors flex items-center gap-1"
+                      >
+                        <Sparkles size={10} /> AI Suggest
+                      </button>
+                    </div>
+                    <input 
+                      type="text" 
+                      value={taskForm.title}
+                      onChange={(e) => setTaskForm({...taskForm, title: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      placeholder="e.g. Watch Rewarded Ad"
+                    />
+                  </div>
+
+                  {taskForm.adNetwork === "Monetag Mini App" ? (
+                    <div className="space-y-4">
+                      {/* Animated Instructions Preview */}
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-slate-400">📋 Animated Instructions Preview</label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {[
+                            { icon: <Target className="text-blue-400" size={16} />, text: "Complete this reward task.", delay: 0.1 },
+                            { icon: <Play className="text-emerald-400" size={16} />, text: "Tap the Watch Ad button.", delay: 0.2 },
+                            { icon: <Tv className="text-indigo-400" size={16} />, text: "Watch the advertisement completely.", delay: 0.3 },
+                            { icon: <Timer className="text-amber-400" size={16} />, text: "Please do not close or skip the ad.", delay: 0.4 },
+                            { icon: <Award className="text-purple-400" size={16} />, text: "Unlock automatically after completion.", delay: 0.5 },
+                            { icon: <CheckCircle2 className="text-emerald-500" size={16} />, text: "Tap Claim Reward after verification.", delay: 0.6 },
+                          ].map((item, i) => (
+                            <motion.div 
+                              key={i}
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: item.delay }}
+                              className="flex items-center gap-3 p-3 bg-slate-950/60 border border-slate-800 rounded-xl"
+                            >
+                              <div className="p-2 bg-slate-900 rounded-lg">{item.icon}</div>
+                              <span className="text-[11px] text-slate-300 font-medium">{item.text}</span>
+                            </motion.div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Animated Warning Box */}
+                      <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-2xl space-y-3">
+                        <div className="flex items-center gap-2 text-red-400 mb-1">
+                          <AlertTriangle size={18} className="animate-pulse" />
+                          <span className="text-xs font-bold uppercase tracking-widest">Crucial Warnings</span>
+                        </div>
+                        <div className="space-y-2">
+                          {[
+                            { icon: <Smartphone className="text-red-400" size={14} />, text: "Do not close the Mini App while ad is playing." },
+                            { icon: <ShieldAlert className="text-red-500" size={14} />, text: "Skipping or closing ad will cancel reward." },
+                            { icon: <AlertCircle className="text-red-400" size={14} />, text: "VPN, Proxy and Emulators are strictly prohibited." },
+                            { icon: <CheckCircle2 className="text-blue-500" size={14} />, text: "Reward is credited only after successful completion." },
+                          ].map((item, i) => (
+                            <motion.div 
+                              key={i}
+                              animate={{ opacity: [0.7, 1, 0.7] }}
+                              transition={{ duration: 3, repeat: Infinity, delay: i * 0.5 }}
+                              className="flex items-center gap-2 text-[11px] text-slate-400"
+                            >
+                              {item.icon}
+                              <span>{item.text}</span>
+                            </motion.div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Animated Progress Timeline */}
+                      <div className="py-2">
+                        <label className="block text-sm font-medium text-slate-400 mb-3">🛤️ Task Completion Flow</label>
+                        <div className="flex flex-col gap-1 px-2">
+                          {[
+                            { step: "①", label: "Tap Watch Ad", icon: <Play size={12} /> },
+                            { step: "②", label: "Ad Starts", icon: <Tv size={12} /> },
+                            { step: "③", label: "Watch Until End", icon: <Timer size={12} /> },
+                            { step: "④", label: "Verification", icon: <ClipboardCheck size={12} /> },
+                            { step: "⑤", label: "Claim Reward", icon: <Zap size={12} /> },
+                            { step: "⑥", label: "Reward Credited", icon: <Award size={12} /> },
+                          ].map((item, i, arr) => (
+                            <div key={i} className="flex items-center gap-3">
+                              <div className="flex flex-col items-center">
+                                <motion.div 
+                                  animate={{ 
+                                    scale: [1, 1.1, 1], 
+                                    backgroundColor: ["#1e293b", "#3b82f6", "#1e293b"],
+                                    borderColor: ["#334155", "#60a5fa", "#334155"]
+                                  }}
+                                  transition={{ duration: 2, repeat: Infinity, delay: i * 0.4 }}
+                                  className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold text-white border border-slate-700"
+                                >
+                                  {item.step}
+                                </motion.div>
+                                {i < arr.length - 1 && (
+                                  <div className="w-0.5 h-4 bg-slate-800 my-0.5"></div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 text-xs font-medium text-slate-400 bg-slate-950/40 px-3 py-1.5 rounded-lg border border-slate-800/50 flex-1">
+                                <span className="text-blue-400">{item.icon}</span>
+                                {item.label}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">💰 Reward Amount</label>
+                          <input 
+                            type="number" 
+                            value={taskForm.rewardAmount}
+                            onChange={(e) => setTaskForm({...taskForm, rewardAmount: e.target.value})}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                            placeholder="e.g. 50"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">🕒 Timer (s)</label>
+                          <input 
+                            type="number" 
+                            value={taskForm.timerDuration}
+                            onChange={(e) => setTaskForm({...taskForm, timerDuration: e.target.value})}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                            placeholder="e.g. 15"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="block text-sm font-medium text-slate-400">📄 Task Description</label>
+                          <button 
+                            onClick={() => handleGenerateAiTask('description')}
+                            disabled={aiGeneratingTask}
+                            className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors flex items-center gap-1"
+                          >
+                            <Sparkles size={10} /> AI Generate
+                          </button>
+                        </div>
+                        <textarea 
+                          value={taskForm.description}
+                          onChange={(e) => setTaskForm({...taskForm, description: e.target.value})}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 h-24 resize-none"
+                          placeholder="Task instructions..."
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="block text-sm font-medium text-slate-400">💰 Reward Amount</label>
+                            <button 
+                              onClick={() => handleGenerateAiTask('rewardAmount')}
+                              disabled={aiGeneratingTask}
+                              className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors"
+                            >
+                              ✨
+                            </button>
+                          </div>
+                          <input 
+                            type="number" 
+                            value={taskForm.rewardAmount}
+                            onChange={(e) => setTaskForm({...taskForm, rewardAmount: e.target.value})}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                            placeholder="e.g. 50"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="block text-sm font-medium text-slate-400">🕒 Timer (s)</label>
+                            <button 
+                              onClick={() => handleGenerateAiTask('timerDuration')}
+                              disabled={aiGeneratingTask}
+                              className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors"
+                            >
+                              ✨
+                            </button>
+                          </div>
+                          <input 
+                            type="number" 
+                            value={taskForm.timerDuration}
+                            onChange={(e) => setTaskForm({...taskForm, timerDuration: e.target.value})}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                            placeholder="e.g. 15"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="block text-sm font-medium text-slate-400">📄 Total Pages</label>
+                            <button 
+                              onClick={() => handleGenerateAiTask('totalPages')}
+                              disabled={aiGeneratingTask}
+                              className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors"
+                            >
+                              ✨
+                            </button>
+                          </div>
+                          <input 
+                            type="number" 
+                            value={taskForm.totalPages}
+                            onChange={(e) => setTaskForm({...taskForm, totalPages: e.target.value})}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                            placeholder="e.g. 3"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Status</label>
+                          <select 
+                            value={taskForm.status}
+                            onChange={(e) => setTaskForm({...taskForm, status: e.target.value})}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                          >
+                            <option value="🟢 Active">🟢 Active</option>
+                            <option value="🔴 Disabled">🔴 Disabled</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="block text-sm font-medium text-slate-400">📷 Task Image URL</label>
+                          <button 
+                            onClick={() => handleGenerateAiTask('imageUrl')}
+                            disabled={aiGeneratingTask}
+                            className="text-[10px] bg-slate-900 hover:bg-slate-800 text-indigo-400 px-2 py-0.5 rounded border border-slate-800 transition-colors flex items-center gap-1"
+                          >
+                            <Sparkles size={10} /> AI Image
+                          </button>
+                        </div>
+                        <input 
+                          type="text" 
+                          value={taskForm.imageUrl}
+                          onChange={(e) => setTaskForm({...taskForm, imageUrl: e.target.value})}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                          placeholder="https://..."
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {/* Step 2: Add Ads (Select Ads based on network and type) - Hidden for Monetag Mini App */}
+                  {taskForm.adNetwork && taskForm.adNetwork !== "Monetag Mini App" && (
                     <div className="bg-slate-950/40 p-4 border border-slate-800 rounded-xl mt-3 space-y-3">
                       <div className="flex justify-between items-center pb-2 border-b border-slate-800">
                         <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">🎯 Select {taskForm.adNetwork} Ads (Step 2)</span>
@@ -6640,6 +6763,7 @@ export default function AdminDashboard() {
                     </div>
                   )}
                 </div>
+
               ) : (modalAction === 'create_ad' || modalAction === 'edit_ad') ? (
                 <div className="space-y-4">
                   <div>

@@ -2443,16 +2443,16 @@ async function processEarnRewards(botToken: string, chatId: number, user: any) {
         console.error("Error fetching dynamic tasks in bot.ts:", e);
     }
 
-    // Merge hardcoded REWARD_TASKS and Firestore dbTasks (dbTasks take precedence if matching ID)
-    const taskMap = new Map<string, any>();
-    REWARD_TASKS.forEach(t => taskMap.set(t.id, t));
-    dbTasks.forEach(t => {
-        // Only show Active tasks
-        if (t.status === "🟢 Active" || String(t.status || "").toLowerCase().includes("active")) {
-            taskMap.set(t.id, t);
-        }
-    });
-    const mergedTasks = Array.from(taskMap.values());
+    // Only show Active tasks
+    const mergedTasks = dbTasks.filter(t => 
+        t.status === "🟢 Active" || 
+        String(t.status || "").toLowerCase().includes("active")
+    );
+    
+    if (mergedTasks.length === 0) {
+        await sendTelegramMessage(botToken, chatId, "No reward tasks available.", { parse_mode: "Markdown" });
+        return;
+    }
 
     let message = `💰 *Reward Tasks*\n\n`;
     const buttons: any[] = [];

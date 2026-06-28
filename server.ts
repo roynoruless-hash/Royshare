@@ -11,7 +11,51 @@ import { safeGenerateContent } from "./src/lib/gemini";
 // ...
 const db = getDb();
 
+async function cleanupDemoTasks() {
+  try {
+    const tasksToCleanup = [
+      { id: "task_1" },
+      { id: "task_2" },
+      { id: "task_3" },
+      { id: "task_4" },
+      { title: "Task #1" },
+      { title: "Task #2" },
+      { title: "Task #3" },
+      { title: "Task #4" },
+      { title: "Open Task #3 In Chrome" },
+      { title: "Open Task #4 In Chrome" },
+      { title: "Watch Ads Rewards" },
+      { title: "Quick Video Ad Session" }
+    ];
+
+    const tasksRef = collection(db, "tasks");
+    const snapshot = await getDocs(tasksRef);
+    
+    for (const docSnap of snapshot.docs) {
+      const data = docSnap.data();
+      const id = docSnap.id;
+      const title = data.title || "";
+      
+      const shouldDelete = tasksToCleanup.some(t => {
+        if (t.id && t.id === id) return true;
+        if (t.title && t.title === title) return true;
+        return false;
+      });
+
+      if (shouldDelete) {
+        console.log(`Cleaning up demo task: ${title} (${id})`);
+        await deleteDoc(docSnap.ref);
+      }
+    }
+  } catch (e) {
+    console.error("Error cleaning up demo tasks:", e);
+  }
+}
+
 async function startServer() {
+  // Run cleanup on startup
+  await cleanupDemoTasks();
+  
   const app = express();
   app.use(express.json());
 
@@ -3497,16 +3541,11 @@ Bonus added successfully.`;
         console.error("Error fetching dynamic tasks in settings endpoint:", e);
       }
 
-      // Merge hardcoded REWARD_TASKS and Firestore dbTasks (dbTasks take precedence if matching ID)
-      const taskMap = new Map<string, any>();
-      REWARD_TASKS.forEach(t => taskMap.set(t.id, t));
-      dbTasks.forEach(t => {
-        // Only return Active tasks to the user
-        if (t.status === "🟢 Active" || String(t.status || "").toLowerCase().includes("active")) {
-          taskMap.set(t.id, t);
-        }
-      });
-      const mergedTasks = Array.from(taskMap.values());
+      // Only return Active tasks to the user
+      const mergedTasks = dbTasks.filter(t => 
+        t.status === "🟢 Active" || 
+        String(t.status || "").toLowerCase().includes("active")
+      );
 
       return res.json({
         timerDuration,
@@ -3550,9 +3589,7 @@ Bonus added successfully.`;
       }
 
       if (!isDbTask) {
-        const task = REWARD_TASKS.find(t => t.id === taskId);
-        if (!task) return res.status(400).json({ error: "Invalid taskId" });
-        amount = task.amount;
+        return res.status(400).json({ error: "Invalid taskId" });
       }
 
       // Anti-abuse: Check if already completed
