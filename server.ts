@@ -3715,20 +3715,34 @@ Bonus added successfully.`;
   // MONETAG SERVER-SIDE POSTBACK SYSTEM
   // ========================================
 
+  // 0. Health Check Endpoint
+  app.get("/api/monetag/postback/test", (req, res) => {
+    res.json({
+      success: true,
+      message: "Monetag Postback API is working",
+      timestamp: new Date().toISOString()
+    });
+  });
+
   // 1. Postback Handler (Supports both GET and POST)
   app.all("/api/monetag/postback", async (req, res) => {
     const method = req.method;
     const params = method === "GET" ? req.query : req.body;
     
+    console.log(`[MONETAG POSTBACK] Received ${method} request at ${new Date().toISOString()}`);
+    console.log(`[MONETAG POSTBACK] Params:`, JSON.stringify(params, null, 2));
+
+    // Support multiple macro names for common fields
+    const telegram_id = params.telegram_id || params.ext_id || params.subid || params.click_id;
+    const ymid = params.ymid || params.visitor_id || params.clickid;
+    const request_var = params.request_var || params.custom_var || params.taskId;
+    
     const {
-      telegram_id,
       zone_id,
       sub_zone_id,
       event_type,
       reward_event_type,
-      estimated_price,
-      ymid,
-      request_var
+      estimated_price
     } = params;
 
     // Log entry for the postback
@@ -3744,11 +3758,14 @@ Bonus added successfully.`;
     try {
       // Basic validation
       if (!telegram_id || !ymid) {
+        console.error(`[MONETAG POSTBACK] Error: Missing telegram_id (${telegram_id}) or ymid (${ymid})`);
         logEntry.status = "failed";
         logEntry.error = "Missing telegram_id or ymid";
         await addDoc(postbackRef, logEntry);
         return res.status(400).send("Missing telegram_id or ymid");
       }
+
+      console.log(`[MONETAG POSTBACK] Processing for telegram_id: ${telegram_id}, ymid: ${ymid}`);
 
       // Replay Protection: Check if this YMID was already processed successfully
       const duplicateQuery = query(
@@ -3758,15 +3775,16 @@ Bonus added successfully.`;
       );
       const duplicateSnapshot = await getDocs(duplicateQuery);
       if (!duplicateSnapshot.empty) {
+        console.warn(`[MONETAG POSTBACK] Warning: Duplicate YMID detected: ${ymid}`);
         logEntry.status = "failed";
         logEntry.error = "Duplicate YMID detected (Replay Attack prevented)";
         await addDoc(postbackRef, logEntry);
-        // Return 200 to Monetag so they stop retrying, even though we didn't process it again
         return res.status(200).send("Duplicate postback already processed");
       }
 
       // Check reward eligibility
       if (reward_event_type !== "yes") {
+        console.log(`[MONETAG POSTBACK] Info: Event ignored because reward_event_type is '${reward_event_type}'`);
         logEntry.status = "ignored";
         logEntry.reason = "reward_event_type is not 'yes'";
         await addDoc(postbackRef, logEntry);
@@ -3774,13 +3792,23 @@ Bonus added successfully.`;
       }
 
       // Find User by Telegram ID
+      const tgIdNum = Number(telegram_id);
+      if (isNaN(tgIdNum)) {
+        console.error(`[MONETAG POSTBACK] Error: Invalid telegram_id (NaN): ${telegram_id}`);
+        logEntry.status = "failed";
+        logEntry.error = `Invalid Telegram ID: ${telegram_id}`;
+        await addDoc(postbackRef, logEntry);
+        return res.status(400).send("Invalid telegram_id");
+      }
+
       const usersRef = collection(db, "users");
-      const userQuery = query(usersRef, where("telegramId", "==", Number(telegram_id)));
+      const userQuery = query(usersRef, where("telegramId", "==", tgIdNum));
       const userSnapshot = await getDocs(userQuery);
 
       if (userSnapshot.empty) {
+        console.error(`[MONETAG POSTBACK] Error: User with telegramId ${tgIdNum} not found`);
         logEntry.status = "failed";
-        logEntry.error = `User with Telegram ID ${telegram_id} not found in database`;
+        logEntry.error = `User with Telegram ID ${tgIdNum} not found in database`;
         await addDoc(postbackRef, logEntry);
         return res.status(404).send("User not found");
       }
@@ -3788,6 +3816,7 @@ Bonus added successfully.`;
       const userDoc = userSnapshot.docs[0];
       const userData = userDoc.data();
       const userId = userDoc.id;
+      console.log(`[MONETAG POSTBACK] Found user: ${userId} (${userData.username || 'No username'})`);
 
       // Determine reward amount
       // Default fallback reward
@@ -3809,6 +3838,8 @@ Bonus added successfully.`;
       const newBalance = currentBalance + rewardAmount;
       const newTotalEarnings = currentTotalEarnings + rewardAmount;
 
+      console.log(`[MONETAG POSTBACK] Crediting reward: ${rewardAmount} to user ${userId}. New balance: ${newBalance}`);
+
       await updateDoc(userDoc.ref, {
         balance: newBalance,
         totalEarnings: newTotalEarnings,
@@ -3818,7 +3849,7 @@ Bonus added successfully.`;
       // Log Reward History
       await addDoc(collection(db, "reward_history"), {
         userId,
-        telegramId: Number(telegram_id),
+        telegramId: tgIdNum,
         amount: rewardAmount,
         type: "monetag_postback",
         description: `Monetag Ad Completion (Zone: ${zone_id})`,
@@ -3829,6 +3860,7 @@ Bonus added successfully.`;
 
       // Mark Task as Completed
       if (taskId && taskId !== "monetag_default_task") {
+        console.log(`[MONETAG POSTBACK] Marking task ${taskId} as verified for user ${userId}`);
         const completionsRef = collection(db, "task_completions");
         // Use setDoc with a composite ID to prevent duplicates if postbacks arrive multiple times for same task
         const completionId = `${userId}_${taskId}_${ymid}`;
@@ -3895,6 +3927,7 @@ Bonus added successfully.`;
       logEntry.rewardAmount = rewardAmount;
       await addDoc(postbackRef, logEntry);
 
+      console.log(`[MONETAG POSTBACK] Success: Reward credited for telegram_id ${telegram_id}`);
       return res.status(200).send("Reward credited successfully");
     } catch (e: any) {
       console.error("Monetag Postback Processing Error:", e);
@@ -3919,7 +3952,8 @@ Bonus added successfully.`;
       const recentEvents = recentSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
       const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
-      const postbackUrl = `${appUrl}/api/monetag/postback?telegram_id={telegram_id}&zone_id={zone_id}&sub_zone_id={sub_zone_id}&event_type={event_type}&reward_event_type={reward_event_type}&estimated_price={estimated_price}&ymid={ymid}&request_var={request_var}`;
+      // Update URL to use more common macros as fallbacks
+      const postbackUrl = `${appUrl}/api/monetag/postback?ext_id={ext_id}&ymid={ymid}&zone_id={zone_id}&event_type={event_type}&reward_event_type={reward_event_type}&estimated_price={estimated_price}&request_var={request_var}`;
 
       res.json({
         success: true,
@@ -3965,6 +3999,8 @@ Bonus added successfully.`;
       const { userId, taskId } = req.query;
       if (!userId || !taskId) return res.status(400).json({ error: "Missing params" });
       
+      console.log(`[STATUS CHECK] Checking status for userId: ${userId}, taskId: ${taskId}`);
+
       const q = query(
         collection(db, "task_completions"),
         where("userId", "==", userId),
@@ -3974,11 +4010,14 @@ Bonus added successfully.`;
       
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
+        console.log(`[STATUS CHECK] Success: Task ${taskId} found verified for user ${userId}`);
         return res.json({ completed: true });
       } else {
-        return res.json({ completed: false });
+        console.log(`[STATUS CHECK] Pending: No verified completion found for userId: ${userId}, taskId: ${taskId}`);
+        return res.json({ completed: false, reason: "No verified record found in task_completions collection with status 'verified'." });
       }
     } catch (e: any) {
+      console.error("[STATUS CHECK] Error:", e);
       res.status(500).json({ error: e.message });
     }
   });

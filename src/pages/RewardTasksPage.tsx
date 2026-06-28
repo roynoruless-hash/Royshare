@@ -332,6 +332,28 @@ export default function RewardTasksPage() {
     }
   };
 
+  // Automatically poll for completion once ad is watched
+  useEffect(() => {
+    let interval: any;
+    if (adWatchedSuccessfully && !isCompletedSuccess && !submitting) {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
+          const data = await res.json();
+          if (data.completed) {
+            setVideoCompleted(true);
+            setCurrentTime(duration);
+            setIsCompletedSuccess(true);
+            clearInterval(interval);
+          }
+        } catch (e) {
+          console.error("Polling error:", e);
+        }
+      }, 5000); // Check every 5 seconds
+    }
+    return () => clearInterval(interval);
+  }, [adWatchedSuccessfully, isCompletedSuccess, submitting, userId, taskId, duration]);
+
   const handleWatchMonetagAd = async () => {
     if (isMonetagAdRunning || adWatchedSuccessfully || submitting) return;
 
@@ -383,7 +405,7 @@ export default function RewardTasksPage() {
         setCurrentTime(duration);
         setIsCompletedSuccess(true);
       } else {
-        setMonetagError("Verification pending. Please wait a few seconds and try again.");
+        setMonetagError(`Verification pending: ${data.reason || "Waiting for Monetag postback"}`);
       }
     } catch (err) {
       setMonetagError("Failed to check verification status.");
