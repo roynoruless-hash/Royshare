@@ -4,7 +4,8 @@ import {
   Zap, Play, CheckCircle2, AlertTriangle, Timer, Tv, 
   Target, ShieldAlert, Award, Clock, AlertCircle, Info,
   Smartphone, MousePointer2, ClipboardCheck, Sparkles,
-  Copy, ExternalLink, Eye, EyeOff
+  Copy, ExternalLink, Eye, EyeOff, RotateCcw, UserPlus, Trash2,
+  Search, User, Filter, Download, Users
 } from "lucide-react";
 import AdScriptRenderer from "../components/AdScriptRenderer";
 
@@ -68,6 +69,7 @@ export default function AdminDashboard() {
   const [userSearch, setUserSearch] = useState("");
   const [userView, setUserView] = useState<'all' | 'banned' | 'stats'>('all');
   const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
   const [ads, setAds] = useState<any[]>([]);
   const [adsLoading, setAdsLoading] = useState(false);
@@ -725,6 +727,69 @@ export default function AdminDashboard() {
     } finally {
       setUsersLoading(false);
     }
+  };
+
+  const handleUserAction = async (userId: string, action: string) => {
+    if (action === 'delete' && !confirm("⚠️ Are you sure you want to permanently delete this user?\n\nThis will remove their profile, wallet, referral data, and all history.")) return;
+    if (action === 'reset' && !confirm("Are you sure you want to reset this user? This will clear balance, rewards, and progress.")) return;
+    if (action === 're-register' && !confirm("Are you sure you want to set this user for re-registration?")) return;
+
+    setModalLoading(true);
+    try {
+      const endpoint = action === 'delete' 
+        ? `/api/admin/users/${userId}` 
+        : `/api/admin/users/${userId}/${action}`;
+      
+      const res = await fetch(endpoint, {
+        method: action === 'delete' ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminId: "Admin" })
+      });
+      
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message || "Action completed successfully");
+        fetchUsers();
+        if (selectedUser?.id === userId) setSelectedUser(null);
+        if (modalAction === 'view_user') setModalAction('none');
+      } else {
+        alert(data.error || "Action failed");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const handleBulkUserAction = async (action: string) => {
+    if (selectedUserIds.length === 0) return;
+    if (!confirm(`Are you sure you want to ${action} ${selectedUserIds.length} users?`)) return;
+
+    setUsersLoading(true);
+    try {
+      const res = await fetch("/api/admin/users/bulk-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: selectedUserIds, action, adminId: "Admin" })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message);
+        setSelectedUserIds([]);
+        fetchUsers();
+      } else {
+        alert(data.error);
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const handleExportUsers = () => {
+    window.open("/api/admin/users/export", "_blank");
   };
 
   const fetchAds = async () => {
@@ -2534,91 +2599,280 @@ export default function AdminDashboard() {
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
                 <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                  👥 User Manager
+                  <Users className="text-indigo-400" size={28} />
+                  User Manager
                 </h2>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <button onClick={() => setUserView('all')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${userView === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📋 All Users</button>
-                  <button onClick={() => setUserView('banned')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${userView === 'banned' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🚫 Banned Users</button>
-                  <button onClick={() => setUserView('stats')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${userView === 'stats' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 User Statistics</button>
+                  <button onClick={() => { setUserView('all'); setSelectedUserIds([]); }} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${userView === 'all' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📋 All Users</button>
+                  <button onClick={() => { setUserView('banned'); setSelectedUserIds([]); }} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${userView === 'banned' ? 'bg-red-600 text-white shadow-lg shadow-red-900/40' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🚫 Banned Users</button>
+                  <button onClick={() => setUserView('stats')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${userView === 'stats' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 User Statistics</button>
                   <button onClick={fetchUsers} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700">🔄 Refresh</button>
                 </div>
               </div>
 
               {usersLoading ? (
-                <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
+                <div className="flex justify-center py-20">
+                  <div className="relative">
+                    <div className="w-12 h-12 border-4 border-indigo-500/20 rounded-full"></div>
+                    <div className="absolute top-0 left-0 w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                </div>
               ) : userView === 'stats' ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">👥 Total Users</h3>
-                    <p className="text-2xl font-bold text-white">{users.length}</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5 shadow-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Users</h3>
+                      <Users size={16} className="text-indigo-400" />
+                    </div>
+                    <p className="text-3xl font-black text-white">{users.length}</p>
                   </div>
-                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">🟢 Active Users</h3>
-                    <p className="text-2xl font-bold text-emerald-400">{users.filter(u => u.status !== 'Banned').length}</p>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-5 shadow-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-xs font-bold text-emerald-500/80 uppercase tracking-widest">Active</h3>
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                    </div>
+                    <p className="text-3xl font-black text-emerald-400">{users.filter(u => u.status !== 'Banned').length}</p>
                   </div>
-                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-red-500/80 uppercase tracking-wider mb-1">🔴 Banned Users</h3>
-                    <p className="text-2xl font-bold text-red-400">{users.filter(u => u.status === 'Banned').length}</p>
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-5 shadow-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-xs font-bold text-red-500/80 uppercase tracking-widest">Banned</h3>
+                      <ShieldAlert size={16} className="text-red-400" />
+                    </div>
+                    <p className="text-3xl font-black text-red-400">{users.filter(u => u.status === 'Banned').length}</p>
                   </div>
-                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">💰 Total Balance</h3>
-                    <p className="text-2xl font-bold text-blue-400">₹{users.reduce((acc, u) => acc + Number(u.availableBalance || 0), 0).toFixed(2)}</p>
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-5 shadow-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-xs font-bold text-indigo-500/80 uppercase tracking-widest">Total Balance</h3>
+                      <Zap size={16} className="text-indigo-400" />
+                    </div>
+                    <p className="text-3xl font-black text-indigo-400">₹{users.reduce((acc, u) => acc + Number(u.availableBalance || 0), 0).toFixed(0)}</p>
                   </div>
                 </div>
               ) : (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-                  <div className="p-4 border-b border-slate-800 bg-slate-950/50 flex flex-wrap gap-4 items-center justify-between">
-                    <h3 className="font-bold text-white">{userView === 'banned' ? '🚫 Banned Users' : '📋 All Users'}</h3>
-                    <div className="flex items-center bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 w-full md:w-auto">
-                      <span className="text-slate-400 mr-2">🔍</span>
-                      <input type="text" placeholder="Search by ID, Username, Phone..." value={userSearch} onChange={e => setUserSearch(e.target.value)} className="bg-transparent text-sm text-white focus:outline-none w-full md:w-64" />
+                <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-3xl overflow-hidden shadow-2xl animate-in fade-in slide-in-from-bottom-6">
+                  <div className="p-5 border-b border-slate-800 bg-slate-950/40 flex flex-wrap gap-4 items-center justify-between">
+                    <div className="flex flex-wrap items-center gap-4">
+                      <h3 className="font-black text-white flex items-center gap-2">
+                        {userView === 'banned' ? '🚫 Banned Users' : '📋 All Users'}
+                        <span className="bg-slate-800 text-[10px] px-2 py-0.5 rounded-full text-slate-400">
+                          {users.filter(u => userView === 'banned' ? u.status === 'Banned' : true).length}
+                        </span>
+                      </h3>
+                      <div className="relative group">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={16} />
+                        <input 
+                          type="text" 
+                          placeholder="Search by ID, Username, Phone, Name..." 
+                          value={userSearch} 
+                          onChange={e => setUserSearch(e.target.value)} 
+                          className="bg-slate-950/50 border border-slate-800 focus:border-indigo-500/50 rounded-2xl pl-10 pr-4 py-2 text-sm text-white focus:outline-none w-full md:w-96 transition-all" 
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                      <AnimatePresence>
+                        {selectedUserIds.length > 0 && (
+                          <motion.div 
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl px-3 py-1.5"
+                          >
+                            <span className="text-xs font-black text-indigo-400">{selectedUserIds.length} Selected</span>
+                            <div className="h-4 w-px bg-slate-700 mx-1"></div>
+                            <button onClick={() => handleBulkUserAction('delete')} className="text-[10px] font-black text-red-400 hover:text-red-300 px-2 py-1 bg-red-500/10 rounded-lg transition-colors flex items-center gap-1">
+                              <Trash2 size={10} /> Delete
+                            </button>
+                            <button onClick={() => handleBulkUserAction('reset')} className="text-[10px] font-black text-yellow-400 hover:text-yellow-300 px-2 py-1 bg-yellow-500/10 rounded-lg transition-colors flex items-center gap-1">
+                              <RotateCcw size={10} /> Reset
+                            </button>
+                            <button onClick={() => setSelectedUserIds([])} className="p-1 text-slate-500 hover:text-white transition-colors">
+                              <EyeOff size={14} />
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                      
+                      <button onClick={handleExportUsers} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl transition-all shadow-lg shadow-emerald-900/40">
+                        <Download size={14} />
+                        EXPORT CSV
+                      </button>
                     </div>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
+
+                  <div className="overflow-x-auto custom-scrollbar">
+                    <table className="w-full text-left text-sm text-slate-300 border-collapse">
+                      <thead className="text-[10px] text-slate-500 uppercase font-black bg-slate-950/20 border-b border-slate-800">
                         <tr>
-                          <th className="px-4 py-3">👤 User Info</th>
-                          <th className="px-4 py-3">💰 Balance</th>
-                          <th className="px-4 py-3">📈 Stats</th>
-                          <th className="px-4 py-3">Status</th>
-                          <th className="px-4 py-3 text-right">Actions</th>
+                          <th className="px-6 py-4 w-10">
+                            <div className="flex items-center">
+                              <input 
+                                type="checkbox" 
+                                className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900" 
+                                checked={selectedUserIds.length > 0 && selectedUserIds.length === users.length}
+                                onChange={(e) => {
+                                  if (e.target.checked) setSelectedUserIds(users.map(u => u.id));
+                                  else setSelectedUserIds([]);
+                                }}
+                              />
+                            </div>
+                          </th>
+                          <th className="px-6 py-4 tracking-widest">👤 Identity</th>
+                          <th className="px-6 py-4 tracking-widest">💰 Wealth</th>
+                          <th className="px-6 py-4 tracking-widest">🛡️ Trust & Activity</th>
+                          <th className="px-6 py-4 text-right tracking-widest">Command</th>
                         </tr>
                       </thead>
-                      <tbody>
-                        {users.filter(u => userView === 'banned' ? u.status === 'Banned' : true).filter(u => !userSearch || u.id?.includes(userSearch) || u.username?.toLowerCase().includes(userSearch.toLowerCase()) || u.phone?.includes(userSearch) || u.name?.toLowerCase().includes(userSearch.toLowerCase())).length === 0 ? (
-                          <tr><td colSpan={5} className="text-center py-8 text-slate-500">No users found</td></tr>
-                        ) : (
-                          users.filter(u => userView === 'banned' ? u.status === 'Banned' : true).filter(u => !userSearch || u.id?.includes(userSearch) || u.username?.toLowerCase().includes(userSearch.toLowerCase()) || u.phone?.includes(userSearch) || u.name?.toLowerCase().includes(userSearch.toLowerCase())).map((u: any) => (
-                            <tr key={u.id} className="border-b border-slate-800/50 hover:bg-slate-800/20">
-                              <td className="px-4 py-3">
-                                <div className="font-medium text-white">{u.name || 'Unknown'}</div>
-                                <div className="text-xs text-slate-400">@{u.username || 'N/A'}</div>
-                                <div className="font-mono text-xs text-slate-500 mt-1">{u.id}</div>
-                                {u.phone && <div className="text-xs text-slate-400 mt-0.5">📱 {u.phone}</div>}
+                      <tbody className="divide-y divide-slate-800/30">
+                        {(() => {
+                          const filtered = users
+                            .filter(u => userView === 'banned' ? u.status === 'Banned' : true)
+                            .filter(u => {
+                              const s = userSearch.toLowerCase();
+                              return !userSearch || 
+                                String(u.id || "").includes(s) || 
+                                String(u.telegramId || "").includes(s) ||
+                                String(u.username || "").toLowerCase().includes(s) || 
+                                String(u.phone || "").includes(s) || 
+                                String(u.firstName || "").toLowerCase().includes(s) ||
+                                String(u.lastName || "").toLowerCase().includes(s) ||
+                                String(u.name || "").toLowerCase().includes(s);
+                            });
+
+                          if (filtered.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={5} className="text-center py-20">
+                                  <div className="flex flex-col items-center gap-3">
+                                    <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center text-slate-600 mb-2">
+                                      <Users size={32} />
+                                    </div>
+                                    <p className="text-slate-400 font-bold">No Users Found</p>
+                                    <p className="text-xs text-slate-600">Try adjusting your search or filters</p>
+                                    <button onClick={() => { setUserSearch(''); setUserView('all'); }} className="text-xs font-bold text-indigo-400 hover:underline mt-2">Clear all filters</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return filtered.map((u: any) => (
+                            <tr key={u.id} className={`group transition-all duration-300 ${selectedUserIds.includes(u.id) ? 'bg-indigo-500/10' : 'hover:bg-slate-800/30'}`}>
+                              <td className="px-6 py-4">
+                                <input 
+                                  type="checkbox" 
+                                  className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900"
+                                  checked={selectedUserIds.includes(u.id)}
+                                  onChange={() => {
+                                    if (selectedUserIds.includes(u.id)) setSelectedUserIds(prev => prev.filter(id => id !== u.id));
+                                    else setSelectedUserIds(prev => [...prev, u.id]);
+                                  }}
+                                />
                               </td>
-                              <td className="px-4 py-3">
-                                <div className="font-bold text-emerald-400">₹{Number(u.availableBalance || 0).toFixed(2)}</div>
-                                <div className="text-xs text-yellow-400">🎁 ₹{Number(u.bonusBalance || 0).toFixed(2)}</div>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 font-black border border-indigo-500/20 group-hover:scale-110 transition-transform">
+                                    {(u.firstName || u.name || '?')[0].toUpperCase()}
+                                  </div>
+                                  <div className="flex flex-col">
+                                    <span className="font-black text-white text-sm tracking-tight">{u.firstName || u.name || 'Anonymous'} {u.lastName || ''}</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">@{u.username || 'unknown'}</span>
+                                      <span className="w-1 h-1 rounded-full bg-slate-700"></span>
+                                      <span className="text-[10px] text-slate-500 font-mono">ID: {u.telegramId || u.id}</span>
+                                    </div>
+                                    {u.phone && (
+                                      <div className="flex items-center gap-1 mt-1">
+                                        <Smartphone size={10} className="text-emerald-500" />
+                                        <span className="text-[10px] text-emerald-400/80 font-bold">{u.phone}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
                               </td>
-                              <td className="px-4 py-3 text-xs space-y-1">
-                                <div>📤 {u.uploads || 0} files</div>
-                                <div>🔗 {u.links || 0} links</div>
-                                <div>👥 {u.referrals || 0} refs</div>
+                              <td className="px-6 py-4">
+                                <div className="flex flex-col">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs font-black text-slate-400">₹</span>
+                                    <span className="text-lg font-black text-emerald-400 tracking-tighter">
+                                      {Number(u.availableBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <div className="flex items-center gap-1 bg-slate-800/50 px-1.5 py-0.5 rounded border border-slate-700/50">
+                                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">REWARD</span>
+                                      <span className="text-[10px] font-black text-yellow-500">₹{Number(u.rewards || 0).toFixed(0)}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 bg-slate-800/50 px-1.5 py-0.5 rounded border border-slate-700/50">
+                                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">REF</span>
+                                      <span className="text-[10px] font-black text-blue-400">{u.referrals || 0}</span>
+                                    </div>
+                                  </div>
+                                </div>
                               </td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-1 rounded text-xs font-bold ${u.status === 'Banned' ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-                                  {u.status === 'Banned' ? '🚫 Banned' : '🟢 Active'}
-                                </span>
+                              <td className="px-6 py-4">
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between text-[9px] uppercase tracking-widest font-black text-slate-600">
+                                    <span>Identity Status</span>
+                                    <div className="flex gap-2">
+                                      <div className="flex items-center gap-1">
+                                        <div className={`w-1.5 h-1.5 rounded-full ${u.membershipVerified ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`}></div>
+                                        <span className={u.membershipVerified ? 'text-emerald-500' : 'text-red-500'}>JOIN</span>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <div className={`w-1.5 h-1.5 rounded-full ${u.contactVerified ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`}></div>
+                                        <span className={u.contactVerified ? 'text-emerald-500' : 'text-red-500'}>CONTACT</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                                      <Clock size={10} />
+                                      <span>Joined: <span className="text-slate-200 font-bold">{u.joinDate ? new Date(u.joinDate).toLocaleDateString('en-GB') : 'N/A'}</span></span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                                      <Timer size={10} />
+                                      <span>Last: <span className="text-slate-200 font-bold">{u.lastActive ? new Date(u.lastActive).toLocaleDateString('en-GB') : 'N/A'}</span></span>
+                                    </div>
+                                  </div>
+                                </div>
                               </td>
-                              <td className="px-4 py-3 text-right">
-                                <button onClick={() => { setSelectedUser(u); setModalAction('view_user'); }} className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-xs font-medium transition-colors">
-                                  View Details
-                                </button>
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button 
+                                    onClick={() => { setSelectedUser(u); setModalAction('view_user'); }} 
+                                    className="w-8 h-8 flex items-center justify-center bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white rounded-xl transition-all border border-blue-500/20"
+                                    title="View & Edit"
+                                  >
+                                    <Eye size={14} />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleUserAction(u.id, 'reset')} 
+                                    className="w-8 h-8 flex items-center justify-center bg-yellow-500/10 hover:bg-yellow-500 text-yellow-500 hover:text-white rounded-xl transition-all border border-yellow-500/20"
+                                    title="Reset User"
+                                  >
+                                    <RotateCcw size={14} />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleUserAction(u.id, 're-register')} 
+                                    className="w-8 h-8 flex items-center justify-center bg-purple-500/10 hover:bg-purple-500 text-purple-400 hover:text-white rounded-xl transition-all border border-purple-500/20"
+                                    title="Force Re-registration"
+                                  >
+                                    <UserPlus size={14} />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleUserAction(u.id, 'delete')} 
+                                    className="w-8 h-8 flex items-center justify-center bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white rounded-xl transition-all border border-red-500/20"
+                                    title="Delete User"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
                               </td>
                             </tr>
-                          ))
-                        )}
+                          ));
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -7321,6 +7575,9 @@ export default function AdminDashboard() {
                       <button onClick={() => setModalAction('ban_user')} className="py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors">🚫 Ban User</button>
                     )}
                     <button onClick={() => setModalAction('message_user')} className="py-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 rounded-xl text-xs font-bold transition-colors">📨 Send Message</button>
+                    <button onClick={() => handleUserAction(selectedUser.id, 'reset')} className="py-2 bg-yellow-600/20 hover:bg-yellow-600/40 text-yellow-500 rounded-xl text-xs font-bold transition-colors">🔄 Reset Progress</button>
+                    <button onClick={() => handleUserAction(selectedUser.id, 're-register')} className="py-2 bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 rounded-xl text-xs font-bold transition-colors">➕ Force Re-register</button>
+                    <button onClick={() => handleUserAction(selectedUser.id, 'delete')} className="py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl text-xs font-bold transition-colors">🗑 Delete User</button>
                   </div>
                 </div>
               ) : (modalAction === 'add_balance' || modalAction === 'deduct_balance') ? (

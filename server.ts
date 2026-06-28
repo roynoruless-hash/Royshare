@@ -126,6 +126,22 @@ async function startServer() {
     });
   });
 
+// Admin Logging Helper
+async function logAdminActivity(adminId: string, userId: string, action: string, ip: string, details?: any) {
+  try {
+    await addDoc(collection(db, "adminActivityLogs"), {
+      adminId: adminId || "Admin",
+      userId: userId || "N/A",
+      action: action || "Unknown Action",
+      ip: ip || "unknown",
+      details: details || {},
+      createdAt: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error("Failed to log admin activity:", err);
+  }
+}
+
 // Admin Dashboard route
   app.get("/api/admin/dashboard", async (req, res) => {
     try {
@@ -1438,15 +1454,188 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  // --- ADMIN USER MANAGEMENT HELPERS ---
+  const performDeleteUser = async (userId: string) => {
+    // 1. Delete user profile
+    await deleteDoc(doc(db, "users", userId));
+
+    // 2. Delete referral data
+    await deleteDoc(doc(db, "referrals", userId));
+    
+    // 3. Delete monetization history (Monetag postbacks)
+    const postbackQuery = query(collection(db, "monetagPostbacks"), where("telegramId", "==", Number(userId)));
+    const postbacks = await getDocs(postbackQuery);
+    for (const d of postbacks.docs) await deleteDoc(d.ref);
+
+    // 4. Delete YMID records
+    const ymidQuery = query(collection(db, "processedYmids"), where("userId", "==", userId));
+    const ymids = await getDocs(ymidQuery);
+    for (const d of ymids.docs) await deleteDoc(d.ref);
+
+    // 5. Sessions / Cached data
+    const sessionQuery = query(collection(db, "userSessions"), where("userId", "==", userId));
+    const sessions = await getDocs(sessionQuery);
+    for (const d of sessions.docs) await deleteDoc(d.ref);
+  };
+
+  const performResetUser = async (userId: string) => {
+    const userRef = doc(db, "users", userId);
+    await setDoc(userRef, {
+      balance: 0,
+      rewards: 0,
+      referrals: 0,
+      totalEarnings: 0,
+      availableBalance: 0,
+      bonusBalance: 0,
+      fileEarnings: 0,
+      linkEarnings: 0,
+      referralEarnings: 0,
+      rewardBalance: 0,
+      totalWithdrawn: 0,
+      pendingWithdrawals: 0,
+      membershipVerified: false,
+      contactVerified: false,
+      monetagProgress: 0,
+      tasksCompleted: 0,
+      lastActive: new Date().toISOString()
+    }, { merge: true });
+
+    // Clear processed YMIDs
+    const q = query(collection(db, "processedYmids"), where("userId", "==", userId));
+    const snap = await getDocs(q);
+    for (const d of snap.docs) await deleteDoc(d.ref);
+  };
+
+  // --- ADMIN USER ROUTES ---
+
   app.put("/api/admin/users/:id/status", async (req, res) => {
     try {
       const { id } = req.params;
-      const { status, reason } = req.body;
+      const { status, reason, adminId } = req.body;
       const userRef = doc(db, "users", id);
       await setDoc(userRef, { status, banReason: reason || null }, { merge: true });
-      res.json({ success: true });
+      
+      await logAdminActivity(adminId || "Admin", id, status === "Banned" ? "Ban User" : "Unban User", req.ip || "unknown", { reason });
+      
+      res.json({ success: true, message: `User ${status === 'Banned' ? 'banned' : 'unbanned'} successfully` });
     } catch (e: any) {
       console.error("Admin user status update error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Delete User COMPLETELY
+  app.delete("/api/admin/users/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminId } = req.body;
+      
+      await performDeleteUser(id);
+      await logAdminActivity(adminId || "Admin", id, "Permanent Delete User", req.ip || "unknown");
+
+      res.json({ success: true, message: "User deleted permanently" });
+    } catch (e: any) {
+      console.error("Admin user delete error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Reset User
+  app.post("/api/admin/users/:id/reset", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminId } = req.body;
+      
+      await performResetUser(id);
+      await logAdminActivity(adminId || "Admin", id, "Reset User", req.ip || "unknown");
+
+      res.json({ success: true, message: "User progress reset successfully" });
+    } catch (e: any) {
+      console.error("Admin user reset error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Re-register User
+  app.post("/api/admin/users/:id/re-register", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminId } = req.body;
+      const userRef = doc(db, "users", id);
+
+      const reRegisterData = {
+        membershipVerified: false,
+        contactVerified: false,
+        onboardingStep: 0,
+        registrationCompleted: false,
+        lastActive: new Date().toISOString()
+      };
+
+      await setDoc(userRef, reRegisterData, { merge: true });
+
+      const sessionQuery = query(collection(db, "userSessions"), where("userId", "==", id));
+      const sessions = await getDocs(sessionQuery);
+      for (const d of sessions.docs) await deleteDoc(d.ref);
+
+      await logAdminActivity(adminId || "Admin", id, "Re-register User", req.ip || "unknown");
+
+      res.json({ success: true, message: "User set for re-registration. They must follow onboarding flow again." });
+    } catch (e: any) {
+      console.error("Admin user re-register error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Bulk Action
+  app.post("/api/admin/users/bulk-action", async (req, res) => {
+    try {
+      const { userIds, action, adminId } = req.body;
+      if (!userIds || !Array.isArray(userIds)) return res.status(400).json({ error: "Invalid user IDs" });
+
+      for (const id of userIds) {
+        if (action === 'delete') {
+          await performDeleteUser(id);
+        } else if (action === 'reset') {
+          await performResetUser(id);
+        }
+      }
+
+      await logAdminActivity(adminId || "Admin", "Multiple", `Bulk ${action}`, req.ip || "unknown", { count: userIds.length });
+
+      res.json({ success: true, message: `Bulk ${action} completed for ${userIds.length} users` });
+    } catch (e: any) {
+      console.error("Admin bulk action error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Export Users CSV
+  app.get("/api/admin/users/export", async (req, res) => {
+    try {
+      const snapshot = await getDocs(collection(db, "users"));
+      const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      const fields = [
+        "id", "telegramId", "username", "firstName", "lastName", "phone", 
+        "balance", "availableBalance", "rewards", "referrals", 
+        "membershipVerified", "contactVerified", "createdAt", "lastActive"
+      ];
+
+      let csv = fields.join(",") + "\n";
+      users.forEach((u: any) => {
+        const row = fields.map(f => {
+          let val = u[f] || "";
+          if (typeof val === 'string' && val.includes(",")) val = `"${val}"`;
+          return val;
+        });
+        csv += row.join(",") + "\n";
+      });
+
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", "attachment; filename=users_export.csv");
+      res.status(200).send(csv);
+    } catch (e: any) {
+      console.error("Admin export users error:", e);
       res.status(500).json({ error: "Server error" });
     }
   });
@@ -3805,21 +3994,39 @@ Bonus added successfully.`;
       const userQuery = query(usersRef, where("telegramId", "==", tgIdNum));
       const userSnapshot = await getDocs(userQuery);
 
+      let userId: string;
+      let userData: any;
+      let userDocRef: any;
+
       if (userSnapshot.empty) {
-        console.error(`[MONETAG POSTBACK] Error: User with telegramId ${tgIdNum} not found`);
-        logEntry.status = "failed";
-        logEntry.error = `User with Telegram ID ${tgIdNum} not found in database`;
-        await addDoc(postbackRef, logEntry);
-        return res.status(404).send("User not found");
+        console.warn(`[MONETAG POSTBACK] User with telegramId ${tgIdNum} not found. Creating automatic record.`);
+        // Create minimal user record if not found
+        userDocRef = doc(usersRef, String(tgIdNum));
+        userData = {
+          telegramId: tgIdNum,
+          username: params.username || "monetag_auto_user",
+          firstName: params.firstName || "Monetag",
+          lastName: params.lastName || "User",
+          balance: 0,
+          totalEarnings: 0,
+          createdAt: new Date().toISOString(),
+          lastActive: new Date().toISOString(),
+          membershipVerified: false,
+          contactVerified: false,
+          monetag_auto_created: true
+        };
+        await setDoc(userDocRef, userData);
+        userId = String(tgIdNum);
+        console.log(`[MONETAG POSTBACK] Created automatic user record: ${userId}`);
+      } else {
+        const userDoc = userSnapshot.docs[0];
+        userData = userDoc.data();
+        userId = userDoc.id;
+        userDocRef = userDoc.ref;
+        console.log(`[MONETAG POSTBACK] Found user: ${userId} (${userData.username || 'No username'})`);
       }
 
-      const userDoc = userSnapshot.docs[0];
-      const userData = userDoc.data();
-      const userId = userDoc.id;
-      console.log(`[MONETAG POSTBACK] Found user: ${userId} (${userData.username || 'No username'})`);
-
       // Determine reward amount
-      // Default fallback reward
       let rewardAmount = 5; 
       
       // We use request_var as the taskId if passed from frontend ad call
@@ -3840,7 +4047,7 @@ Bonus added successfully.`;
 
       console.log(`[MONETAG POSTBACK] Crediting reward: ${rewardAmount} to user ${userId}. New balance: ${newBalance}`);
 
-      await updateDoc(userDoc.ref, {
+      await updateDoc(userDocRef, {
         balance: newBalance,
         totalEarnings: newTotalEarnings,
         lastEarningAt: new Date().toISOString()

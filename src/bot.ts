@@ -94,35 +94,50 @@ export async function handleUpdate(botToken: string, update: any) {
 
     const db = getDb();
     const userObj = update.message ? update.message.from : (update.callback_query ? update.callback_query.from : null);
+    const chatId = update.message ? update.message.chat.id : (update.callback_query ? update.callback_query.message.chat.id : null);
+
     if (userObj && userObj.id) {
         try {
             const userDocRef = doc(db, "users", String(userObj.id));
             const userSnap = await getDoc(userDocRef);
             const nowIso = new Date().toISOString();
+            
             if (userSnap.exists()) {
+                console.log(`[USER LOG] USER EXISTS: ${userObj.id}`);
                 const existingData = userSnap.data();
                 const uData: any = { lastActive: nowIso };
-                if (!existingData.joinDate) {
-                    uData.joinDate = nowIso;
-                }
-                if (userObj.first_name && !existingData.firstName) {
-                    uData.firstName = userObj.first_name;
-                }
-                if (userObj.username && !existingData.username) {
-                    uData.username = userObj.username;
-                }
+                
+                // Update missing fields for existing users
+                if (!existingData.chatId && chatId) uData.chatId = chatId;
+                if (!existingData.username && userObj.username) uData.username = userObj.username;
+                if (!existingData.firstName && userObj.first_name) uData.firstName = userObj.first_name;
+                if (!existingData.lastName && userObj.last_name) uData.lastName = userObj.last_name;
+                if (!existingData.languageCode && userObj.language_code) uData.languageCode = userObj.language_code;
+                
                 await setDoc(userDocRef, uData, { merge: true });
             } else {
+                console.log(`[USER LOG] NEW USER CREATED: ${userObj.id}`);
                 await setDoc(userDocRef, {
                     telegramId: userObj.id,
                     username: userObj.username || "",
                     firstName: userObj.first_name || "",
+                    lastName: userObj.last_name || "",
+                    languageCode: userObj.language_code || "",
+                    chatId: chatId || 0,
+                    createdAt: nowIso,
+                    lastActive: nowIso,
                     joinDate: nowIso,
-                    lastActive: nowIso
-                }, { merge: true });
+                    balance: 0,
+                    rewards: 0,
+                    referrals: 0,
+                    availableBalance: 0,
+                    totalEarnings: 0,
+                    membershipVerified: false,
+                    contactVerified: false
+                });
             }
         } catch (dbErr) {
-            console.error("Failed to automatically update user session timestamps:", dbErr);
+            console.error("Failed to update user session:", dbErr);
         }
     }
 
@@ -556,7 +571,7 @@ async function ensureSettings() {
 }
 
 async function processStart(botToken: string, chatId: number, user: any, startText?: string) {
-    console.log("processStart: Checking user status");
+    console.log(`[USER LOG] START RECEIVED: ${user.id}`);
     const db = getDb();
     
     // Check deep link parameter
@@ -574,14 +589,12 @@ async function processStart(botToken: string, chatId: number, user: any, startTe
             } else if (isExistingVerified) {
                 console.log(`Referral Rejected: Existing Registered User (${referredUserId})`);
             } else {
-                // Check if user is already linked/has referral claim (Duplicate Referral Claim / already linked to another referrer)
                 const refDocRef = doc(db, "referrals", referredUserId);
                 const refDoc = await getDoc(refDocRef);
                 
                 if (refDoc.exists()) {
-                    console.log(`Referral Rejected: User already linked to referrer or has duplicate claim`);
+                    console.log(`Referral Rejected: User already linked`);
                 } else {
-                    // Create pending referral relationship
                     await setDoc(refDocRef, {
                         referrerId: String(referrerId),
                         referredUserId: referredUserId,
@@ -595,7 +608,6 @@ async function processStart(botToken: string, chatId: number, user: any, startTe
                         totalCommission: 0
                     });
                     
-                    // Link on user document
                     await setDoc(userDocRef, {
                         referredBy: String(referrerId)
                     }, { merge: true });
@@ -604,39 +616,97 @@ async function processStart(botToken: string, chatId: number, user: any, startTe
                 }
             }
         } catch (err) {
-            console.error("Error setting up referral relationship during processStart:", err);
+            console.error("Error setting up referral:", err);
         }
     }
 
     // Check for download deep link
     if (startText && startText.includes(" dl_")) {
         const fileId = startText.split(" dl_")[1]?.trim();
-        console.log(`Detected Download Intent: ${fileId}`);
         await setDoc(doc(db, "users", String(user.id)), {
             pendingDownloadId: fileId
         }, { merge: true });
     }
 
-    const userDoc = await getDoc(doc(db, "users", String(user.id)));
-    if (userDoc.exists() && userDoc.data()?.membershipVerified) {
-        const userData = userDoc.data();
-        if (userData?.pendingDownloadId) {
-            await fulfillDownload(botToken, chatId, userData.pendingDownloadId);
-            // Clear pending download
-            await setDoc(doc(db, "users", String(user.id)), {
-                pendingDownloadId: null
-            }, { merge: true });
-        } else {
-            await sendTelegramMessage(botToken, chatId, "Welcome back to RoyShare!", { reply_markup: getMainMenuKeyboard() });
-        }
-    } else {
-        await sendTelegramMessage(botToken, chatId, "📱 Please share your contact to continue.", {
+    // MANDATORY JOIN VERIFICATION (STEP 3)
+    const channelId = -1003385031126;
+    const groupId = -1003929156200;
+
+    const checkMemberById = async (cId: number, uId: number) => {
+        try {
+            const res = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${cId}&user_id=${uId}`);
+            const data = await res.json();
+            if (data.ok && data.result) {
+                const status = data.result.status;
+                return status === 'member' || status === 'administrator' || status === 'creator';
+            }
+            return false;
+        } catch { return false; }
+    };
+
+    const isChannelJoined = await checkMemberById(channelId, user.id);
+    const isGroupJoined = await checkMemberById(groupId, user.id);
+
+    if (!isChannelJoined || !isGroupJoined) {
+        console.log(`[USER LOG] CHANNEL FAILED: ${user.id}`);
+        const message = `👋 Welcome to RoyShare!
+
+To continue, you MUST join our channel and group for verification.
+
+📢 Channel: https://t.me/royshare_official
+👥 Group: https://t.me/RoyShareCommunity
+
+After joining, click the button below to verify.`;
+        
+        await sendTelegramMessage(botToken, chatId, message, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "✅ Verify Join", callback_data: "verify_join" }]
+                ]
+            }
+        });
+        return;
+    }
+
+    console.log(`[USER LOG] CHANNEL VERIFIED: ${user.id}`);
+
+    // CONTACT VERIFICATION (STEP 4)
+    const userDocRef = doc(db, "users", String(user.id));
+    const userSnap = await getDoc(userDocRef);
+    const userData = userSnap.data();
+
+    // Check if phone verification is required (enabled by default if not set)
+    const phoneRequired = true; // Hardcoded as per request for "if enabled" logic, we assume it is.
+    const hasPhone = userData?.phone || userData?.contactVerified;
+
+    if (phoneRequired && !hasPhone) {
+        console.log(`[USER LOG] CONTACT REQUESTED: ${user.id}`);
+        await sendTelegramMessage(botToken, chatId, "📱 Please share your contact to complete registration.", {
             reply_markup: {
                 keyboard: [[{ text: "📱 Share Contact", request_contact: true }]],
                 one_time_keyboard: true,
                 resize_keyboard: true
             }
         });
+        return;
+    }
+
+    // ALL VERIFIED -> DASHBOARD (STEP 5)
+    console.log(`[USER LOG] DASHBOARD OPENED: ${user.id}`);
+    
+    // Update membershipVerified if not set
+    if (!userData?.membershipVerified) {
+        await setDoc(userDocRef, { membershipVerified: true, contactVerified: true }, { merge: true });
+    }
+
+    // Welcome Message
+    const welcomeMsg = userData?.membershipVerified ? "Welcome back to RoyShare!" : "🎉 Welcome to RoyShare! Your account is now active.";
+    
+    if (userData?.pendingDownloadId) {
+        await fulfillDownload(botToken, chatId, userData.pendingDownloadId);
+        await setDoc(userDocRef, { pendingDownloadId: null }, { merge: true });
+    } else {
+        await sendTelegramMessage(botToken, chatId, welcomeMsg, { reply_markup: getMainMenuKeyboard() });
     }
 }
 
@@ -4005,44 +4075,33 @@ async function processCallback(botToken: string, callbackQuery: any) {
 
         if (data === "verify_join") {
             try {
-                // Log settings precisely
-                const db = getDb();
-                const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
-                const data = settingsDoc.data();
-                
-                console.log("DEBUG: Full Firestore Data:", JSON.stringify(data));
-                
-                const getUsername = (link: string | undefined) => {
-                    if (!link) return "";
-                    let cleaned = link.replace(/https?:\/\/(t\.me\/|telegram\.me\/)/i, '');
-                    cleaned = cleaned.replace(/^@/, '');
-                    return cleaned.split('/')[0];
-                };
-
                 const channelId = -1003385031126;
                 const groupId = -1003929156200;
                 
-                console.log("DEBUG: Verification started using IDs", { channelId, groupId });
-
                 const checkMemberById = async (chatId: number, uId: number) => {
                     const response = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${chatId}&user_id=${uId}`);
                     const data = await response.json();
-                    console.log(`DEBUG: Raw getChatMember result for ${chatId}:`, JSON.stringify(data));
                     if (data.ok && data.result) {
                         const status = data.result.status;
-                        const isJoined = status === 'member' || status === 'administrator' || status === 'creator';
-                        return { isJoined, status, raw: data.result };
+                        return status === 'member' || status === 'administrator' || status === 'creator';
                     }
-                    return { isJoined: false, status: data.description || "Unknown error", raw: data };
+                    return false;
                 };
 
-                const resChannel = await checkMemberById(channelId, userId);
-                const resGroup = await checkMemberById(groupId, userId);
+                const isChannelJoined = await checkMemberById(channelId, userId);
+                const isGroupJoined = await checkMemberById(groupId, userId);
 
-                console.log("DEBUG: Final verification result", { resChannel, resGroup });
+                if (isChannelJoined && isGroupJoined) {
+                    console.log(`[USER LOG] CHANNEL VERIFIED: ${userId}`);
+                    
+                    // Answer callback
+                    await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "✅ Membership Verified!" })
+                    });
 
-                if (resChannel.isJoined && resGroup.isJoined) {
-                    // Success: Delete verification message
+                    // Delete verification message
                     await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -4050,105 +4109,27 @@ async function processCallback(botToken: string, callbackQuery: any) {
                     });
 
                     await setDoc(doc(db, "users", String(userId)), {
-                        contactVerified: true,
                         membershipVerified: true
                     }, { merge: true });
 
-                    const userDoc = await getDoc(doc(db, "users", String(userId)));
-                    const userData = userDoc.data();
-                    if (userData?.pendingDownloadId) {
-                        await fulfillDownload(botToken, chatId, userData.pendingDownloadId);
-                        await setDoc(doc(db, "users", String(userId)), {
-                            pendingDownloadId: null
-                        }, { merge: true });
-                        await sendTelegramMessage(botToken, chatId, "Welcome to RoyShare!", { reply_markup: getMainMenuKeyboard() });
-                    } else {
-                        await sendTelegramMessage(botToken, chatId, "✅ Membership verified! Welcome to RoyShare.", { reply_markup: getMainMenuKeyboard() });
-                    }
-
-                    // Process referral counting if they were referred
-                    try {
-                        const referralDocRef = doc(db, "referrals", String(userId));
-                        const referralDoc = await getDoc(referralDocRef);
-                        if (referralDoc.exists()) {
-                            const refData = referralDoc.data();
-                            const referrerId = refData.referrerId;
-                            
-                            // Let's update referred user info in referrals
-                            const rFirstName = callbackQuery.from.first_name || refData.referredFirstName || "User";
-                            const rLastName = callbackQuery.from.last_name || refData.referredLastName || "";
-                            const rUsername = callbackQuery.from.username || refData.referredUsername || "";
-                            const joinDate = refData.joinDate || new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-
-                            await setDoc(referralDocRef, {
-                                referredFirstName: rFirstName,
-                                referredLastName: rLastName,
-                                referredUsername: rUsername,
-                                joinDate: joinDate
-                            }, { merge: true });
-
-                            // Let's increment totalReferrals and referrals on the referrer
-                            const referrerDocRef = doc(db, "users", String(referrerId));
-                            const referrerDoc = await getDoc(referrerDocRef);
-                            if (referrerDoc.exists()) {
-                                const rData = referrerDoc.data();
-                                const currentTotalRef = rData?.totalReferrals || 0;
-                                const currentRef = rData?.referrals || 0;
-                                await setDoc(referrerDocRef, {
-                                    totalReferrals: currentTotalRef + 1,
-                                    referrals: currentRef + 1
-                                }, { merge: true });
-                            }
-                            
-                            // Notify the referrer!
-                            try {
-                                const name = rLastName ? `${rFirstName} ${rLastName}` : rFirstName;
-                                const usernameStr = rUsername ? `@${rUsername}` : "N/A";
-                                const notifyMsg = `🎉 New Referral Joined\n\n👤 Name: ${name}\n📛 Username: ${usernameStr}\n🆔 User ID: ${userId}\n📅 Join Date: ${joinDate}\n\n⏳ Status: Pending Commission`;
-                                await sendTelegramMessage(botToken, Number(referrerId), notifyMsg);
-                            } catch (eNotify) {}
-                        }
-                    } catch (refErr) {
-                        console.error("Error processing referral on membership verification:", refErr);
-                    }
-
-                    await sendTelegramMessage(botToken, chatId, "🎉 Welcome to RoyShare! Upload files, create links, earn rewards and manage your content easily.", {
-                        reply_markup: { remove_keyboard: true }
-                    });
-
-                    await sendTelegramMessage(botToken, chatId, "Main Menu:", { reply_markup: getMainMenuKeyboard() });
+                    // Re-run start to check contact or show dashboard
+                    await processStart(botToken, chatId, callbackQuery.from);
                 } else {
-                    const channelStatusStr = resChannel.isJoined ? "Joined" : "Not Joined";
-                    const groupStatusStr = resGroup.isJoined ? "Joined" : "Not Joined";
-
-                    let errorMessage = "";
-
-                    if (!resChannel.isJoined && !resGroup.isJoined) {
-                        errorMessage = `❌ Verification Failed
-
-⚠️ Kripya pehle Channel aur Group dono join karein, phir Verify Join button dabayein.
-
-📢 Channel: ${channelStatusStr}
-👥 Group: ${groupStatusStr}`;
-                    } else if (!resChannel.isJoined) {
-                        errorMessage = `❌ Verification Failed
-
-⚠️ Kripya pehle Channel join karein, phir Verify Join button dabayein.
-
-📢 Channel: ${channelStatusStr}`;
-                    } else if (!resGroup.isJoined) {
-                        errorMessage = `❌ Verification Failed
-
-⚠️ Kripya pehle Group join karein, phir Verify Join button dabayein.
-
-👥 Group: ${groupStatusStr}`;
-                    }
-
-                    await sendTelegramMessage(botToken, chatId, errorMessage);
+                    console.log(`[USER LOG] CHANNEL FAILED: ${userId}`);
+                    await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ 
+                            callback_query_id: callbackQuery.id, 
+                            text: "❌ Verification Failed! Please join both Channel and Group first.",
+                            show_alert: true
+                        })
+                    });
                 }
-            } catch (e: any) {
-                console.error("DEBUG: Verification failed", e);
-                await sendTelegramMessage(botToken, chatId, `❌ Verification error: ${e.message}`);
+                return;
+            } catch (err: any) {
+                console.error("DEBUG: Verification error", err);
+                await sendTelegramMessage(botToken, chatId, `❌ Verification error: ${err.message}`);
             }
         } else if (data === "withdraw_continue") {
             try {
@@ -5269,9 +5250,8 @@ This feature is currently under maintenance and will be implemented soon.`;
 }
 
 async function processContact(botToken: string, chatId: number, user: any, contact: any) {
-    console.log("processContact: User shared contact, saving and showing verification options.");
+    console.log(`[USER LOG] CONTACT SAVED: ${user.id}`);
     
-    // Attempt DB write silently
     try {
         const db = getDb();
         if (contact.user_id === user.id) {
@@ -5279,38 +5259,20 @@ async function processContact(botToken: string, chatId: number, user: any, conta
                 telegramId: user.id,
                 username: user.username,
                 firstName: user.first_name,
+                lastName: user.last_name,
                 phone: contact.phone_number,
-                joinDate: new Date().toISOString()
+                contactVerified: true
             }, { merge: true });
-            console.log("User saved to DB");
+            
+            // After contact, check if membership is already verified.
+            // If yes, show dashboard. If no, show verification.
+            await processStart(botToken, chatId, user);
+        } else {
+            await sendTelegramMessage(botToken, chatId, "❌ Error: Please share your OWN contact.");
         }
     } catch (e) {
-        await logDbError({ collection: "users", docId: String(user.id), operation: "set", userId: user.id });
+        console.error("Error in processContact:", e);
     }
-
-    // Default settings to fallback
-    const settings = {
-        channelLink: "https://t.me/your_channel",
-        groupLink: "https://t.me/your_group"
-    };
-
-    const messageText = `✅ Contact verified.
-
-📢 Channel:
-https://t.me/royshare_official
-
-👥 Group:
-https://t.me/RoyShareCommunity
-
-Please join, then click Verify below.`;
-
-    const inlineKeyboard = {
-        inline_keyboard: [
-            [{ text: "✅ Verify Join", callback_data: "verify_join" }]
-        ]
-    };
-    
-    await sendTelegramMessage(botToken, chatId, messageText, { reply_markup: inlineKeyboard });
 }
 
 async function normalizeUsername(username: string): Promise<string> {
