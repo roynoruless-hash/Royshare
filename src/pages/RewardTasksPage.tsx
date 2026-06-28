@@ -44,6 +44,8 @@ export default function RewardTasksPage() {
   const [fallbackAttempts, setFallbackAttempts] = useState(0);
   const [isMonetagAdRunning, setIsMonetagAdRunning] = useState(false);
   const [monetagError, setMonetagError] = useState<string | null>(null);
+  const [adWatchedSuccessfully, setAdWatchedSuccessfully] = useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
 
   const handleVideoError = () => {
     console.warn("Video failed to load in RewardTasksPage. Trying fallback...");
@@ -301,11 +303,11 @@ export default function RewardTasksPage() {
     }
   };
 
-  const handleMonetagClaim = async () => {
-    if (isMonetagAdRunning || videoCompleted || submitting) return;
+  const handleWatchMonetagAd = async () => {
+    if (isMonetagAdRunning || adWatchedSuccessfully || submitting) return;
 
     if (typeof (window as any).show_11210088 !== 'function') {
-      setMonetagError("Please watch the complete advertisement to receive your reward.");
+      setMonetagError("Please watch the complete advertisement to unlock your reward.");
       return;
     }
 
@@ -313,16 +315,26 @@ export default function RewardTasksPage() {
     setMonetagError(null);
     try {
       await (window as any).show_11210088();
-      // Reward user only after successful completion
-      setVideoCompleted(true);
-      setCurrentTime(duration);
-      submitTaskCompletion();
+      setAdWatchedSuccessfully(true);
+      setShowSuccessPopup(true);
+      // Automatically hide popup after 3 seconds
+      setTimeout(() => setShowSuccessPopup(false), 3000);
     } catch (err: any) {
       console.error("Monetag ad error:", err);
-      setMonetagError("Please watch the complete advertisement to receive your reward.");
+      setMonetagError("Please watch the complete advertisement to unlock your reward.");
     } finally {
       setIsMonetagAdRunning(false);
     }
+  };
+
+  const handleClaimMonetagReward = async () => {
+    if (!adWatchedSuccessfully || videoCompleted || submitting) return;
+    
+    // Set video states to trigger existing logic if needed
+    setVideoCompleted(true);
+    setCurrentTime(duration);
+    
+    submitTaskCompletion();
   };
 
   const submitTaskCompletion = async () => {
@@ -466,37 +478,62 @@ export default function RewardTasksPage() {
 
           {/* Claim Button */}
           <div className="pt-2">
-            <button
-              onClick={handleMonetagClaim}
-              disabled={isMonetagAdRunning || videoCompleted || submitting}
-              className={`w-full py-6 rounded-[2rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden ${
-                videoCompleted 
-                  ? "bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 cursor-default" 
-                  : "bg-gradient-to-br from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white shadow-blue-900/40"
-              }`}
-            >
-              {isMonetagAdRunning ? (
-                <>
-                  <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin mb-1" />
-                  <span>Loading Ad...</span>
-                </>
-              ) : videoCompleted ? (
-                <>
-                  <CheckCircle2 size={32} />
-                  <span>Reward Credited</span>
-                </>
-              ) : (
-                <>
-                  <motion.div
-                    animate={{ scale: [1, 1.15, 1], rotate: [0, 5, -5, 0] }}
-                    transition={{ repeat: Infinity, duration: 2 }}
-                  >
-                    <Zap size={32} className="fill-current text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]" />
-                  </motion.div>
-                  <span>Claim Now</span>
-                </>
-              )}
-            </button>
+            {!adWatchedSuccessfully ? (
+              <button
+                onClick={handleWatchMonetagAd}
+                disabled={isMonetagAdRunning || submitting}
+                className={`w-full py-6 rounded-[2rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white shadow-blue-900/40`}
+              >
+                {isMonetagAdRunning ? (
+                  <>
+                    <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin mb-1" />
+                    <span>Loading Ad...</span>
+                  </>
+                ) : (
+                  <>
+                    <motion.div
+                      animate={{ scale: [1, 1.15, 1], rotate: [0, 5, -5, 0] }}
+                      transition={{ repeat: Infinity, duration: 2 }}
+                    >
+                      <Play size={32} className="fill-current text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]" />
+                    </motion.div>
+                    <span>Watch Ad</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={handleClaimMonetagReward}
+                disabled={videoCompleted || submitting}
+                className={`w-full py-6 rounded-[2rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden ${
+                  videoCompleted 
+                    ? "bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 cursor-default" 
+                    : "bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-amber-900/40"
+                }`}
+              >
+                {videoCompleted ? (
+                  <>
+                    <CheckCircle2 size={32} />
+                    <span>Reward Credited</span>
+                  </>
+                ) : submitting ? (
+                  <>
+                    <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin mb-1" />
+                    <span>Claiming...</span>
+                  </>
+                ) : (
+                  <>
+                    <motion.div
+                      animate={{ scale: [1, 1.2, 1] }}
+                      transition={{ repeat: Infinity, duration: 1.5 }}
+                    >
+                      <Zap size={32} className="fill-current text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" />
+                    </motion.div>
+                    <span>Claim Reward</span>
+                  </>
+                )}
+              </button>
+            )}
 
             {/* Status & Errors */}
             <div className="h-6 mt-4">
@@ -518,15 +555,38 @@ export default function RewardTasksPage() {
                   >
                     Reward Credited Successfully
                   </motion.p>
+                ) : adWatchedSuccessfully ? (
+                  <motion.p 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-blue-400 text-sm font-bold"
+                  >
+                    Ready to Claim!
+                  </motion.p>
                 ) : (
                   <p className="text-slate-500 text-xs font-medium uppercase tracking-widest opacity-60">
-                    Tap to watch and earn
+                    Watch complete ad to unlock
                   </p>
                 )}
               </AnimatePresence>
             </div>
           </div>
         </motion.div>
+
+        {/* Success Popup */}
+        <AnimatePresence>
+          {showSuccessPopup && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8, y: 50 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 50 }}
+              className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-white px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2"
+            >
+              <CheckCircle2 size={20} />
+              <span>Advertisement watched successfully.</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
@@ -581,28 +641,48 @@ export default function RewardTasksPage() {
                   <h3 className="text-xl font-bold text-white">Watch Rewarded Ad</h3>
                   <p className="text-sm text-slate-400">Complete the short ad to claim your reward coins.</p>
                 </div>
-                <button
-                  onClick={handleMonetagClaim}
-                  disabled={isMonetagAdRunning || videoCompleted || submitting}
-                  className="w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white rounded-2xl font-bold transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2 text-lg active:scale-95"
-                >
-                  {isMonetagAdRunning ? (
-                    <>
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Ad is Running...</span>
-                    </>
-                  ) : videoCompleted ? (
-                    <>
-                      <CheckCircle2 size={24} />
-                      <span>Ad Completed</span>
-                    </>
-                  ) : (
-                    <>
-                      <Zap size={20} className="fill-current" />
-                      <span>Claim Reward Coins</span>
-                    </>
-                  )}
-                </button>
+                {!adWatchedSuccessfully ? (
+                  <button
+                    onClick={handleWatchMonetagAd}
+                    disabled={isMonetagAdRunning || submitting}
+                    className="w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white rounded-2xl font-bold transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2 text-lg active:scale-95"
+                  >
+                    {isMonetagAdRunning ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Ad is Running...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play size={20} />
+                        <span>Watch Ad Now</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleClaimMonetagReward}
+                    disabled={videoCompleted || submitting}
+                    className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white rounded-2xl font-bold transition-all shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2 text-lg active:scale-95"
+                  >
+                    {videoCompleted ? (
+                      <>
+                        <CheckCircle2 size={24} />
+                        <span>Reward Credited</span>
+                      </>
+                    ) : submitting ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Claiming...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap size={20} className="fill-current" />
+                        <span>Claim Reward Coins</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           ) : videoAd && (videoAd.adType === 'VAST Video Ad' || videoAd.adType === 'VAST Video') ? (
