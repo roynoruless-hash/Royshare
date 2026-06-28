@@ -141,23 +141,24 @@ export async function handleUpdate(botToken: string, update: any) {
         }
     }
 
-    if (update.message) {
-        const msg = update.message;
-        const chatId = msg.chat.id;
-        const user = msg.from;
-        
-        console.log("Message received:", msg.text, "from user:", user.id);
+    try {
+        if (update.message) {
+            const msg = update.message;
+            const chatId = msg.chat.id;
+            const user = msg.from;
+            
+            console.log("Message received:", msg.text, "from user:", user.id);
 
-        const db = getDb();
-        const userDocRef = doc(db, "users", String(user.id));
-        const userSnap = await getDoc(userDocRef);
-        const userData = userSnap.exists() ? userSnap.data() : null;
+            const db = getDb();
+            const userDocRef = doc(db, "users", String(user.id));
+            const userSnap = await getDoc(userDocRef);
+            const userData = userSnap.exists() ? userSnap.data() : null;
 
 
-        if (msg.text && msg.text.startsWith("/start")) {
-             console.log("Matched /start command");
-             await processStart(botToken, chatId, user, msg.text);
-        } else if (msg.text === "/uploadtest") {
+            if (msg.text && msg.text.startsWith("/start")) {
+                 console.log("Matched /start command");
+                 await processStart(botToken, chatId, user, msg.text);
+            } else if (msg.text === "/uploadtest") {
             const db = getDb();
             await setDoc(doc(db, "users", String(user.id)), { uploadTestMode: true }, { merge: true });
             await sendTelegramMessage(botToken, chatId, "Test mode activated. Please send the file you want to test.");
@@ -256,6 +257,7 @@ https://youtube.com`;
             console.log("Direct URL detected. Processing independent shortening.");
             await processShortenUrl(botToken, chatId, user, msg.text);
         } else if (msg.contact) {
+            console.log("CONTACT UPDATE RECEIVED");
             console.log("Matched contact share");
             await processContact(botToken, chatId, user, msg.contact);
         } else if (msg.document || msg.photo || msg.video || msg.audio) {
@@ -394,6 +396,10 @@ ${msg.text}`;
         console.log("Callback query received");
         await processCallback(botToken, update.callback_query);
     }
+} catch (err: any) {
+    console.error("CRITICAL ERROR IN handleUpdate:");
+    console.error(err.stack || err);
+}
 }
 
 async function handleAdminReplyTextInput(botToken: string, adminChatId: number, adminUser: any, replyMessage: string, replyData: { docId: string, ticketId: string }) {
@@ -712,6 +718,7 @@ After joining, click the button below to verify.`;
 
     // ALL VERIFIED -> DASHBOARD (STEP 5)
     console.log("ONBOARDING COMPLETED");
+    console.log("DASHBOARD OPENED");
     console.log(`[USER LOG] DASHBOARD OPENED: ${user.id}`);
     
     // Update membershipVerified if not set
@@ -5273,16 +5280,31 @@ async function processContact(botToken: string, chatId: number, user: any, conta
     console.log("CONTACT RECEIVED");
     console.log("CONTACT USER ID", contact.user_id);
     console.log("SENDER USER ID", user.id);
-    console.log(`[USER LOG] CONTACT SAVED: ${user.id}`);
     
     try {
+        if (!contact || !contact.phone_number) {
+            console.warn("CONTACT PARSED - FAILED: Missing contact data or phone number");
+            return;
+        }
+        
+        console.log("CONTACT PARSED - SUCCESS");
+        console.log(`[USER LOG] CONTACT ATTEMPT: ${user.id}`);
+        
         const db = getDb();
-        if (contact.user_id === user.id) {
+        
+        // 2. Verify that contact.user_id matches the sender's Telegram ID
+        // 3. Reject manually forwarded contacts (they won't have user_id or it won't match)
+        if (contact.user_id && Number(contact.user_id) === Number(user.id)) {
+            console.log("USER FOUND - MATCHED");
+            
+            // 4. Save the phone number in Firestore
+            // 5. Mark phoneVerified = true
+            // 6. Update lastSeen
             await setDoc(doc(db, "users", String(user.id)), {
                 telegramId: user.id,
-                username: user.username,
-                firstName: user.first_name,
-                lastName: user.last_name,
+                username: user.username || "",
+                firstName: user.first_name || "",
+                lastName: user.last_name || "",
                 phone: contact.phone_number,
                 contactVerified: true,
                 phoneVerified: true,
@@ -5298,16 +5320,19 @@ async function processContact(botToken: string, chatId: number, user: any, conta
                 reply_markup: { remove_keyboard: true }
             });
 
-            // After contact, check if membership is already verified.
-            // If yes, show dashboard. If no, show verification.
+            // 7. Continue the onboarding flow automatically
+            console.log("JOIN CHECK");
             await processStart(botToken, chatId, user);
         } else {
-            await sendTelegramMessage(botToken, chatId, "❌ Error: Please share your OWN contact. Manually forwarded contacts are rejected.", {
+            console.warn("USER FOUND - MISMATCH OR FORWARDED");
+            await sendTelegramMessage(botToken, chatId, "❌ Error: Please share your OWN contact using the button provided. Manually forwarded contacts are rejected.", {
                 reply_markup: { remove_keyboard: true }
             });
         }
-    } catch (e) {
-        console.error("Error in processContact:", e);
+    } catch (e: any) {
+        console.error("ERROR STACK TRACE:");
+        console.error(e.stack || e);
+        console.error("Error in processContact:", e.message);
     }
 }
 

@@ -3267,6 +3267,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       console.log(`📥 Processing Update ID: ${update.update_id}`);
+      console.log("RAW UPDATE JSON:", JSON.stringify(update, null, 2));
 
       // 8. Ensure the webhook always returns HTTP 200 immediately after processing
       // We will spawn the processing promise and respond with HTTP 200 immediately
