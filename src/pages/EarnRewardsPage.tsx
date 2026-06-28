@@ -77,12 +77,31 @@ export default function EarnRewardsPage() {
     const queryUserId = params.get("userId");
     const queryTaskId = params.get("taskId");
 
+    const checkTelegram = () => {
+      const tg = (window as any).Telegram?.WebApp;
+      
+      // Improved Detection: Check for WebApp, initData, and user
+      const hasTgWebApp = !!(tg && tg.initData && tg.initDataUnsafe?.user);
+      setIsTelegramApp(hasTgWebApp);
+      
+      if (tg) {
+        console.log("Telegram WebApp Version:", tg.version);
+        console.log("Telegram Platform:", tg.platform);
+        console.log("Telegram initData:", tg.initData);
+        console.log("Telegram user:", tg.initDataUnsafe?.user);
+        
+        tg.ready();
+        tg.expand();
+      } else {
+        console.log("Telegram WebApp not detected yet in EarnRewardsPage");
+      }
+    };
+
+    checkTelegram();
+    // Retry once after 500ms to ensure SDK is fully initialized
+    const retryTimer = setTimeout(checkTelegram, 500);
+
     const tg = (window as any).Telegram?.WebApp;
-    setIsTelegramApp(!!tg?.initData);
-    if (tg) {
-      tg.ready();
-      tg.expand();
-    }
     const tgUserId = tg?.initDataUnsafe?.user?.id;
 
     const resolvedUserId = queryUserId || (tgUserId ? String(tgUserId) : null);
@@ -99,6 +118,8 @@ export default function EarnRewardsPage() {
       setError("Missing query parameters (userId and taskId are required).");
       setLoading(false);
     }
+
+    return () => clearTimeout(retryTimer);
   }, []);
 
   // Fetch settings, user information, and tasks

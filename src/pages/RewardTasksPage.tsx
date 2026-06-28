@@ -49,13 +49,31 @@ export default function RewardTasksPage() {
   const [isTelegramApp, setIsTelegramApp] = useState(false);
 
   useEffect(() => {
-    const tg = (window as any).Telegram?.WebApp;
-    const isTg = !!tg?.initData;
-    setIsTelegramApp(isTg);
-    if (tg) {
-      tg.ready();
-      tg.expand();
-    }
+    const checkTelegram = () => {
+      const tg = (window as any).Telegram?.WebApp;
+      
+      // Improved Detection: Check for WebApp, initData, and user
+      const hasTgWebApp = !!(tg && tg.initData && tg.initDataUnsafe?.user);
+      setIsTelegramApp(hasTgWebApp);
+      
+      if (tg) {
+        console.log("Telegram WebApp Version:", tg.version);
+        console.log("Telegram Platform:", tg.platform);
+        console.log("Telegram initData:", tg.initData);
+        console.log("Telegram user:", tg.initDataUnsafe?.user);
+        
+        tg.ready();
+        tg.expand();
+      } else {
+        console.log("Telegram WebApp not detected yet in RewardTasksPage");
+      }
+    };
+
+    checkTelegram();
+    // Retry once after 500ms to ensure SDK is fully initialized
+    const retryTimer = setTimeout(checkTelegram, 500);
+
+    return () => clearTimeout(retryTimer);
   }, []);
 
   const handleVideoError = () => {
@@ -460,7 +478,7 @@ export default function RewardTasksPage() {
           <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mb-6 text-amber-500">
             <AlertCircle size={40} />
           </div>
-          <h1 className="text-2xl font-bold text-white mb-2">Telegram Only Task</h1>
+          <h1 className="text-2xl font-bold text-white mb-2">Mini App Required</h1>
           <p className="text-slate-400 max-w-xs mb-8">
             Please open this reward inside Telegram Mini App.
           </p>
