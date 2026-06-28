@@ -6,38 +6,18 @@
     <title>My Google AI Studio App</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script>
-      // Load Monetag SDK only inside Telegram Mini App environment
-      const checkAndLoadMonetag = () => {
+      // Load Monetag SDK for Telegram Mini App
+      (function() {
         const tg = window.Telegram?.WebApp;
-        if (tg && tg.initData && tg.initDataUnsafe?.user) {
-          const user = tg.initDataUnsafe.user;
-          console.log("Telegram WebApp Detected. User ID:", user.id);
-          
-          // Store user ID globally for the SDK to pick up if needed
-          window.telegram_user_id = user.id;
-          
+        if (tg && tg.initData) {
           const script = document.createElement('script');
           script.src = "//libtl.com/sdk.js";
           script.setAttribute('data-zone', '11210088');
           script.setAttribute('data-sdk', 'show_11210088');
-          
-          // Pass the telegram ID to the SDK for postback tracking
-          // Note: The specific attribute name might vary based on your account settings, 
-          // but we ensure it's available for the reward call.
-          script.setAttribute('data-ext-id', user.id.toString());
-          
           document.head.appendChild(script);
-        } else {
-          console.log("Not in Telegram Mini App environment. Monetag SDK skipped.");
+          console.log("[MONETAG] SDK script injected");
         }
-      };
-      
-      // Try to load Monetag SDK
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', checkAndLoadMonetag);
-      } else {
-        checkAndLoadMonetag();
-      }
+      })();
     </script>
   </head>
   <body>

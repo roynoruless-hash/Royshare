@@ -5074,6 +5074,86 @@ export default function AdminDashboard() {
                         ))}
                       </div>
                     </div>
+
+                    {/* LIVE SDK DEBUGGER */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl border-l-4 border-l-amber-500">
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          🔍 Live Monetag SDK Debugger
+                        </h3>
+                        <div className="px-2 py-1 bg-amber-500/10 rounded text-[10px] font-bold text-amber-500 uppercase tracking-widest animate-pulse">
+                          Live Session
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
+                          <p className="text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">Telegram Identity</p>
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-400">Detected ID:</span>
+                              <span className={`text-xs font-mono font-bold ${typeof (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id !== 'undefined' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {(window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id || 'NOT DETECTED'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-400">Environment:</span>
+                              <span className="text-xs font-bold text-blue-400">
+                                {typeof (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id !== 'undefined' ? 'Telegram Mini App' : 'Browser/Desktop'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
+                          <p className="text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">SDK Availability</p>
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-400">Rewarded SDK:</span>
+                              <span className={`text-xs font-bold ${typeof (window as any).show_11210088 === 'function' ? 'text-emerald-400' : 'text-slate-600'}`}>
+                                {typeof (window as any).show_11210088 === 'function' ? '✅ Loaded (11210088)' : '❌ Not Loaded'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-400">Postback Ready:</span>
+                              <span className="text-xs font-bold text-emerald-400">✅ Enabled</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="group">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Raw initDataUnsafe</p>
+                            <span className="text-[10px] text-slate-600 font-mono">JSON</span>
+                          </div>
+                          <div className="bg-black/60 rounded-xl p-4 font-mono text-[10px] text-emerald-500/80 max-h-40 overflow-y-auto scrollbar-hide border border-slate-800 group-hover:border-slate-700 transition-colors">
+                            <pre>{JSON.stringify((window as any).Telegram?.WebApp?.initDataUnsafe || { error: "No Telegram context" }, null, 2)}</pre>
+                          </div>
+                        </div>
+
+                        <div className="p-4 bg-amber-500/5 border border-amber-500/10 rounded-2xl">
+                          <h4 className="text-xs font-bold text-amber-500 mb-3 flex items-center gap-2">
+                            💡 SDK Integration Checklist
+                          </h4>
+                          <div className="space-y-2">
+                            <div className="flex items-start gap-2">
+                              <div className={`mt-1 w-3 h-3 rounded-full flex-shrink-0 ${typeof (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id !== 'undefined' ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                              <p className="text-[10px] text-slate-400 leading-relaxed">
+                                <span className="font-bold text-white">Telegram ID Check:</span> {typeof (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id !== 'undefined' ? 'Successfully identified as numeric ID. Postback will be attributed correctly.' : 'MISSING ID. Monetag will receive "{ext_id}" or "Unknown", which will FAIL verification.'}
+                              </p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <div className={`mt-1 w-3 h-3 rounded-full flex-shrink-0 ${typeof (window as any).show_11210088 === 'function' ? 'bg-emerald-500' : 'bg-slate-600'}`}></div>
+                              <p className="text-[10px] text-slate-400 leading-relaxed">
+                                <span className="font-bold text-white">SDK Show Function:</span> {typeof (window as any).show_11210088 === 'function' ? 'Function window.show_11210088 is globally available and ready to trigger rewarded ads.' : 'SDK not found. This is normal on desktop browser; it only loads inside real Telegram app.'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Right Column: Recent Events */}
