@@ -3983,6 +3983,7 @@ Bonus added successfully.`;
             balance: 0,
             availableBalance: 0,
             totalEarnings: 0,
+            rewardBalance: 0,
             createdAt: new Date().toISOString(),
             lastActive: new Date().toISOString(),
             membershipVerified: false,
@@ -4023,13 +4024,16 @@ Bonus added successfully.`;
       // AUTOMATIC BALANCE UPDATE: Crediting the user immediately
       const currentBalance = Number(userData.availableBalance || userData.balance || 0);
       const currentTotalEarnings = Number(userData.totalEarnings || 0);
+      const currentRewardBalance = Number(userData.rewardBalance || 0);
       const newBalance = currentBalance + rewardAmount;
       const newTotalEarnings = currentTotalEarnings + rewardAmount;
+      const newRewardBalance = currentRewardBalance + rewardAmount;
 
       await updateDoc(userDocRef, {
         availableBalance: newBalance,
         balance: newBalance,
         totalEarnings: newTotalEarnings,
+        rewardBalance: newRewardBalance,
         lastActive: new Date().toISOString()
       });
       console.log(`[MONETAG POSTBACK] SUCCESS: Balance updated for user ${telegram_id}. New Balance: ${newBalance}`);
@@ -4177,9 +4181,11 @@ Bonus added successfully.`;
       const userData = userSnap.data();
       const currentBalance = Number(userData.availableBalance || userData.balance || 0);
       const currentTotalEarnings = Number(userData.totalEarnings || 0);
+      const currentRewardBalance = Number(userData.rewardBalance || 0);
       
       const newBalance = currentBalance + rewardAmount;
       const newTotalEarnings = currentTotalEarnings + rewardAmount;
+      const newRewardBalance = currentRewardBalance + rewardAmount;
 
       console.log(`[CLAIM REWARD] Crediting reward: ₹${rewardAmount} to TG=${telegram_id}`);
 
@@ -4188,6 +4194,7 @@ Bonus added successfully.`;
         availableBalance: newBalance,
         balance: newBalance,
         totalEarnings: newTotalEarnings,
+        rewardBalance: newRewardBalance,
         lastEarningAt: new Date().toISOString()
       });
 

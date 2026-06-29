@@ -5197,38 +5197,74 @@ export default function AdminDashboard() {
                       </h3>
                       <div className="flex-1 overflow-y-auto pr-2 space-y-4 scrollbar-hide">
                         {monetagStats?.recentEvents?.length > 0 ? (
-                          monetagStats.recentEvents.map((event: any) => (
-                            <div key={event.id} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl hover:border-blue-500/30 transition-all group">
-                              <div className="flex justify-between items-start mb-2">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                  event.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
-                                  event.status === 'failed' ? 'bg-red-500/10 text-red-400' :
-                                  'bg-slate-800 text-slate-400'
-                                }`}>
-                                  {event.status}
-                                </span>
-                                <span className="text-[10px] text-slate-500 font-mono">
-                                  {new Date(event.timestamp).toLocaleTimeString()}
-                                </span>
+                          monetagStats.recentEvents.map((event: any) => {
+                            // Resolve raw user ID using priority:
+                            // 1. telegram_id
+                            // 2. userId
+                            // 3. ext_id (only if it is not empty and not equal to "{ext_id}")
+                            // Otherwise Unknown
+                            let rawId = null;
+                            if (event.params?.telegram_id) {
+                              rawId = event.params.telegram_id;
+                            } else if (event.userId) {
+                              rawId = event.userId;
+                            } else if (event.params?.userId) {
+                              rawId = event.params.userId;
+                            } else if (event.params?.ext_id && event.params.ext_id !== "{ext_id}" && event.params.ext_id.trim() !== "") {
+                              rawId = event.params.ext_id;
+                            }
+
+                            let displayUser = "Unknown";
+                            if (rawId) {
+                              const idStr = String(rawId).trim();
+                              const matchedUser = users?.find((usr: any) => {
+                                return String(usr.id).trim() === idStr || 
+                                       String(usr.telegramId).trim() === idStr || 
+                                       String(usr.userId).trim() === idStr;
+                              });
+
+                              if (matchedUser) {
+                                const fullName = `${matchedUser.firstName || matchedUser.name || ''} ${matchedUser.lastName || ''}`.trim() || 'Anonymous';
+                                const usernameDisplay = matchedUser.username ? ` (@${matchedUser.username})` : '';
+                                displayUser = `${fullName}${usernameDisplay} - ${matchedUser.telegramId || matchedUser.id}`;
+                              } else {
+                                displayUser = idStr;
+                              }
+                            }
+
+                            return (
+                              <div key={event.id} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl hover:border-blue-500/30 transition-all group">
+                                <div className="flex justify-between items-start mb-2">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                    event.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
+                                    event.status === 'failed' ? 'bg-red-500/10 text-red-400' :
+                                    'bg-slate-800 text-slate-400'
+                                  }`}>
+                                    {event.status}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-mono">
+                                    {new Date(event.timestamp).toLocaleTimeString()}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-300 font-bold mb-1">
+                                  User: {displayUser}
+                                </p>
+                                <div className="grid grid-cols-2 gap-2 text-[10px] mt-2">
+                                  <div className="text-slate-500">Reward: <span className="text-emerald-400 font-bold">{event.rewardAmount || 0}</span></div>
+                                  <div className="text-slate-500">Rev: <span className="text-blue-400 font-bold">${event.params?.estimated_price || 0}</span></div>
+                                </div>
+                                <div className="mt-2 pt-2 border-t border-slate-800/50">
+                                  <p className="text-[8px] text-slate-500 font-mono mb-1">Payload:</p>
+                                  <pre className="text-[8px] text-slate-400 bg-black/40 p-2 rounded overflow-x-auto">
+                                    {JSON.stringify(event.params, null, 2)}
+                                  </pre>
+                                  {event.error && (
+                                    <p className="text-[8px] text-red-500 mt-1 font-bold">Error: {event.error}</p>
+                                  )}
+                                </div>
                               </div>
-                              <p className="text-xs text-slate-300 font-bold mb-1">
-                                User: {event.params?.telegram_id || 'Unknown'}
-                              </p>
-                              <div className="grid grid-cols-2 gap-2 text-[10px] mt-2">
-                                <div className="text-slate-500">Reward: <span className="text-emerald-400 font-bold">{event.rewardAmount || 0}</span></div>
-                                <div className="text-slate-500">Rev: <span className="text-blue-400 font-bold">${event.params?.estimated_price || 0}</span></div>
-                              </div>
-                              <div className="mt-2 pt-2 border-t border-slate-800/50">
-                                <p className="text-[8px] text-slate-500 font-mono mb-1">Payload:</p>
-                                <pre className="text-[8px] text-slate-400 bg-black/40 p-2 rounded overflow-x-auto">
-                                  {JSON.stringify(event.params, null, 2)}
-                                </pre>
-                                {event.error && (
-                                  <p className="text-[8px] text-red-500 mt-1 font-bold">Error: {event.error}</p>
-                                )}
-                              </div>
-                            </div>
-                          ))
+                            );
+                          })
                         ) : (
                           <div className="text-center py-10">
                             <p className="text-slate-500 text-sm italic">No events received yet</p>
