@@ -5633,6 +5633,237 @@ Bonus added successfully.`;
     }
   });
 
+  // Helper to format bytes to human readable string
+  function formatBytes(bytes: number, decimals = 2): string {
+    if (!+bytes) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+  }
+
+  // Helper to obtain an active access token for Google Drive
+  async function getActiveGoogleToken(tgId: string): Promise<{ accessToken: string; email: string }> {
+    const docRef = doc(db, "google_drive_accounts", String(tgId));
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      throw new Error("Google Drive is not connected.");
+    }
+    const data = snap.data();
+    if (data.status !== "connected") {
+      throw new Error("Google Drive connection is inactive.");
+    }
+    if (!data.accessToken || !data.refreshToken) {
+      throw new Error("Missing Google Drive credentials.");
+    }
+
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      "https://royshare.onrender.com/api/google-drive/callback"
+    );
+
+    oauth2Client.setCredentials({
+      access_token: data.accessToken,
+      refresh_token: data.refreshToken,
+      expiry_date: data.expiryTime || 0
+    });
+
+    const now = Date.now();
+    const isExpired = (data.expiryTime || 0) <= now + 60000;
+
+    let accessToken = data.accessToken;
+    if (isExpired) {
+      console.log(`[Google API] Access token for tg_id ${tgId} is expired or expiring soon. Refreshing...`);
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      if (credentials.access_token) {
+        accessToken = credentials.access_token;
+        const expiryTime = credentials.expiry_date || (Date.now() + 3600 * 1000);
+        const updateData: any = {
+          accessToken: accessToken,
+          expiryTime: expiryTime,
+          expiryDate: new Date(expiryTime).toISOString()
+        };
+        await setDoc(docRef, updateData, { merge: true });
+        console.log(`[Google API] Successfully refreshed access token for tg_id ${tgId}.`);
+      } else {
+        throw new Error("Failed to refresh Google access token.");
+      }
+    }
+
+    return { accessToken, email: data.email || "" };
+  }
+
+  // Google Drive Connection Status endpoint
+  app.get("/api/google-drive/status", async (req, res) => {
+    try {
+      const tgId = req.query.tg_id as string;
+      if (!tgId) {
+        return res.status(400).json({ error: "Missing tg_id" });
+      }
+      const docRef = doc(db, "google_drive_accounts", String(tgId));
+      const snap = await getDoc(docRef);
+      if (snap.exists() && snap.data()?.status === "connected") {
+        return res.json({ connected: true, email: snap.data().email });
+      }
+      return res.json({ connected: false });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Google Drive Resumable Upload Session initiator endpoint
+  app.post("/api/google-drive/initiate-upload", async (req, res) => {
+    try {
+      const { tg_id, fileName, fileSize, mimeType } = req.body;
+      if (!tg_id || !fileName || !fileSize) {
+        return res.status(400).json({ error: "Missing required parameters (tg_id, fileName, fileSize)" });
+      }
+
+      const { accessToken } = await getActiveGoogleToken(tg_id);
+
+      const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "X-Upload-Content-Type": mimeType || "application/octet-stream",
+          "X-Upload-Content-Length": String(fileSize),
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        body: JSON.stringify({
+          name: fileName,
+          mimeType: mimeType || "application/octet-stream"
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error("[Google Resumable] Failed to initiate session:", errText);
+        return res.status(response.status).json({ error: "Failed to initiate Google Drive upload session", details: errText });
+      }
+
+      const uploadUrl = response.headers.get("Location");
+      if (!uploadUrl) {
+        return res.status(500).json({ error: "Google Drive API did not return a Location header for resumable upload" });
+      }
+
+      return res.json({ uploadUrl });
+    } catch (err: any) {
+      console.error("[Google Resumable] Error:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Google Drive Finalize upload, set permissions, and register in uploads collection
+  app.post("/api/google-drive/finalize-upload", async (req, res) => {
+    try {
+      const { tg_id, driveFileId, fileName, fileSize, mimeType } = req.body;
+      if (!tg_id || !driveFileId || !fileName || !fileSize) {
+        return res.status(400).json({ error: "Missing required parameters (tg_id, driveFileId, fileName, fileSize)" });
+      }
+
+      const { accessToken, email: ownerEmail } = await getActiveGoogleToken(tg_id);
+
+      console.log(`[Google API] Setting public reader permission for file: ${driveFileId}`);
+      const permResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}/permissions`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          role: "reader",
+          type: "anyone"
+        })
+      });
+
+      if (!permResponse.ok) {
+        const permErr = await permResponse.text();
+        console.warn(`[Google API] Warning: Failed to set public permission for file ${driveFileId}:`, permErr);
+      }
+
+      const driveLink = `https://drive.google.com/uc?export=download&id=${driveFileId}`;
+      const uniqueFileId = "gd_" + Math.random().toString(36).substring(2, 10);
+      const royshareLink = `https://royshare.onrender.com/download/${uniqueFileId}`;
+
+      const formattedDate = new Date().toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      });
+
+      const uploadDocRef = doc(db, "uploads", uniqueFileId);
+      await setDoc(uploadDocRef, {
+        fileId: uniqueFileId,
+        telegramId: String(tg_id),
+        userId: String(tg_id),
+        driveFileId,
+        fileName,
+        fileSize: Number(fileSize),
+        mimeType: mimeType || "application/octet-stream",
+        driveLink,
+        royshareLink,
+        generatedLink: royshareLink,
+        uploadDate: formattedDate,
+        downloads: 0,
+        earnings: 0,
+        storage: "google_drive",
+        ownerEmail,
+        status: "active"
+      });
+
+      try {
+        const uRef = doc(db, "users", String(tg_id));
+        const uSnap = await getDoc(uRef);
+        if (uSnap.exists()) {
+          const currentTotalFiles = uSnap.data().totalFiles || 0;
+          await setDoc(uRef, { totalFiles: currentTotalFiles + 1 }, { merge: true });
+        }
+      } catch (uErr) {
+        console.error("Failed to update user totalFiles stat:", uErr);
+      }
+
+      try {
+        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
+        if (botToken) {
+          const formattedSize = formatBytes(Number(fileSize));
+          const messageText = `✅ *Large File Uploaded Successfully*\n\n📄 *File Name:* \`${fileName}\`\n📦 *File Size:* ${formattedSize}\n☁ *Storage:* Google Drive\n\n🔗 *RoyShare Link:* ${royshareLink}`;
+          
+          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: Number(tg_id),
+              text: messageText,
+              parse_mode: "Markdown",
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: "📁 My Files", callback_data: "mycontent_myfiles" },
+                    { text: "⬆️ Upload Another", callback_data: "mycontent_upload" }
+                  ]
+                ]
+              }
+            })
+          });
+        }
+      } catch (tgErr) {
+        console.error("Failed to send telegram upload success notification:", tgErr);
+      }
+
+      return res.json({
+        success: true,
+        fileId: uniqueFileId,
+        royshareLink
+      });
+    } catch (err: any) {
+      console.error("[Google Finalize] Error:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // Admin APIs for Google Drive Accounts
   app.get("/api/admin/google-drive-accounts", async (req, res) => {
     try {
@@ -5728,6 +5959,62 @@ Bonus added successfully.`;
       
       const itemData = docSnap.data();
       console.log(`[DEBUG DOWNLOAD ROUTE] Firestore document data retrieved:`, JSON.stringify(itemData, null, 2));
+
+      if (itemData.storage === "google_drive") {
+        console.log(`[DEBUG DOWNLOAD ROUTE] File is stored on Google Drive. Serving securely...`);
+        try {
+          const { accessToken } = await getActiveGoogleToken(itemData.telegramId);
+          const driveFileId = itemData.driveFileId;
+
+          // Increment download count
+          try {
+            await setDoc(docRef, { downloads: (itemData.downloads || 0) + 1 }, { merge: true });
+          } catch (countErr) {
+            console.error("[DEBUG DOWNLOAD ROUTE] Failed to update download count:", countErr);
+          }
+
+          const googleStreamUrl = `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`;
+          const response = await fetch(googleStreamUrl, {
+            headers: {
+              "Authorization": `Bearer ${accessToken}`
+            }
+          });
+
+          if (!response.ok) {
+            console.error(`[DEBUG DOWNLOAD ROUTE] Google Drive stream returned status: ${response.status}`);
+            return res.redirect(`https://drive.google.com/uc?export=download&id=${driveFileId}`);
+          }
+
+          res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(itemData.fileName)}"`);
+          res.setHeader("Content-Type", response.headers.get("Content-Type") || "application/octet-stream");
+          if (response.headers.get("Content-Length")) {
+            res.setHeader("Content-Length", response.headers.get("Content-Length")!);
+          }
+
+          if (response.body) {
+            const reader = response.body.getReader();
+            const pump = async (): Promise<any> => {
+              const { done, value } = await reader.read();
+              if (done) {
+                res.end();
+                return;
+              }
+              res.write(value);
+              return pump();
+            };
+            await pump();
+            return;
+          } else {
+            return res.redirect(`https://drive.google.com/uc?export=download&id=${driveFileId}`);
+          }
+        } catch (err: any) {
+          console.error(`[DEBUG DOWNLOAD ROUTE] Error serving Google Drive file:`, err);
+          if (itemData.driveFileId) {
+            return res.redirect(`https://drive.google.com/uc?export=download&id=${itemData.driveFileId}`);
+          }
+          throw err;
+        }
+      }
 
       // Fetch Telegram Settings to see if we can use getFile as a primary path
       const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));

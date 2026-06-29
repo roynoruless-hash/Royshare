@@ -241,42 +241,7 @@ Welcome to Roy Share Earn ❤️`;
             await processAccount(botToken, chatId, user);
         } else if (msg.text === "📤 Upload File") {
             console.log("User selected Upload File");
-            const db = getDb();
-            await setDoc(doc(db, "users", String(user.id)), { uploadTestMode: true }, { merge: true });
-            
-            const message = `📤 Send the file you want to upload.
-
-Supported Files:
-
-📄 PDF
-📦 APK
-🎬 Video
-🎵 Audio
-🖼 Image
-📁 ZIP/RAR
-📃 Documents
-
-Maximum File Size:
-2 GB`;
-            const gdocRef = doc(db, "google_drive_accounts", String(user.id));
-            const gsnap = await getDoc(gdocRef);
-            let inlineKeyboard;
-            if (gsnap.exists() && gsnap.data()?.status === "connected") {
-                inlineKeyboard = {
-                    inline_keyboard: [
-                        [{ text: "🟢 Google Drive: Connected", callback_data: "settings_google_drive" }]
-                    ]
-                };
-            } else {
-                const appUrl = getActualAppUrl();
-                const connectUrl = `${appUrl}/api/google-drive/connect?tg_id=${user.id}`;
-                inlineKeyboard = {
-                    inline_keyboard: [
-                        [{ text: "🔗 Connect Google Drive", url: connectUrl }]
-                    ]
-                };
-            }
-            await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+            await showUploadMenu(botToken, chatId, String(user.id));
         } else if (msg.text === "📁 My Content") {
             console.log("User selected My Content");
             await processMyContent(botToken, chatId, user);
@@ -4973,23 +4938,14 @@ Telegram:
             const withdrawalId = data.replace("withdrawal_details_", "");
             await processWithdrawalDetails(botToken, chatId, withdrawalId);
         } else if (data === "mycontent_upload") {
-            await setDoc(doc(db, "users", String(userId)), { uploadTestMode: true }, { merge: true });
-            
-            const message = `📤 Send the file you want to upload.
-
-Supported Files:
-
-📄 PDF
-📦 APK
-🎬 Video
-🎵 Audio
-🖼 Image
-📁 ZIP/RAR
-📃 Documents
-
-Maximum File Size:
-2 GB`;
-            await sendTelegramMessage(botToken, chatId, message);
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await showUploadMenu(botToken, chatId, String(userId), callbackQuery.message?.message_id);
         } else if (data === "mycontent_search") {
             await setDoc(doc(db, "users", String(userId)), { 
                 pendingSearchFile: true,
@@ -5221,6 +5177,146 @@ https://youtube.com`;
                 });
             } catch (e) {}
             await processGoogleDriveSettings(botToken, chatId, String(userId), callbackQuery.message.message_id);
+        } else if (data === "upload_type_small") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await setDoc(doc(db, "users", String(userId)), { uploadTestMode: true }, { merge: true });
+            const messageText = `📤 *Send the file you want to upload.*
+
+Supported Files:
+
+📄 PDF
+📦 APK
+🎬 Video
+🎵 Audio
+🖼 Image
+📁 ZIP/RAR
+📃 Documents
+
+Maximum File Size:
+20 MB`;
+            if (callbackQuery.message?.message_id) {
+                try {
+                    await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            chat_id: chatId,
+                            message_id: callbackQuery.message.message_id,
+                            text: messageText,
+                            parse_mode: "Markdown"
+                        })
+                    });
+                    return;
+                } catch (e) {}
+            }
+            await sendTelegramMessage(botToken, chatId, messageText, { parse_mode: "Markdown" });
+        } else if (data === "upload_type_large") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            const gdocRef = doc(db, "google_drive_accounts", String(userId));
+            const gsnap = await getDoc(gdocRef);
+            const isConnected = gsnap.exists() && 
+                                gsnap.data()?.status === "connected" && 
+                                gsnap.data()?.accessToken && 
+                                gsnap.data()?.refreshToken;
+
+            if (!isConnected) {
+                const appUrl = getActualAppUrl();
+                const connectUrl = `${appUrl}/api/google-drive/connect?tg_id=${userId}`;
+                const messageText = `⚠️ *Google Drive is not connected.*\n\nPlease connect your Google Drive first.`;
+                const inlineKeyboard = {
+                    inline_keyboard: [
+                        [{ text: "🔗 Connect Google Drive", url: connectUrl }],
+                        [{ text: "🔙 Back", callback_data: "upload_back_to_menu" }]
+                    ]
+                };
+                if (callbackQuery.message?.message_id) {
+                    try {
+                        await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                chat_id: chatId,
+                                message_id: callbackQuery.message.message_id,
+                                text: messageText,
+                                parse_mode: "Markdown",
+                                reply_markup: inlineKeyboard
+                            })
+                        });
+                        return;
+                    } catch (e) {}
+                }
+                await sendTelegramMessage(botToken, chatId, messageText, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+            } else {
+                const appUrl = getActualAppUrl();
+                const uploadUrl = `${appUrl}/drive-upload?tg_id=${userId}`;
+                const messageText = `☁️ *Large File Upload*\n\nMaximum Size:\n10 GB\n\nClick below to open secure uploader.`;
+                const inlineKeyboard = {
+                    inline_keyboard: [
+                        [{ text: "🚀 Open Upload Page", url: uploadUrl }],
+                        [{ text: "🔙 Back", callback_data: "upload_back_to_menu" }]
+                    ]
+                };
+                if (callbackQuery.message?.message_id) {
+                    try {
+                        await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                chat_id: chatId,
+                                message_id: callbackQuery.message.message_id,
+                                text: messageText,
+                                parse_mode: "Markdown",
+                                reply_markup: inlineKeyboard
+                            })
+                        });
+                        return;
+                    } catch (e) {}
+                }
+                await sendTelegramMessage(botToken, chatId, messageText, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+            }
+        } else if (data === "upload_back") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            if (callbackQuery.message?.message_id) {
+                try {
+                    await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            chat_id: chatId,
+                            message_id: callbackQuery.message.message_id,
+                            text: "❌ *Upload cancelled.*",
+                            parse_mode: "Markdown"
+                        })
+                    });
+                } catch (e) {}
+            }
+        } else if (data === "upload_back_to_menu") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await showUploadMenu(botToken, chatId, String(userId), callbackQuery.message?.message_id);
         } else if (data === "disconnect_google_drive") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
@@ -5340,6 +5436,52 @@ This feature is currently under maintenance and will be implemented soon.`;
 
 function getActualAppUrl(): string {
     return "https://royshare.onrender.com";
+}
+
+async function showUploadMenu(botToken: string, chatId: number, userId: string, messageIdToEdit?: number) {
+    const db = getDb();
+    await setDoc(doc(db, "users", String(userId)), { uploadTestMode: false }, { merge: true });
+
+    const message = `📤 *Choose Upload Type*
+
+① 📦 *Small Files (0 MB – 20 MB)*
+⚡ Upload using Telegram Storage
+
+② ☁️ *Large Files (20 MB – 10 GB)*
+☁️ Upload using your connected Google Drive`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [
+                { text: "📦 Small Files", callback_data: "upload_type_small" },
+                { text: "☁️ Large Files", callback_data: "upload_type_large" }
+            ],
+            [
+                { text: "🔙 Back", callback_data: "upload_back" }
+            ]
+        ]
+    };
+
+    if (messageIdToEdit) {
+        try {
+            await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    message_id: messageIdToEdit,
+                    text: message,
+                    parse_mode: "Markdown",
+                    reply_markup: inlineKeyboard
+                })
+            });
+            return;
+        } catch (e) {
+            console.error("Failed to edit message for upload menu:", e);
+        }
+    }
+
+    await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
 }
 
 async function processGoogleDriveSettings(botToken: string, chatId: number, userId: string, messageIdToEdit?: number) {
