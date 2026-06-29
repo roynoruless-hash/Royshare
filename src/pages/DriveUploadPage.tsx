@@ -11,7 +11,8 @@ import {
   Copy, 
   ExternalLink, 
   FileIcon,
-  HardDrive
+  HardDrive,
+  RefreshCw
 } from "lucide-react";
 
 export default function DriveUploadPage() {
@@ -32,6 +33,9 @@ export default function DriveUploadPage() {
   // Result states
   const [royshareLink, setRoyshareLink] = useState("");
   const [copied, setCopied] = useState(false);
+  const [currentUploadUrl, setCurrentUploadUrl] = useState<string>("");
+  const [currentDriveFileId, setCurrentDriveFileId] = useState<string>("");
+  const [failedStep, setFailedStep] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -110,6 +114,48 @@ export default function DriveUploadPage() {
     setSelectedFile(file);
   };
 
+  const finalizeUpload = async (url: string, fileId?: string) => {
+    if (!tgId || !selectedFile) return;
+    setPhase("finalizing");
+    setError(null);
+
+    try {
+      const response = await fetch("/api/google-drive/finalize-upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          tg_id: tgId,
+          driveFileId: fileId || currentDriveFileId || undefined,
+          fileName: selectedFile.name,
+          fileSize: selectedFile.size,
+          mimeType: selectedFile.type,
+          uploadUrl: url
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (data.step) {
+          setFailedStep(data.step);
+          if (data.driveFileId) {
+            setCurrentDriveFileId(data.driveFileId);
+          }
+        }
+        throw new Error(data.details || data.error || "Failed to finalize the upload with RoyShare server.");
+      }
+
+      setRoyshareLink(data.royshareLink);
+      setPhase("success");
+      setFailedStep(null);
+    } catch (err: any) {
+      setPhase("error");
+      setError(err.message || "An error occurred while finalizing the file.");
+    }
+  };
+
   const startUpload = async () => {
     if (!selectedFile || !tgId) return;
 
@@ -120,6 +166,9 @@ export default function DriveUploadPage() {
     setRemainingTime(0);
     setUploadedSize(0);
     setTotalSize(selectedFile.size);
+    setCurrentUploadUrl("");
+    setCurrentDriveFileId("");
+    setFailedStep(null);
 
     try {
       // Step 1: Initiate resumable upload session on server
@@ -145,6 +194,7 @@ export default function DriveUploadPage() {
       }
 
       const { uploadUrl } = initData;
+      setCurrentUploadUrl(uploadUrl);
 
       // Step 2: Upload directly to Google's Resumable session URL
       const xhr = new XMLHttpRequest();
@@ -175,52 +225,24 @@ export default function DriveUploadPage() {
       };
 
       xhr.onload = async () => {
-        if (xhr.status === 200 || xhr.status === 201) {
-          try {
+        let driveFileId = "";
+        try {
+          if (xhr.status === 200 || xhr.status === 201) {
             const googleResponse = JSON.parse(xhr.responseText);
-            const driveFileId = googleResponse.id;
-
-            if (!driveFileId) {
-              throw new Error("Google Drive API response did not include a File ID.");
+            driveFileId = googleResponse.id;
+            if (driveFileId) {
+              setCurrentDriveFileId(driveFileId);
             }
-
-            // Step 3: Finalize upload on the server
-            setPhase("finalizing");
-            const finalizeResponse = await fetch("/api/google-drive/finalize-upload", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                tg_id: tgId,
-                driveFileId,
-                fileName: selectedFile.name,
-                fileSize: selectedFile.size,
-                mimeType: selectedFile.type
-              })
-            });
-
-            if (!finalizeResponse.ok) {
-              const errData = await finalizeResponse.json();
-              throw new Error(errData.error || "Failed to finalize the upload with RoyShare server.");
-            }
-
-            const finalizeData = await finalizeResponse.json();
-            setRoyshareLink(finalizeData.royshareLink);
-            setPhase("success");
-          } catch (err: any) {
-            setPhase("error");
-            setError(err.message || "An error occurred while finalizing the file.");
           }
-        } else {
-          setPhase("error");
-          setError(`Google Drive upload failed with status code ${xhr.status}.`);
+        } catch (e) {
+          console.warn("Failed to parse Google response body, server will query status:", e);
         }
+        await finalizeUpload(uploadUrl, driveFileId);
       };
 
-      xhr.onerror = () => {
-        setPhase("error");
-        setError("A network error occurred during upload. Please check your internet connection and try again.");
+      xhr.onerror = async () => {
+        console.warn("XHR error triggered, querying server to verify if upload actually finished on Google's side...");
+        await finalizeUpload(uploadUrl);
       };
 
       xhr.send(selectedFile);
@@ -295,8 +317,17 @@ export default function DriveUploadPage() {
           <div id="upload-error-alert" className="mb-6 p-4 bg-rose-500/15 border border-rose-500/30 rounded-xl text-rose-300 text-sm flex gap-3 items-start">
             <XCircle className="w-5 h-5 shrink-0 text-rose-400" />
             <div>
-              <p className="font-semibold">Upload Error</p>
-              <p className="opacity-90">{error}</p>
+              <p className="font-semibold">
+                {failedStep && failedStep > 1 ? "Upload Completed (Finalization Failed)" : "Upload Error"}
+              </p>
+              {failedStep && failedStep > 1 ? (
+                <div className="space-y-1.5 opacity-90 mt-1 select-text">
+                  <p>The file was successfully uploaded to Google Drive, but a post-upload operation failed at <strong>Step {failedStep}</strong>:</p>
+                  <p className="font-mono bg-slate-950/60 p-2.5 rounded-lg text-xs mt-1 border border-rose-500/20 max-h-[150px] overflow-auto select-text whitespace-pre-wrap">{error}</p>
+                </div>
+              ) : (
+                <p className="opacity-90">{error}</p>
+              )}
             </div>
           </div>
         )}
@@ -513,17 +544,44 @@ export default function DriveUploadPage() {
 
         {/* PHASE 7: GENERAL ERROR STATE / RETRY */}
         {phase === "error" && !error?.includes("session not detected") && (
-          <div id="error-retry-action" className="flex flex-col items-center py-4">
-            <button 
-              onClick={() => {
-                setError(null);
-                setPhase("idle");
-                setSelectedFile(null);
-              }}
-              className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-semibold text-sm transition border border-slate-700"
-            >
-              Try Again
-            </button>
+          <div id="error-retry-action" className="flex flex-col items-center py-4 w-full">
+            {failedStep && failedStep > 1 ? (
+              <div className="flex flex-col sm:flex-row gap-3 w-full justify-center">
+                <button 
+                  onClick={() => finalizeUpload(currentUploadUrl, currentDriveFileId)}
+                  className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-semibold text-sm transition text-center flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
+                >
+                  <RefreshCw className="w-4 h-4 animate-spin-once" /> Retry Finalizing (No Re-upload)
+                </button>
+                <button 
+                  onClick={() => {
+                    setError(null);
+                    setPhase("idle");
+                    setSelectedFile(null);
+                    setCurrentUploadUrl("");
+                    setCurrentDriveFileId("");
+                    setFailedStep(null);
+                  }}
+                  className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-semibold text-sm transition border border-slate-700"
+                >
+                  Discard & Start Over
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={() => {
+                  setError(null);
+                  setPhase("idle");
+                  setSelectedFile(null);
+                  setCurrentUploadUrl("");
+                  setCurrentDriveFileId("");
+                  setFailedStep(null);
+                }}
+                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-semibold text-sm transition shadow-lg shadow-blue-600/20"
+              >
+                Try Again
+              </button>
+            )}
           </div>
         )}
       </div>
