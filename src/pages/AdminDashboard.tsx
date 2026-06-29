@@ -150,6 +150,51 @@ export default function AdminDashboard() {
   const [supportSettingsLoading, setSupportSettingsLoading] = useState(false);
   const [settingsTab, setSettingsTab] = useState('🤖 Bot Settings');
 
+  const [googleDriveAccounts, setGoogleDriveAccounts] = useState<any[]>([]);
+  const [googleDriveLoading, setGoogleDriveLoading] = useState(false);
+  const [googleDriveError, setGoogleDriveError] = useState("");
+
+  const fetchGoogleDriveAccounts = async () => {
+    setGoogleDriveLoading(true);
+    setGoogleDriveError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/google-drive-accounts`);
+      if (!res.ok) throw new Error("Failed to fetch Google Drive accounts");
+      const result = await res.json();
+      if (result.success) {
+        setGoogleDriveAccounts(result.accounts || []);
+      } else {
+        throw new Error(result.error || "Failed to fetch accounts");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setGoogleDriveError(err.message || "An error occurred");
+    } finally {
+      setGoogleDriveLoading(false);
+    }
+  };
+
+  const handleDisconnectGoogleDrive = async (id: string) => {
+    if (!window.confirm("Are you sure you want to disconnect this Google Drive account? This will revoke access but won't delete user data.")) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/google-drive-accounts/${id}/disconnect`, {
+        method: "POST"
+      });
+      if (!res.ok) throw new Error("Failed to disconnect account");
+      const result = await res.json();
+      if (result.success) {
+        alert("Account disconnected successfully!");
+        fetchGoogleDriveAccounts();
+      } else {
+        throw new Error(result.error || "Failed to disconnect account");
+      }
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    }
+  };
+
   const [shortenerTestLoading, setShortenerTestLoading] = useState(false);
   const [shortenerTestStatus, setShortenerTestStatus] = useState<string>("");
   const [showShortenerKey, setShowShortenerKey] = useState(false);
@@ -1501,6 +1546,8 @@ export default function AdminDashboard() {
       fetchBackups();
     } else if (activeTab === '💰 Monetag Postback') {
       fetchMonetagStats();
+    } else if (activeTab === '📥 Google Drive Accounts') {
+      fetchGoogleDriveAccounts();
     }
 
     return () => {
@@ -1735,7 +1782,7 @@ export default function AdminDashboard() {
         <div className="space-y-8 max-w-7xl mx-auto">
           {/* Navigation Buttons */}
           <div className="flex flex-wrap gap-3">
-            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "🔗 Smart URL Shortener", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "💰 Monetag Postback", "⚙️ System Settings"].map((btn) => (
+            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "🔗 Smart URL Shortener", "📥 Google Drive Accounts", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "💰 Monetag Postback", "⚙️ System Settings"].map((btn) => (
               <button 
                 key={btn} 
                 onClick={() => {
@@ -5284,6 +5331,103 @@ export default function AdminDashboard() {
                         <ExternalLink size={14} /> Documentation
                       </button>
                     </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {activeTab === '📥 Google Drive Accounts' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-blue-500/10 rounded-2xl">
+                    <Download className="w-6 h-6 text-blue-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Google Drive Connected Accounts</h2>
+                    <p className="text-sm text-slate-400">Manage and monitor linked Google Drive accounts</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={fetchGoogleDriveAccounts}
+                  disabled={googleDriveLoading}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700 disabled:opacity-50"
+                >
+                  🔄 Refresh List
+                </button>
+              </div>
+
+              {googleDriveError && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl text-sm">
+                  ⚠️ {googleDriveError}
+                </div>
+              )}
+
+              {googleDriveLoading ? (
+                <div className="flex justify-center py-20">
+                   <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-800 bg-slate-950/40 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                          <th className="px-6 py-4">Telegram ID</th>
+                          <th className="px-6 py-4">Name</th>
+                          <th className="px-6 py-4">Gmail Address</th>
+                          <th className="px-6 py-4">Connected Date</th>
+                          <th className="px-6 py-4">Status</th>
+                          <th className="px-6 py-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800 text-sm text-slate-300">
+                        {googleDriveAccounts.length > 0 ? (
+                          googleDriveAccounts.map((account) => (
+                            <tr key={account.id} className="hover:bg-slate-800/20 transition-colors">
+                              <td className="px-6 py-4 font-mono font-medium text-slate-400">
+                                {account.userId || account.id}
+                              </td>
+                              <td className="px-6 py-4 font-semibold text-white">
+                                {account.name}
+                              </td>
+                              <td className="px-6 py-4 font-mono text-slate-300">
+                                {account.email}
+                              </td>
+                              <td className="px-6 py-4 text-slate-400">
+                                {account.connectedAt}
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${
+                                  account.status === 'connected' 
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                                    : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                }`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${account.status === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></span>
+                                  {account.status === 'connected' ? 'Connected' : 'Disconnected'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                {account.status === 'connected' && (
+                                  <button
+                                    onClick={() => handleDisconnectGoogleDrive(account.id)}
+                                    className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 text-xs font-semibold rounded-lg hover:text-white transition-all border border-rose-500/20"
+                                  >
+                                    Disconnect
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="text-center py-12 text-slate-500 italic">
+                              No connected Google Drive accounts found.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}

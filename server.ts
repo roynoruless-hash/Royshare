@@ -1,15 +1,56 @@
 import { handleUpdate, submitWithdrawalRequest } from "./src/bot";
 import express from "express";
 import path from "path";
+import fs from "fs";
+import { getApps, initializeApp, cert } from "firebase-admin/app";
+import { getStorage } from "firebase-admin/storage";
 import { createServer as createViteServer } from "vite";
 import { getDb } from "./src/lib/firebase";
 import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit } from "firebase/firestore";
 import { REWARD_TASKS } from "./src/lib/tasks";
 import { GoogleGenAI } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./src/lib/gemini";
+import { google } from "googleapis";
 
 // ...
 const db = getDb();
+
+const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+
+if (getApps().length === 0) {
+  let credential;
+  const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
+  const serviceAccountFilePath = path.join(process.cwd(), "firebase-service-account.json");
+
+  if (serviceAccountEnv) {
+    try {
+      console.log("[FIREBASE ADMIN] Initializing using FIREBASE_SERVICE_ACCOUNT env variable.");
+      credential = cert(JSON.parse(serviceAccountEnv));
+    } catch (e: any) {
+      console.error("[FIREBASE ADMIN] Failed to parse FIREBASE_SERVICE_ACCOUNT env string:", e.message || e);
+    }
+  } else if (fs.existsSync(serviceAccountFilePath)) {
+    try {
+      console.log("[FIREBASE ADMIN] Initializing using firebase-service-account.json file.");
+      const keyData = JSON.parse(fs.readFileSync(serviceAccountFilePath, "utf8"));
+      credential = cert(keyData);
+    } catch (e: any) {
+      console.error("[FIREBASE ADMIN] Failed to parse firebase-service-account.json file:", e.message || e);
+    }
+  }
+
+  const appOptions: any = {
+    projectId: config.projectId,
+    storageBucket: config.storageBucket || `${config.projectId}.appspot.com`
+  };
+
+  if (credential) {
+    appOptions.credential = credential;
+  }
+
+  initializeApp(appOptions);
+}
 
 async function cleanupDemoTasks() {
   try {
@@ -5011,35 +5052,9 @@ Bonus added successfully.`;
           }
         }
 
-        // Get original download URL from Telegram
-        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-        const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
-        const botUsername = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botUsername : null;
-        
-        let downloadUrl = "";
-        if (botToken && itemData.telegramFileId) {
-          try {
-            console.log(`[DEBUG CLAIM] Fetching direct Telegram download URL using telegramFileId: ${itemData.telegramFileId}`);
-            const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${itemData.telegramFileId}`);
-            const getFileData = await getFileRes.json();
-            if (getFileData.ok && getFileData.result?.file_path) {
-              downloadUrl = `https://api.telegram.org/file/bot${botToken}/${getFileData.result.file_path}`;
-              console.log(`[DEBUG CLAIM] Successfully retrieved direct Telegram download URL: ${downloadUrl}`);
-            } else {
-              console.warn(`[DEBUG CLAIM] Failed to get file path from Telegram API: ${JSON.stringify(getFileData)}`);
-            }
-          } catch (e) {
-            console.error("[DEBUG CLAIM] Error fetching direct download URL from Telegram getFile API:", e);
-          }
-        }
-
-        if (!downloadUrl) {
-          if (botToken && botUsername && itemData.storageChannelId && itemData.telegramMessageId && itemData.telegramMessageId !== "NOT_SET") {
-            downloadUrl = `https://t.me/${botUsername}?start=dl_${linkId}`;
-          } else {
-            downloadUrl = itemData.generatedLink || "";
-          }
-        }
+        // Return the new secure direct backend download endpoint
+        const downloadUrl = `/download/${linkId}?action=download`;
+        console.log(`[DEBUG CLAIM] Returning backend download url: ${downloadUrl}`);
 
         res.json({
           success: true,
@@ -5402,6 +5417,304 @@ Bonus added successfully.`;
     } catch (e: any) {
       console.error("Error saving user shortener settings:", e);
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Google Drive Connection Routes
+  app.get("/api/google-drive/connect", (req, res) => {
+    try {
+      const tg_id = req.query.tg_id;
+      if (!tg_id) {
+        return res.status(400).send("Error: Missing tg_id query parameter.");
+      }
+
+      const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/google-drive/callback`;
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        redirectUri
+      );
+
+      const authUrl = oauth2Client.generateAuthUrl({
+        access_type: "offline",
+        prompt: "consent",
+        scope: [
+          "https://www.googleapis.com/auth/drive.readonly",
+          "https://www.googleapis.com/auth/userinfo.email",
+          "https://www.googleapis.com/auth/userinfo.profile"
+        ],
+        state: String(tg_id)
+      });
+
+      res.redirect(authUrl);
+    } catch (e: any) {
+      console.error("Error in Google Drive connect route:", e);
+      res.status(500).send(`Error: ${e.message}`);
+    }
+  });
+
+  app.get("/api/google-drive/callback", async (req, res) => {
+    try {
+      const { code, state } = req.query;
+      if (!code || !state) {
+        return res.status(400).send("Error: Missing code or state parameters from Google callback.");
+      }
+
+      const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/google-drive/callback`;
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        redirectUri
+      );
+
+      const { tokens } = await oauth2Client.getToken(code as string);
+      oauth2Client.setCredentials(tokens);
+
+      const oauth2 = google.oauth2({
+        auth: oauth2Client,
+        version: "v2"
+      });
+
+      const userInfo = await oauth2.userinfo.get();
+      const email = userInfo.data.email || "";
+      const name = userInfo.data.name || "";
+      const googleUserId = userInfo.data.id || "";
+
+      // Store in Firestore
+      const docRef = doc(db, "google_drive_accounts", String(state));
+      const existingSnap = await getDoc(docRef);
+
+      const accountData: any = {
+        userId: String(state),
+        name: name,
+        email: email,
+        googleUserId: googleUserId,
+        accessToken: tokens.access_token || "",
+        expiryTime: tokens.expiry_date || 0,
+        connectedAt: new Date().toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" }),
+        status: "connected"
+      };
+
+      if (tokens.refresh_token) {
+        accountData.refreshToken = tokens.refresh_token;
+      } else if (existingSnap.exists() && existingSnap.data()?.refreshToken) {
+        accountData.refreshToken = existingSnap.data().refreshToken;
+      }
+
+      await setDoc(docRef, accountData, { merge: true });
+
+      // Notify User via Telegram
+      try {
+        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
+        if (botToken) {
+          const messageText = `✅ *Google Drive Connected Successfully*\n\n*Email:*\n${email}\n\nYour Google Drive is now connected with RoyShare.`;
+          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: Number(state),
+              text: messageText,
+              parse_mode: "Markdown"
+            })
+          });
+        }
+      } catch (tgErr) {
+        console.error("Failed to send telegram notification for google drive connect:", tgErr);
+      }
+
+      res.send(`
+        <html>
+          <body style="margin:0;padding:0;background-color:#0f172a;display:flex;justify-content:center;align-items:center;height:100vh;">
+            <div style="font-family:sans-serif;padding:2.5rem;max-width:500px;width:90%;border:1px solid #334155;border-radius:20px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.3);background-color:#1e293b;text-align:center;color:#f8fafc;">
+              <div style="font-size:3rem;margin-bottom:1rem;">✅</div>
+              <h1 style="color:#10b981;font-size:2rem;margin-bottom:1rem;margin-top:0;font-weight:700;">Drive Connected!</h1>
+              <p style="color:#94a3b8;margin-bottom:1.5rem;font-size:1.1rem;line-height:1.5;">Google Drive has been successfully connected to your RoyShare account.</p>
+              <div style="background-color:#334155;padding:1.2rem;border-radius:12px;font-family:monospace;font-size:1rem;color:#e2e8f0;margin-bottom:1.5rem;word-break:break-all;">
+                <strong>Gmail:</strong> ${email}
+              </div>
+              <p style="color:#64748b;font-size:0.9rem;">You can safely close this browser window and return to your Telegram Bot.</p>
+            </div>
+          </body>
+        </html>
+      `);
+    } catch (e: any) {
+      console.error("Error in Google Drive callback:", e);
+      res.status(500).send(`Error: ${e.message}`);
+    }
+  });
+
+  // Admin APIs for Google Drive Accounts
+  app.get("/api/admin/google-drive-accounts", async (req, res) => {
+    try {
+      const colRef = collection(db, "google_drive_accounts");
+      const snap = await getDocs(colRef);
+      const accounts: any[] = [];
+      snap.forEach(d => {
+        const data = d.data();
+        accounts.push({
+          id: d.id,
+          userId: data.userId || d.id,
+          name: data.name || "N/A",
+          email: data.email || "N/A",
+          connectedAt: data.connectedAt || "N/A",
+          status: data.status || "N/A"
+        });
+      });
+      res.json({ success: true, accounts });
+    } catch (e: any) {
+      console.error("Error fetching Google Drive accounts for admin:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/google-drive-accounts/:id/disconnect", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const docRef = doc(db, "google_drive_accounts", id);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: "Account connection record not found" });
+      }
+
+      await updateDoc(docRef, {
+        accessToken: "",
+        refreshToken: "",
+        status: "disconnected"
+      });
+
+      // Notify on Telegram
+      try {
+        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
+        if (botToken) {
+          const messageText = `⚠️ *Google Drive Disconnected*\n\nYour Google Drive connection has been disconnected.`;
+          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: Number(id),
+              text: messageText,
+              parse_mode: "Markdown"
+            })
+          });
+        }
+      } catch (tgErr) {
+        console.error("Failed to send telegram disconnect notification:", tgErr);
+      }
+
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Error disconnecting Google Drive account:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Differentiate page visit vs file download action
+  app.get("/download/:fileId", async (req, res, next) => {
+    // If it's a standard page view in browser (not action=download), pass to React SPA
+    if (req.query.action !== "download" && (!req.headers.accept || req.headers.accept.includes("text/html"))) {
+      return next();
+    }
+
+    const { fileId } = req.params;
+    console.log(`\n=== [DEBUG DOWNLOAD ROUTE] TRACING STEPS FOR FILE ID: ${fileId} ===`);
+
+    try {
+      // Step 1: Read Firestore document
+      console.log(`[DEBUG DOWNLOAD ROUTE] Step 1: Reading Firestore document uploads/${fileId}`);
+      const docRef = doc(db, "uploads", fileId);
+      const docSnap = await getDoc(docRef);
+      
+      if (!docSnap.exists()) {
+        const errorMsg = `Document uploads/${fileId} does not exist in Firestore database.`;
+        console.error(`[DEBUG DOWNLOAD ROUTE] Error: ${errorMsg}`);
+        return res.status(404).send(`
+          <div style="font-family:sans-serif;padding:2rem;max-width:600px;margin:auto;">
+            <h1 style="color:#ef4444;">404 Not Found</h1>
+            <p>${errorMsg}</p>
+          </div>
+        `);
+      }
+      
+      const itemData = docSnap.data();
+      console.log(`[DEBUG DOWNLOAD ROUTE] Firestore document data retrieved:`, JSON.stringify(itemData, null, 2));
+
+      // Fetch Telegram Settings to see if we can use getFile as a primary path
+      const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
+      
+      let telegramDirectUrl = "";
+      if (botToken && itemData.telegramFileId) {
+        try {
+          console.log(`[DEBUG DOWNLOAD ROUTE] Checking if file can be fetched via Telegram Bot API...`);
+          const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${itemData.telegramFileId}`);
+          const getFileData = await getFileRes.json();
+          if (getFileData.ok && getFileData.result?.file_path) {
+            telegramDirectUrl = `https://api.telegram.org/file/bot${botToken}/${getFileData.result.file_path}`;
+            console.log(`[DEBUG DOWNLOAD ROUTE] Successfully retrieved direct Telegram download URL: ${telegramDirectUrl}`);
+          } else {
+            console.warn(`[DEBUG DOWNLOAD ROUTE] Telegram Bot API getFile returned error (likely file size > 20MB): ${JSON.stringify(getFileData)}`);
+          }
+        } catch (e: any) {
+          console.error(`[DEBUG DOWNLOAD ROUTE] Error querying Telegram Bot API getFile:`, e.message || e);
+        }
+      }
+
+      // If we got a direct Telegram URL (i.e. file <= 20MB), we redirect directly to it!
+      if (telegramDirectUrl) {
+        console.log(`[DEBUG DOWNLOAD ROUTE] File is small enough to download via Telegram. Redirecting...`);
+        return res.redirect(telegramDirectUrl);
+      }
+
+      // Step 2: Resolve Firebase Storage path
+      console.log(`[DEBUG DOWNLOAD ROUTE] Step 2: Resolving Firebase Storage path for: ${itemData.fileName || 'file'}`);
+      const fileName = itemData.fileName || "file";
+      const storagePath = `uploads/${fileId}/${fileName}`;
+      console.log(`[DEBUG DOWNLOAD ROUTE] Resolved Firebase Storage path: "${storagePath}"`);
+
+      // Step 3: Generate download URL
+      console.log(`[DEBUG DOWNLOAD ROUTE] Step 3: Generating download URL for path: "${storagePath}"`);
+      const bucket = getStorage().bucket();
+      const fileRef = bucket.file(storagePath);
+
+      console.log(`[DEBUG DOWNLOAD ROUTE] Checking if file exists in Firebase Storage bucket: ${bucket.name}`);
+      const [exists] = await fileRef.exists();
+      if (!exists) {
+        const errorMsg = `File not found in Firebase Storage bucket at path: "${storagePath}"`;
+        console.error(`[DEBUG DOWNLOAD ROUTE] Error: ${errorMsg}`);
+        throw new Error(errorMsg);
+      }
+
+      console.log(`[DEBUG DOWNLOAD ROUTE] File exists in bucket. Generating signed download URL...`);
+      const [downloadUrl] = await fileRef.getSignedUrl({
+        action: 'read',
+        expires: Date.now() + 15 * 60 * 1000, // 15 minutes
+      });
+      console.log(`[DEBUG DOWNLOAD ROUTE] Successfully generated signed download URL: ${downloadUrl}`);
+
+      // Step 4: Return the file
+      console.log(`[DEBUG DOWNLOAD ROUTE] Step 4: Returning/serving the file. Redirecting user to: ${downloadUrl}`);
+      return res.redirect(downloadUrl);
+
+    } catch (err: any) {
+      console.error(`\n🔴 [DEBUG DOWNLOAD ROUTE] EXCEPTION ENCOUNTERED FOR FILE ID: ${fileId}`);
+      console.error(`Error Message: ${err.message || err}`);
+      console.error(`Stack Trace:\n`, err.stack || err);
+      console.error(`================================================================================\n`);
+
+      // Never redirect to Telegram on download failure. Return the real error (404, 403 or 500) with the reason.
+      const statusCode = err.message?.includes("not found") ? 404 : 500;
+      return res.status(statusCode).send(`
+        <div style="font-family:sans-serif;padding:2rem;max-width:600px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;margin-top:4rem;box-shadow:0 4px 6px -1px rgb(0 0 0 / 0.1);background-color:#ffffff;">
+          <h1 style="color:#ef4444;font-size:1.875rem;margin-bottom:1rem;margin-top:0;">Download Failed</h1>
+          <p style="color:#475569;margin-bottom:1.5rem;">An error occurred while attempting to resolve your file download.</p>
+          <div style="background-color:#f1f5f9;padding:1rem;border-radius:6px;font-family:monospace;font-size:0.875rem;color:#0f172a;word-break:break-all;">
+            <strong>Error ${statusCode}:</strong> ${err.message || err}
+          </div>
+          <p style="color:#94a3b8;font-size:0.75rem;margin-top:1.5rem;text-align:center;">RoyShare Safe Download System</p>
+        </div>
+      `);
     }
   });
 

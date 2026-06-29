@@ -5198,6 +5198,24 @@ https://youtube.com`;
                 });
             } catch (e) {}
             await handleSetCurrency(botToken, chatId, String(userId), "USD", callbackQuery.message.message_id);
+        } else if (data === "settings_google_drive") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id })
+                });
+            } catch (e) {}
+            await processGoogleDriveSettings(botToken, chatId, String(userId), callbackQuery.message.message_id);
+        } else if (data === "disconnect_google_drive") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "Google Drive disconnected!" })
+                });
+            } catch (e) {}
+            await handleGoogleDriveDisconnect(botToken, chatId, String(userId), callbackQuery.message.message_id);
         } else if (data === "settings_back") {
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
@@ -5236,7 +5254,8 @@ Select a setting option below to customize your experience.`;
             [{ text: "🌐 Language", callback_data: "settings_language" }],
             [{ text: "🔐 Privacy & Security", callback_data: "settings_privacy" }],
             [{ text: "📊 Statistics", callback_data: "settings_statistics" }],
-            [{ text: "ℹ️ About RoyShare", callback_data: "settings_about" }]
+            [{ text: "ℹ️ About RoyShare", callback_data: "settings_about" }],
+            [{ text: "🔗 Connect Google Drive", callback_data: "settings_google_drive" }]
         ]
     };
 
@@ -5299,6 +5318,75 @@ This feature is currently under maintenance and will be implemented soon.`;
     const inlineKeyboard = {
         inline_keyboard: [
             [{ text: "🔙 Back", callback_data: "settings_back" }]
+        ]
+    };
+
+    await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+}
+
+function getActualAppUrl(): string {
+    return process.env.APP_URL || process.env.VITE_APP_URL || "https://royshare.onrender.com";
+}
+
+async function processGoogleDriveSettings(botToken: string, chatId: number, userId: string, messageIdToEdit: number) {
+    const db = getDb();
+    const docRef = doc(db, "google_drive_accounts", userId);
+    const snap = await getDoc(docRef);
+
+    let message = "";
+    const inlineKeyboard: any = { inline_keyboard: [] };
+
+    if (snap.exists() && snap.data()?.status === "connected") {
+        const data = snap.data();
+        message = `🟢 *Google Drive Connected Successfully*
+
+*Email:*
+${data.email || "N/A"}
+
+Your Google Drive is now connected with RoyShare.`;
+
+        inlineKeyboard.inline_keyboard.push([
+            { text: "❌ Disconnect Google Drive", callback_data: "disconnect_google_drive" }
+        ]);
+    } else {
+        const appUrl = getActualAppUrl();
+        const connectUrl = `${appUrl}/api/google-drive/connect?tg_id=${userId}`;
+
+        message = `🔗 *Connect Google Drive*
+
+Connect your Google Drive with RoyShare to enable direct access.
+
+Click the button below to authenticate.`;
+
+        inlineKeyboard.inline_keyboard.push([
+            { text: "🔗 Connect Google Drive", url: connectUrl }
+        ]);
+    }
+
+    inlineKeyboard.inline_keyboard.push([
+        { text: "🔙 Back to Settings", callback_data: "settings_back" }
+    ]);
+
+    await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+}
+
+async function handleGoogleDriveDisconnect(botToken: string, chatId: number, userId: string, messageIdToEdit: number) {
+    const db = getDb();
+    const docRef = doc(db, "google_drive_accounts", userId);
+    
+    await setDoc(docRef, {
+        accessToken: "",
+        refreshToken: "",
+        status: "disconnected"
+    }, { merge: true });
+
+    const message = `✅ *Google Drive Disconnected*
+
+Your Google Drive account has been successfully disconnected.`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔙 Back to Settings", callback_data: "settings_back" }]
         ]
     };
 

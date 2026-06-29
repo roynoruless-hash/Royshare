@@ -6,22 +6,23 @@ async function inspectDb() {
         const db = getDb();
         console.log("--- Inspection Start ---");
         
-        // 3. Settings/telegram check
-        const telegramDocRef = doc(db, 'settings', 'telegram');
-        const docSnap = await getDoc(telegramDocRef);
+        const uploadRef = doc(db, 'uploads', 'FLPCMZ9Z4C');
+        const docSnap = await getDoc(uploadRef);
 
-        console.log("Document 'settings/telegram' exists:", docSnap.exists());
+        console.log("Document 'uploads/FLPCMZ9Z4C' exists:", docSnap.exists());
         if (docSnap.exists()) {
-            console.log("Document data:", docSnap.data());
+            console.log("Document data:", JSON.stringify(docSnap.data(), null, 2));
         } else {
-            console.log("Document 'settings/telegram' does not exist.");
+            console.log("Document 'uploads/FLPCMZ9Z4C' does not exist.");
         }
 
         console.log("--- Inspection End ---");
+        process.exit(0);
     } catch (e: any) {
         console.error("--- Inspection Exception ---");
         console.error("Code:", e.code);
         console.error("Stack:", e.stack);
+        process.exit(1);
     }
 }
 inspectDb();
