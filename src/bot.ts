@@ -14,11 +14,7 @@ function formatCurrency(amount: number, currency: string = "INR", includeSymbol:
 }
 
 function getAppUrl(): string {
-    const rawAppUrl = process.env.VITE_APP_URL || process.env.APP_URL || "https://royshare.onrender.com";
-    if (!rawAppUrl || rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") {
-        return "https://royshare.onrender.com";
-    }
-    return rawAppUrl;
+    return "https://royshare.onrender.com";
 }
 
 async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string): Promise<string> {
@@ -5343,7 +5339,7 @@ This feature is currently under maintenance and will be implemented soon.`;
 }
 
 function getActualAppUrl(): string {
-    return process.env.APP_URL || process.env.VITE_APP_URL || "https://royshare.onrender.com";
+    return "https://royshare.onrender.com";
 }
 
 async function processGoogleDriveSettings(botToken: string, chatId: number, userId: string, messageIdToEdit?: number) {

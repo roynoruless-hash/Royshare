@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import { handleUpdate, submitWithdrawalRequest } from "./src/bot";
 import express from "express";
 import path from "path";
@@ -5428,10 +5431,92 @@ Bonus added successfully.`;
         return res.status(400).send("Error: Missing tg_id query parameter.");
       }
 
-      const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/google-drive/callback`;
+      const appUrl = "https://royshare.onrender.com";
+      const redirectUri = "https://royshare.onrender.com/api/google-drive/callback";
+
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+      const isConfigured = clientId && clientSecret && 
+                           !clientId.startsWith("YOUR_") && !clientId.startsWith("MY_") && clientId.trim() !== "" &&
+                           !clientSecret.startsWith("YOUR_") && !clientSecret.startsWith("MY_") && clientSecret.trim() !== "";
+
+      if (!isConfigured) {
+        const missingVars = [];
+        if (!clientId || clientId.startsWith("YOUR_") || clientId.startsWith("MY_") || clientId.trim() === "") missingVars.push("GOOGLE_CLIENT_ID");
+        if (!clientSecret || clientSecret.startsWith("YOUR_") || clientSecret.startsWith("MY_") || clientSecret.trim() === "") missingVars.push("GOOGLE_CLIENT_SECRET");
+
+        res.send(`
+          <html>
+            <body style="margin:0;padding:0;background-color:#0f172a;color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;">
+              <div style="padding:2.5rem;max-width:700px;width:90%;border:1px solid #334155;border-radius:20px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.3);background-color:#1e293b;margin:2rem 0;">
+                <div style="font-size:3rem;margin-bottom:1rem;text-align:center;">⚙️</div>
+                <h1 style="color:#ef4444;font-size:2rem;margin-bottom:1.5rem;margin-top:0;font-weight:700;text-align:center;">Google OAuth Setup Required</h1>
+                
+                <p style="color:#94a3b8;margin-bottom:1.5rem;font-size:1.1rem;line-height:1.6;">
+                  To enable Google Drive integration, you must configure Google OAuth Credentials in the AI Studio environment variables.
+                </p>
+
+                <div style="background-color:#0f172a;padding:1.2rem;border-radius:12px;margin-bottom:2rem;border:1px solid #ef4444;">
+                  <h3 style="color:#f87171;margin-top:0;margin-bottom:0.8rem;font-size:1.1rem;">Missing Environment Variables:</h3>
+                  <ul style="color:#ef4444;font-family:monospace;font-size:1rem;margin:0;padding-left:1.5rem;line-height:1.5;">
+                    ${missingVars.map(v => `<li><strong>${v}</strong></li>`).join('')}
+                  </ul>
+                </div>
+
+                <h2 style="color:#38bdf8;font-size:1.4rem;margin-top:2rem;margin-bottom:1rem;font-weight:600;border-bottom:1px solid #334155;padding-bottom:0.5rem;">How to configure Google Cloud Console:</h2>
+                
+                <ol style="color:#cbd5e1;padding-left:1.5rem;line-height:1.8;font-size:1rem;">
+                  <li style="margin-bottom:0.8rem;">
+                    Go to the <strong><a href="https://console.cloud.google.com/" target="_blank" style="color:#38bdf8;text-decoration:underline;">Google Cloud Console</a></strong> and select or create a project.
+                  </li>
+                  <li style="margin-bottom:0.8rem;">
+                    Go to <strong>APIs & Services > OAuth consent screen</strong>:
+                    <ul style="padding-left:1.2rem;list-style-type:circle;margin-top:0.4rem;">
+                      <li>Choose <strong>External</strong> user type, fill in required fields, and save.</li>
+                      <li>In the <strong>Scopes</strong> step, add <code>.../auth/drive.readonly</code>, <code>.../auth/userinfo.email</code>, and <code>.../auth/userinfo.profile</code>.</li>
+                      <li>In the <strong>Test users</strong> step, add your developer email address (e.g., <code>ritikrai2625@gmail.com</code>) so you can authenticate while the app is in testing.</li>
+                    </ul>
+                  </li>
+                  <li style="margin-bottom:0.8rem;">
+                    Go to <strong>APIs & Services > Credentials</strong>, click <strong>+ CREATE CREDENTIALS</strong>, and select <strong>OAuth client ID</strong>.
+                  </li>
+                  <li style="margin-bottom:0.8rem;">
+                    Configure the credential:
+                    <ul style="padding-left:1.2rem;list-style-type:circle;margin-top:0.4rem;">
+                      <li>Select <strong>Web application</strong> as Application type.</li>
+                      <li>Under <strong>Authorized redirect URIs</strong>, add this exact URL:<br>
+                        <code style="background-color:#0f172a;padding:0.2rem 0.5rem;border-radius:4px;color:#38bdf8;word-break:break-all;font-size:0.9rem;">${redirectUri}</code>
+                      </li>
+                    </ul>
+                  </li>
+                  <li style="margin-bottom:0.8rem;">
+                    Click <strong>Create</strong>, then copy the generated <strong>Client ID</strong> and <strong>Client Secret</strong>.
+                  </li>
+                  <li style="margin-bottom:0.8rem;">
+                    In AI Studio, go to the <strong>Settings (or Secrets)</strong> menu and add these keys with your copied values:
+                    <ul style="padding-left:1.2rem;list-style-type:circle;margin-top:0.4rem;">
+                      <li><code>GOOGLE_CLIENT_ID</code></li>
+                      <li><code>GOOGLE_CLIENT_SECRET</code></li>
+                    </ul>
+                  </li>
+                </ol>
+
+                <div style="margin-top:2.5rem;text-align:center;">
+                  <button onclick="window.location.reload();" style="background-color:#0284c7;color:#ffffff;border:none;padding:0.8rem 1.8rem;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;transition:background-color 0.2s;">
+                    🔄 Reload Page
+                  </button>
+                </div>
+              </div>
+            </body>
+          </html>
+        `);
+        return;
+      }
+
       const oauth2Client = new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
+        clientId,
+        clientSecret,
         redirectUri
       );
 
@@ -5460,7 +5545,8 @@ Bonus added successfully.`;
         return res.status(400).send("Error: Missing code or state parameters from Google callback.");
       }
 
-      const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/google-drive/callback`;
+      const appUrl = "https://royshare.onrender.com";
+      const redirectUri = "https://royshare.onrender.com/api/google-drive/callback";
       const oauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
