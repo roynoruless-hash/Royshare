@@ -5797,73 +5797,194 @@ Bonus added successfully.`;
 
   // Google Drive Finalize upload, set permissions, and register in uploads collection
   app.post("/api/google-drive/finalize-upload", async (req, res) => {
+    console.log(`[Google API Trace] === START FINALIZE UPLOAD ===`);
+    console.log(`[Google API Trace] Finalize request payload received:`, JSON.stringify(req.body, null, 2));
+
+    let { tg_id, driveFileId, fileName, fileSize, mimeType, uploadUrl } = req.body;
+
     try {
-      const { tg_id, driveFileId, fileName, fileSize, mimeType } = req.body;
-      if (!tg_id || !driveFileId || !fileName || !fileSize) {
-        return res.status(400).json({ error: "Missing required parameters (tg_id, driveFileId, fileName, fileSize)" });
+      // Step 1: Validate core inputs and check token
+      console.log(`[Google API Trace] [Step 1] Validating core inputs and fetching access token...`);
+      if (!tg_id) {
+        console.error(`[Google API Trace] [Step 1] Validation FAILED: Missing tg_id.`);
+        return res.status(400).json({ error: "Missing required parameter: tg_id", step: 1 });
+      }
+      if (!fileName) {
+        console.error(`[Google API Trace] [Step 1] Validation FAILED: Missing fileName.`);
+        return res.status(400).json({ error: "Missing required parameter: fileName", step: 1 });
+      }
+      if (!fileSize) {
+        console.error(`[Google API Trace] [Step 1] Validation FAILED: Missing fileSize.`);
+        return res.status(400).json({ error: "Missing required parameter: fileSize", step: 1 });
       }
 
-      const { accessToken, email: ownerEmail } = await getActiveGoogleToken(tg_id);
+      let accessToken = "";
+      let ownerEmail = "";
+      try {
+        const tokenObj = await getActiveGoogleToken(tg_id);
+        accessToken = tokenObj.accessToken;
+        ownerEmail = tokenObj.email;
+        console.log(`[Google API Trace] [Step 1] Successfully fetched active Google OAuth token for user: ${ownerEmail}`);
+      } catch (authErr: any) {
+        console.error(`[Google API Trace] [Step 1] Google OAuth token fetching FAILED:`, authErr);
+        return res.status(401).json({ 
+          error: "Google Drive OAuth authentication failed", 
+          step: 1, 
+          details: authErr.message 
+        });
+      }
 
-      console.log(`[Google API] Setting public reader permission for file: ${driveFileId}`);
-      const permResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}/permissions`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          role: "reader",
-          type: "anyone"
-        })
-      });
+      // Step 2: Recover or verify driveFileId
+      console.log(`[Google API Trace] [Step 2] Resolving driveFileId (passed: "${driveFileId || ''}", uploadUrl: "${uploadUrl || ''}")...`);
+      if (!driveFileId && uploadUrl) {
+        console.log(`[Google API Trace] [Step 2] driveFileId is empty. Querying Google Drive upload session status to recover it...`);
+        try {
+          const statusRes = await fetch(uploadUrl, {
+            method: "PUT",
+            headers: {
+              "Content-Length": "0",
+              "Content-Range": `bytes */*`
+            }
+          });
+          const statusText = await statusRes.text();
+          console.log(`[Google API Trace] [Step 2] Google status query HTTP response code: ${statusRes.status}`);
+          console.log(`[Google API Trace] [Step 2] Google status query response body:`, statusText);
+          
+          if (statusRes.status === 200 || statusRes.status === 201) {
+            const metadata = JSON.parse(statusText);
+            if (metadata.id) {
+              driveFileId = metadata.id;
+              console.log(`[Google API Trace] [Step 2] Successfully recovered driveFileId from Google: ${driveFileId}`);
+            } else {
+              console.warn(`[Google API Trace] [Step 2] Google status response parsed but contains no file ID.`);
+            }
+          } else {
+            console.warn(`[Google API Trace] [Step 2] Google status response was not 200/201 OK.`);
+          }
+        } catch (statusErr: any) {
+          console.error(`[Google API Trace] [Step 2] Exception during status query recovery:`, statusErr);
+        }
+      }
 
-      if (!permResponse.ok) {
-        const permErr = await permResponse.text();
-        console.warn(`[Google API] Warning: Failed to set public permission for file ${driveFileId}:`, permErr);
+      if (!driveFileId) {
+        console.error(`[Google API Trace] [Step 2] Verification FAILED: driveFileId is missing/could not be resolved.`);
+        return res.status(400).json({ 
+          error: "Google Drive File ID is missing", 
+          step: 2, 
+          details: "Could not retrieve the file ID from Google Drive. Please make sure the upload completed successfully." 
+        });
+      }
+
+      console.log(`[Google API Trace] driveFileId successfully resolved: ${driveFileId}`);
+
+      // Step 3: Set public reader permissions on Google Drive
+      console.log(`[Google API Trace] [Step 3] Setting public reader permission for file: ${driveFileId}`);
+      try {
+        const permResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}/permissions`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            role: "reader",
+            type: "anyone"
+          })
+        });
+
+        if (!permResponse.ok) {
+          const permErr = await permResponse.text();
+          console.warn(`[Google API Trace] [Step 3] Warning: Failed to set public permission for file ${driveFileId}:`, permErr);
+        } else {
+          console.log(`[Google API Trace] [Step 3] Public permissions set successfully.`);
+        }
+      } catch (permErr: any) {
+        console.warn(`[Google API Trace] [Step 3] Warning: Exception while setting public permission:`, permErr);
+      }
+
+      // Step 4: RoyShare download ID & Page / Firestore metadata creation
+      console.log(`[Google API Trace] [Step 4] Checking for existing metadata records for driveFileId: ${driveFileId}`);
+      let uniqueFileId = "";
+      let royshareLink = "";
+      let existingDoc: any = null;
+
+      try {
+        const q = query(collection(db, "uploads"), where("driveFileId", "==", driveFileId));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          existingDoc = qSnap.docs[0].data();
+          uniqueFileId = qSnap.docs[0].id;
+          royshareLink = existingDoc.royshareLink || `https://royshare.onrender.com/download/${uniqueFileId}`;
+          console.log(`[Google API Trace] Found existing RoyShare record for driveFileId ${driveFileId}. Reusing ID: ${uniqueFileId}`);
+        }
+      } catch (findErr) {
+        console.error(`[Google API Trace] Error querying existing uploads in Step 4:`, findErr);
+      }
+
+      if (!uniqueFileId) {
+        uniqueFileId = "gd_" + Math.random().toString(36).substring(2, 10);
+        royshareLink = `https://royshare.onrender.com/download/${uniqueFileId}`;
+        console.log(`[Google API Trace] Generated new RoyShare download ID: ${uniqueFileId}`);
       }
 
       const driveLink = `https://drive.google.com/uc?export=download&id=${driveFileId}`;
-      const uniqueFileId = "gd_" + Math.random().toString(36).substring(2, 10);
-      const royshareLink = `https://royshare.onrender.com/download/${uniqueFileId}`;
-
       const formattedDate = new Date().toLocaleDateString('en-GB', {
         day: 'numeric',
         month: 'short',
         year: 'numeric'
       });
 
-      const uploadDocRef = doc(db, "uploads", uniqueFileId);
-      await setDoc(uploadDocRef, {
-        fileId: uniqueFileId,
-        telegramId: String(tg_id),
-        userId: String(tg_id),
-        driveFileId,
-        fileName,
-        fileSize: Number(fileSize),
-        mimeType: mimeType || "application/octet-stream",
-        driveLink,
-        royshareLink,
-        generatedLink: royshareLink,
-        uploadDate: formattedDate,
-        downloads: 0,
-        earnings: 0,
-        storage: "google_drive",
-        ownerEmail,
-        status: "active"
-      });
+      console.log(`[Google API Trace] [Step 4] Saving metadata record to Firestore...`);
+      try {
+        const uploadDocRef = doc(db, "uploads", uniqueFileId);
+        await setDoc(uploadDocRef, {
+          fileId: uniqueFileId,
+          telegramId: String(tg_id),
+          userId: String(tg_id),
+          driveFileId,
+          fileName,
+          fileSize: Number(fileSize),
+          mimeType: mimeType || "application/octet-stream",
+          driveLink,
+          royshareLink,
+          generatedLink: royshareLink,
+          uploadDate: formattedDate,
+          downloads: existingDoc ? (existingDoc.downloads || 0) : 0,
+          earnings: existingDoc ? (existingDoc.earnings || 0) : 0,
+          storage: "google_drive",
+          ownerEmail,
+          status: "active"
+        }, { merge: true });
 
+        console.log(`[Google API Trace] [Step 4] Firestore metadata successfully written.`);
+      } catch (fsErr: any) {
+        console.error(`[Google API Trace] [Step 4] Firestore metadata creation FAILED:`, fsErr);
+        return res.status(500).json({
+          error: "Firestore metadata creation failed",
+          step: 4,
+          driveFileId,
+          details: fsErr.message
+        });
+      }
+
+      // Step 5: Update user totalFiles statistics
+      console.log(`[Google API Trace] [Step 5] Updating user totalFiles statistics...`);
       try {
         const uRef = doc(db, "users", String(tg_id));
         const uSnap = await getDoc(uRef);
         if (uSnap.exists()) {
           const currentTotalFiles = uSnap.data().totalFiles || 0;
           await setDoc(uRef, { totalFiles: currentTotalFiles + 1 }, { merge: true });
+          console.log(`[Google API Trace] [Step 5] User totalFiles statistics updated successfully.`);
+        } else {
+          console.log(`[Google API Trace] [Step 5] User document does not exist, skipping totalFiles update.`);
         }
       } catch (uErr) {
-        console.error("Failed to update user totalFiles stat:", uErr);
+        console.error(`[Google API Trace] [Step 5] Warning: Failed to update user totalFiles statistics:`, uErr);
       }
 
+      // Step 6: Send Telegram success notification
+      console.log(`[Google API Trace] [Step 6] Attempting to send Telegram success notification...`);
       try {
         const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
         const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
@@ -5871,7 +5992,7 @@ Bonus added successfully.`;
           const formattedSize = formatBytes(Number(fileSize));
           const messageText = `✅ *Large File Uploaded Successfully*\n\n📄 *File Name:* \`${fileName}\`\n📦 *File Size:* ${formattedSize}\n☁ *Storage:* Google Drive\n\n🔗 *RoyShare Link:* ${royshareLink}`;
           
-          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -5888,19 +6009,49 @@ Bonus added successfully.`;
               }
             })
           });
+
+          if (!tgRes.ok) {
+            const tgErrText = await tgRes.text();
+            console.error(`[Google API Trace] [Step 6] Telegram sendMessage FAILED with status ${tgRes.status}:`, tgErrText);
+            return res.status(500).json({
+              error: "Telegram success notification failed to send",
+              step: 6,
+              driveFileId,
+              details: `Telegram API error: ${tgErrText}`
+            });
+          } else {
+            console.log(`[Google API Trace] [Step 6] Telegram success notification sent successfully.`);
+          }
+        } else {
+          console.warn(`[Google API Trace] [Step 6] Telegram bot token is not configured in settings.`);
         }
-      } catch (tgErr) {
-        console.error("Failed to send telegram upload success notification:", tgErr);
+      } catch (tgErr: any) {
+        console.error(`[Google API Trace] [Step 6] Telegram success notification FAILED:`, tgErr);
+        return res.status(500).json({
+          error: "Telegram success notification failed",
+          step: 6,
+          driveFileId,
+          details: tgErr.message
+        });
       }
 
+      console.log(`[Google API Trace] === FINALIZE UPLOAD COMPLETED SUCCESSFULLY ===`);
+      console.log(`[Google API Trace] Generated RoyShare Link: ${royshareLink}`);
+      
       return res.json({
         success: true,
         fileId: uniqueFileId,
         royshareLink
       });
+
     } catch (err: any) {
-      console.error("[Google Finalize] Error:", err);
-      return res.status(500).json({ error: err.message });
+      console.error(`[Google API Trace] Unexpected finalize error:`, err);
+      return res.status(500).json({ 
+        error: "An unexpected error occurred during finalization", 
+        step: 4, 
+        driveFileId, 
+        details: err.message 
+      });
     }
   });
 

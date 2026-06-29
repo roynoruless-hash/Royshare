@@ -119,20 +119,47 @@ export default function DriveUploadPage() {
     setPhase("finalizing");
     setError(null);
 
+    const targetDriveFileId = fileId || currentDriveFileId;
+    const targetFileName = selectedFile.name;
+    const targetFileSize = selectedFile.size;
+
+    console.log("=== Google Drive Upload Completed ===");
+    console.log("driveFileId received:", targetDriveFileId);
+
+    // Validate that none of the values are null or undefined
+    const missingParams: string[] = [];
+    if (!tgId) missingParams.push("tg_id");
+    if (!targetDriveFileId) missingParams.push("driveFileId");
+    if (!targetFileName) missingParams.push("fileName");
+    if (targetFileSize === undefined || targetFileSize === null) missingParams.push("fileSize");
+
+    if (missingParams.length > 0) {
+      const errorMessage = `Missing required parameter(s): ${missingParams.join(", ")}`;
+      console.error("[Finalize Error] Validation failed before calling server:", errorMessage);
+      setFailedStep(2); // driveFileId is step 2
+      setPhase("error");
+      setError(errorMessage);
+      return;
+    }
+
+    const payload = {
+      tg_id: tgId,
+      driveFileId: targetDriveFileId,
+      fileName: targetFileName,
+      fileSize: targetFileSize,
+      mimeType: selectedFile.type || "application/octet-stream",
+      uploadUrl: url
+    };
+
+    console.log("Finalize request payload:", JSON.stringify(payload, null, 2));
+
     try {
       const response = await fetch("/api/google-drive/finalize-upload", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          tg_id: tgId,
-          driveFileId: fileId || currentDriveFileId || undefined,
-          fileName: selectedFile.name,
-          fileSize: selectedFile.size,
-          mimeType: selectedFile.type,
-          uploadUrl: url
-        })
+        body: JSON.stringify(payload)
       });
 
       const data = await response.json();
@@ -143,9 +170,15 @@ export default function DriveUploadPage() {
           if (data.driveFileId) {
             setCurrentDriveFileId(data.driveFileId);
           }
+        } else {
+          setFailedStep(4); // Default to Step 4 if not specified
         }
         throw new Error(data.details || data.error || "Failed to finalize the upload with RoyShare server.");
       }
+
+      console.log("Firestore success: Metadata record generated.");
+      console.log("Telegram success: Success notification sent.");
+      console.log("RoyShare link generated:", data.royshareLink);
 
       setRoyshareLink(data.royshareLink);
       setPhase("success");
