@@ -3316,37 +3316,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   };
 
   async function runPolling(botToken: string) {
-      if (pollingState.isRunning) return;
-      pollingState.isRunning = true;
-      console.log("Polling started with token:", botToken ? `${botToken.substring(0, 5)}...` : "EMPTY!!!");
-    if (!botToken) {
-        console.error("CRITICAL: BOT TOKEN IS EMPTY! Polling will fail.");
-    }
-      
-      while (pollingState.isRunning) {
-          try {
-              const res = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates?offset=${pollingState.lastUpdateId + 1}&timeout=30`);
-              const data = await res.json();
-              if (data.ok && data.result.length > 0) {
-                  for (const update of data.result) {
-                      pollingState.lastUpdateId = update.update_id;
-                      pollingState.lastUpdate = update;
-                      pollingState.receivedCount++;
-                      if (update.message?.text) pollingState.lastCommand = update.message.text;
-                      if (update.message?.from?.id) pollingState.lastUserId = update.message.from.id;
-                      else if (update.callback_query?.from?.id) pollingState.lastUserId = update.callback_query.from.id;
-                      
-                      console.log("Processing update:", JSON.stringify(update));
-                      await handleUpdate(botToken, update);
-                  }
-              }
-          } catch (e: any) {
-              pollingState.lastError = e.message;
-              console.error("Polling error:", e);
-          }
-          await new Promise(r => setTimeout(r, 1000));
-      }
-      console.log("Polling stopped.");
+      console.log("Long polling is completely disabled in favor of Telegram Webhook to prevent 409 Conflict errors.");
+      pollingState.isRunning = false;
+      return;
   }
 
   app.post("/api/telegram/polling/start", async (req, res) => {
@@ -3385,7 +3357,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           adminChatId: ""
         });
       } else if (data?.botToken) {
-          runPolling(data.botToken);
+          console.log("Auto-start polling skipped: Webhook is the only active update method.");
       }
   }).catch(e => {
       console.error("Failed to auto-start polling:", e);

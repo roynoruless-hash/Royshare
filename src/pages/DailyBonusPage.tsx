@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { Gift, Disc, RotateCw, AlertTriangle, ArrowLeft, Clock, CheckCircle, ShieldCheck, Star } from "lucide-react";
 import AdRenderer from "../components/AdRenderer";
@@ -67,7 +68,7 @@ export default function DailyBonusPage() {
     if (!userId) return;
 
     // Fetch initial status from Firestore backend
-    fetch(`/api/daily-bonus/status?userId=${userId}`)
+    fetch(`${API_BASE}/api/daily-bonus/status?userId=${userId}`)
       .then(res => res.json())
       .then(data => {
         if (data && data.remainingSpins !== undefined) {
@@ -115,7 +116,7 @@ export default function DailyBonusPage() {
 
     try {
       // Backend spin deduction
-      const res = await fetch("/api/daily-bonus/spin", {
+      const res = await fetch(`${API_BASE}/api/daily-bonus/spin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, rewardAmount: selectedReward.amount })
@@ -155,7 +156,7 @@ export default function DailyBonusPage() {
     setIsClaiming(true);
 
     try {
-      const res = await fetch("/api/daily-bonus/claim", {
+      const res = await fetch(`${API_BASE}/api/daily-bonus/claim`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from "react";
+import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, ShieldAlert, ArrowRight, Download, ExternalLink, CheckCircle2 } from "lucide-react";
 import AnimatedBackground from "./AnimatedBackground";
@@ -139,7 +140,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
     // 1. Fetch active ads for custom placement ID matching
     const fetchAds = async () => {
       try {
-        const res = await fetch("/api/admin/ads");
+        const res = await fetch(`${API_BASE}/api/admin/ads`);
         if (res.ok) {
           const data = await res.json();
           setAllAds(data || []);
@@ -188,7 +189,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
         }
 
         console.log("[MultiPageEngine] Initializing secure routing session...");
-        const initRes = await fetch("/api/smart-links/session/init", {
+        const initRes = await fetch(`${API_BASE}/api/smart-links/session/init`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -372,7 +373,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/smart-links/session/page-complete", {
+      const res = await fetch(`${API_BASE}/api/smart-links/session/page-complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -418,7 +419,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
     setRedirecting(true);
     try {
       console.log("[MultiPageEngine] Calling session claim API...");
-      const res = await fetch("/api/smart-links/session/claim", {
+      const res = await fetch(`${API_BASE}/api/smart-links/session/claim`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId })

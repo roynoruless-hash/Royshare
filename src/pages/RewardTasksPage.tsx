@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, Play, Pause, RotateCcw, Volume2, VolumeX, ShieldCheck, AlertCircle, Sparkles, CheckCircle2, Zap, Award, Terminal } from "lucide-react";
 import { db } from "../lib/firebase";
@@ -168,7 +169,7 @@ export default function RewardTasksPage() {
         }
 
         // Fetch Settings & User Information
-        const settingsRes = await fetch(`/api/earn-rewards/settings?userId=${userId}`);
+        const settingsRes = await fetch(`${API_BASE}/api/earn-rewards/settings?userId=${userId}`);
         const data = await settingsRes.json();
 
         if (data.error) {
@@ -373,10 +374,12 @@ export default function RewardTasksPage() {
       interval = setInterval(async () => {
         if (!realUserId) return;
         try {
-          const res = await fetch(`/api/earn-rewards/check-status?userId=${realUserId}&taskId=${taskId}`);
+          const res = await fetch(`${API_BASE}/api/earn-rewards/check-status?userId=${realUserId}&taskId=${taskId}`);
           const data = await res.json();
           if (data.completed) {
             setIsVerified(true);
+            setIsCompletedSuccess(true);
+            setVideoCompleted(true);
             setMonetagError(null);
             clearInterval(interval);
           } else if (data.reason === "Postback failed") {
@@ -530,7 +533,7 @@ export default function RewardTasksPage() {
     setMonetagError(null);
     
     try {
-      const res = await fetch(`/api/monetag/claim-reward`, {
+      const res = await fetch(`${API_BASE}/api/monetag/claim-reward`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ telegram_id: realTelegramId, taskId: taskId })
@@ -555,7 +558,7 @@ export default function RewardTasksPage() {
     if (!userId || !taskId) return;
     setSubmitting(true);
     try {
-      const res = await fetch("/api/earn-rewards/complete", {
+      const res = await fetch(`${API_BASE}/api/earn-rewards/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, taskId })
@@ -741,45 +744,15 @@ export default function RewardTasksPage() {
                 )}
               </button>
             ) : (
-              <button
-                onClick={handleClaimMonetagReward}
-                disabled={videoCompleted || submitting || !((window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id)}
-                className={`w-full py-6 rounded-[2rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden ${
-                  videoCompleted 
-                    ? "bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 cursor-default" 
-                    : isVerified
-                      ? "bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white shadow-emerald-900/40"
-                      : "bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-amber-900/40"
-                } ${!((window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id) ? 'opacity-50 grayscale' : ''}`}
+              <div
+                className="w-full py-6 rounded-[2rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-xl bg-slate-900/60 border border-blue-500/30 text-blue-400 shadow-blue-900/20"
               >
-                {!((window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id) ? (
-                  <>
-                    <AlertCircle size={32} className="text-red-400" />
-                    <span className="text-lg">Telegram ID Missing</span>
-                    <p className="text-[10px] font-normal opacity-70">Restart bot to fix</p>
-                  </>
-                ) : videoCompleted ? (
-                  <>
-                    <CheckCircle2 size={32} />
-                    <span>Reward Credited</span>
-                  </>
-                ) : submitting ? (
-                  <>
-                    <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin mb-1" />
-                    <span>Claiming...</span>
-                  </>
-                ) : (
-                  <>
-                    <motion.div
-                      animate={{ scale: [1, 1.2, 1] }}
-                      transition={{ repeat: Infinity, duration: 1.5 }}
-                    >
-                      <Zap size={32} className="fill-current text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" />
-                    </motion.div>
-                    <span>Claim Reward</span>
-                  </>
-                )}
-              </button>
+                <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-1" />
+                <span>Verifying Ad Completion...</span>
+                <p className="text-xs font-normal text-slate-400 px-4">
+                  Please wait, checking with ad network server. Your reward will be credited automatically.
+                </p>
+              </div>
             )}
 
             {/* Status & Errors */}
@@ -1024,28 +997,13 @@ export default function RewardTasksPage() {
                     )}
                   </button>
                 ) : (
-                  <button
-                    onClick={handleClaimMonetagReward}
-                    disabled={videoCompleted || submitting}
-                    className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white rounded-2xl font-bold transition-all shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2 text-lg active:scale-95"
-                  >
-                    {videoCompleted ? (
-                      <>
-                        <CheckCircle2 size={24} />
-                        <span>Reward Credited</span>
-                      </>
-                    ) : submitting ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span>Claiming...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={20} className="fill-current" />
-                        <span>Claim Reward Coins</span>
-                      </>
-                    )}
-                  </button>
+                  <div className="w-full py-4 bg-slate-900/60 border border-blue-500/30 text-blue-400 rounded-2xl font-bold flex flex-col items-center justify-center gap-2">
+                    <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm">Verifying Ad Completion...</span>
+                    <p className="text-[10px] font-normal text-slate-400">
+                      Processing reward automatically.
+                    </p>
+                  </div>
                 )}
               </div>
             </div>

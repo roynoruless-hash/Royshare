@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function AdminLogin({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -39,7 +40,7 @@ export default function AdminLogin({ isOpen, onClose }: { isOpen: boolean; onClo
     const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
     
     try {
-      const res = await fetch("/api/telegram/send", {
+      const res = await fetch(`${API_BASE}/api/telegram/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ botToken: telegramBotToken, chatId: telegramChatId, otp: newOtp })

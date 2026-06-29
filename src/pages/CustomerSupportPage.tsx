@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   ArrowLeft, MessageSquare, Bot, AlertCircle, FileText, Send, 
@@ -106,8 +107,8 @@ export default function CustomerSupportPage() {
 
     // Load initial settings and tickets
     Promise.all([
-      fetch("/api/support/settings").then(res => res.json()),
-      fetch(`/api/support/tickets?userId=${resolvedId}`).then(res => res.json())
+      fetch(`${API_BASE}/api/support/settings`).then(res => res.json()),
+      fetch(`${API_BASE}/api/support/tickets?userId=${resolvedId}`).then(res => res.json())
     ]).then(([settingsData, ticketsData]) => {
       if (settingsData) setSettings(settingsData);
       if (Array.isArray(ticketsData)) setTickets(ticketsData);
@@ -123,7 +124,7 @@ export default function CustomerSupportPage() {
     if (activeModal !== "ticket_detail" || !selectedTicket) return;
 
     const interval = setInterval(() => {
-      fetch(`/api/support/tickets?userId=${userId}`)
+      fetch(`${API_BASE}/api/support/tickets?userId=${userId}`)
         .then(res => res.json())
         .then(data => {
           if (Array.isArray(data)) {
@@ -149,7 +150,7 @@ export default function CustomerSupportPage() {
   const loadTickets = async () => {
     setTicketsLoading(true);
     try {
-      const res = await fetch(`/api/support/tickets?userId=${userId}`);
+      const res = await fetch(`${API_BASE}/api/support/tickets?userId=${userId}`);
       if (res.ok) {
         const data = await res.json();
         setTickets(data);
@@ -178,7 +179,7 @@ export default function CustomerSupportPage() {
 
     setSubmittingTicket(true);
     try {
-      const res = await fetch("/api/support/tickets", {
+      const res = await fetch(`${API_BASE}/api/support/tickets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -227,7 +228,7 @@ export default function CustomerSupportPage() {
     setLiveLoading(true);
 
     try {
-      const res = await fetch("/api/support/ai-chat", {
+      const res = await fetch(`${API_BASE}/api/support/ai-chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -255,7 +256,7 @@ export default function CustomerSupportPage() {
   const handleEscalate = async () => {
     setEscalating(true);
     try {
-      const res = await fetch("/api/support/tickets/escalate", {
+      const res = await fetch(`${API_BASE}/api/support/tickets/escalate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -287,7 +288,7 @@ export default function CustomerSupportPage() {
 
     setReplyLoading(true);
     try {
-      const res = await fetch(`/api/support/tickets/${selectedTicket.id}/reply`, {
+      const res = await fetch(`${API_BASE}/api/support/tickets/${selectedTicket.id}/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

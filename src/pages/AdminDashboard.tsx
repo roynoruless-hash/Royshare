@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Zap, Play, CheckCircle2, AlertTriangle, Timer, Tv, 
@@ -158,7 +159,7 @@ export default function AdminDashboard() {
     setShortenerTestStatus("");
     try {
       const config = systemSettings?.urlShortener || {};
-      const res = await fetch("/api/admin/shortener/test-connection", {
+      const res = await fetch(`${API_BASE}/api/admin/shortener/test-connection`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -204,7 +205,7 @@ export default function AdminDashboard() {
     setTestConnectionLoading(true);
     setTestConnectionStatus("");
     try {
-      const res = await fetch("/api/admin/support/test-connection", {
+      const res = await fetch(`${API_BASE}/api/admin/support/test-connection`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -321,7 +322,7 @@ export default function AdminDashboard() {
   const fetchTelegramSettings = async () => {
     setTelegramLoading(true);
     try {
-      const res = await fetch("/api/telegram/settings");
+      const res = await fetch(`${API_BASE}/api/telegram/settings`);
       if (res.ok) {
         const data = await res.json();
         setTelegramConfigs({
@@ -346,7 +347,7 @@ export default function AdminDashboard() {
     setTelegramLoading(true);
     setTelegramFeedback("");
     try {
-      const res = await fetch("/api/telegram/settings", {
+      const res = await fetch(`${API_BASE}/api/telegram/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(telegramConfigs)
@@ -368,7 +369,8 @@ export default function AdminDashboard() {
     setActionLoading((prev: any) => ({ ...prev, [actionKey]: true }));
     setTelegramFeedback("");
     try {
-      const res = await fetch(endpoint, {
+      const targetUrl = endpoint.startsWith("/") ? `${API_BASE}${endpoint}` : endpoint;
+      const res = await fetch(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -397,7 +399,7 @@ export default function AdminDashboard() {
     setActionLoading((prev: any) => ({ ...prev, setWebhook: true }));
     setTelegramFeedback("");
     try {
-      const res = await fetch("/api/telegram/webhook/set", {
+      const res = await fetch(`${API_BASE}/api/telegram/webhook/set`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -412,7 +414,7 @@ export default function AdminDashboard() {
         // Refresh the diagnostics panel automatically
         setActionLoading((prev: any) => ({ ...prev, runDiagnostics: true }));
         try {
-          const diagRes = await fetch('/api/telegram/diagnostics', {
+          const diagRes = await fetch(`${API_BASE}/api/telegram/diagnostics`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(telegramConfigs)
@@ -440,7 +442,7 @@ export default function AdminDashboard() {
     setAiGeneratingInstructions(true);
     setAiError("");
     try {
-      const res = await fetch("/api/admin/shortener/generate-instructions", {
+      const res = await fetch(`${API_BASE}/api/admin/shortener/generate-instructions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings: userShortenerSettings })
@@ -463,7 +465,7 @@ export default function AdminDashboard() {
     setAiGeneratingTask(true);
     setAiError("");
     try {
-      const res = await fetch("/api/admin/tasks/generate-ai", {
+      const res = await fetch(`${API_BASE}/api/admin/tasks/generate-ai`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -540,7 +542,7 @@ export default function AdminDashboard() {
   const fetchMonetagStats = async () => {
     setMonetagStatsLoading(true);
     try {
-      const res = await fetch("/api/admin/monetag/stats");
+      const res = await fetch(`${API_BASE}/api/admin/monetag/stats`);
       const data = await res.json();
       if (data.success) {
         setMonetagStats(data);
@@ -558,7 +560,7 @@ export default function AdminDashboard() {
     try {
       // Use the first user found or a dummy ID for testing
       const telegramId = data?.topEarners?.[0]?.telegramId || "123456789";
-      const res = await fetch("/api/admin/monetag/test-postback", {
+      const res = await fetch(`${API_BASE}/api/admin/monetag/test-postback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ telegramId })
@@ -589,7 +591,7 @@ export default function AdminDashboard() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/admin/dashboard");
+      const res = await fetch(`${API_BASE}/api/admin/dashboard`);
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
       const json = await res.json();
       setData(json);
@@ -604,7 +606,7 @@ export default function AdminDashboard() {
     setWithdrawalsLoading(true);
     setWithdrawalsError("");
     try {
-      const res = await fetch("/api/admin/withdrawals");
+      const res = await fetch(`${API_BASE}/api/admin/withdrawals`);
       if (!res.ok) throw new Error("Failed to fetch withdrawals");
       const json = await res.json();
       setWithdrawals(json);
@@ -619,7 +621,7 @@ export default function AdminDashboard() {
     setTicketsLoading(true);
     setTicketsError("");
     try {
-      const res = await fetch("/api/admin/tickets");
+      const res = await fetch(`${API_BASE}/api/admin/tickets`);
       if (!res.ok) throw new Error("Failed to fetch tickets");
       const json = await res.json();
       setTickets(json);
@@ -634,7 +636,7 @@ export default function AdminDashboard() {
     setAnnouncementsLoading(true);
     setAnnouncementsError("");
     try {
-      const res = await fetch("/api/admin/announcements");
+      const res = await fetch(`${API_BASE}/api/admin/announcements`);
       if (!res.ok) throw new Error("Failed to fetch announcements");
       const json = await res.json();
       setAnnouncements(json);
@@ -649,7 +651,7 @@ export default function AdminDashboard() {
     setTasksLoading(true);
     setTasksError("");
     try {
-      const res = await fetch("/api/admin/tasks");
+      const res = await fetch(`${API_BASE}/api/admin/tasks`);
       if (!res.ok) throw new Error("Failed to fetch tasks");
       const json = await res.json();
       setTasks(json);
@@ -663,7 +665,7 @@ export default function AdminDashboard() {
   const fetchTaskLogs = async () => {
     setTaskLogsLoading(true);
     try {
-      const res = await fetch("/api/admin/task-logs");
+      const res = await fetch(`${API_BASE}/api/admin/task-logs`);
       if (res.ok) {
         const json = await res.json();
         setTaskLogs(json);
@@ -678,7 +680,7 @@ export default function AdminDashboard() {
   const fetchVerifiedTasks = async () => {
     setVerifiedTasksLoading(true);
     try {
-      const res = await fetch("/api/admin/verified-tasks");
+      const res = await fetch(`${API_BASE}/api/admin/verified-tasks`);
       if (res.ok) {
         const json = await res.json();
         setVerifiedTasks(json);
@@ -693,7 +695,7 @@ export default function AdminDashboard() {
   const fetchBonusSettings = async () => {
     setBonusSettingsLoading(true);
     try {
-      const res = await fetch("/api/admin/daily-bonus/settings");
+      const res = await fetch(`${API_BASE}/api/admin/daily-bonus/settings`);
       if (res.ok) setBonusSettings(await res.json());
     } catch (err) {
       console.error(err);
@@ -705,7 +707,7 @@ export default function AdminDashboard() {
   const fetchBonusHistory = async () => {
     setBonusHistoryLoading(true);
     try {
-      const res = await fetch("/api/admin/daily-bonus/history");
+      const res = await fetch(`${API_BASE}/api/admin/daily-bonus/history`);
       if (res.ok) setBonusHistory(await res.json());
     } catch (err) {
       console.error(err);
@@ -716,7 +718,7 @@ export default function AdminDashboard() {
 
   const saveBonusSettings = async (newSettings: any) => {
     try {
-      const res = await fetch("/api/admin/daily-bonus/settings", {
+      const res = await fetch(`${API_BASE}/api/admin/daily-bonus/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newSettings)
@@ -737,7 +739,7 @@ export default function AdminDashboard() {
     setUsersLoading(true);
     setUsersError("");
     try {
-      const res = await fetch("/api/admin/users");
+      const res = await fetch(`${API_BASE}/api/admin/users`);
       if (!res.ok) throw new Error("Failed to fetch users");
       setUsers(await res.json());
     } catch (err: any) {
@@ -753,7 +755,7 @@ export default function AdminDashboard() {
     
     setModalLoading(true);
     try {
-      const res = await fetch("/api/admin/users/delete-all", {
+      const res = await fetch(`${API_BASE}/api/admin/users/delete-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ adminId: "Admin" })
@@ -781,8 +783,8 @@ export default function AdminDashboard() {
     setModalLoading(true);
     try {
       const endpoint = action === 'delete' 
-        ? `/api/admin/users/${userId}` 
-        : `/api/admin/users/${userId}/${action}`;
+        ? `${API_BASE}/api/admin/users/${userId}` 
+        : `${API_BASE}/api/admin/users/${userId}/${action}`;
       
       const res = await fetch(endpoint, {
         method: action === 'delete' ? "DELETE" : "POST",
@@ -812,7 +814,7 @@ export default function AdminDashboard() {
 
     setUsersLoading(true);
     try {
-      const res = await fetch("/api/admin/users/bulk-action", {
+      const res = await fetch(`${API_BASE}/api/admin/users/bulk-action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userIds: selectedUserIds, action, adminId: "Admin" })
@@ -833,14 +835,14 @@ export default function AdminDashboard() {
   };
 
   const handleExportUsers = () => {
-    window.open("/api/admin/users/export", "_blank");
+    window.open(`${API_BASE}/api/admin/users/export`, "_blank");
   };
 
   const fetchAds = async () => {
     setAdsLoading(true);
     setAdsError("");
     try {
-      const res = await fetch("/api/admin/ads");
+      const res = await fetch(`${API_BASE}/api/admin/ads`);
       if (!res.ok) throw new Error("Failed to fetch ads");
       setAds(await res.json());
     } catch (err: any) {
@@ -853,7 +855,7 @@ export default function AdminDashboard() {
   const fetchAdPlacements = async () => {
     setAdPlacementsLoading(true);
     try {
-      const res = await fetch("/api/admin/ad-placements");
+      const res = await fetch(`${API_BASE}/api/admin/ad-placements`);
       if (res.ok) setAdPlacements(await res.json());
     } catch (err) {
       console.error(err);
@@ -864,7 +866,7 @@ export default function AdminDashboard() {
 
   const saveAdPlacements = async (newPlacements: any) => {
     try {
-      const res = await fetch("/api/admin/ad-placements", {
+      const res = await fetch(`${API_BASE}/api/admin/ad-placements`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newPlacements)
@@ -884,7 +886,7 @@ export default function AdminDashboard() {
   const fetchSystemSettings = async () => {
     setSystemSettingsLoading(true);
     try {
-      const res = await fetch("/api/admin/system-settings");
+      const res = await fetch(`${API_BASE}/api/admin/system-settings`);
       if (res.ok) {
         const data = await res.json();
         const normalizedData = {
@@ -910,7 +912,7 @@ export default function AdminDashboard() {
   const saveSystemSettings = async (settingsToSave: any = systemSettings) => {
     setSystemSettingsLoading(true);
     try {
-      const res = await fetch("/api/admin/system-settings", {
+      const res = await fetch(`${API_BASE}/api/admin/system-settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settingsToSave)
@@ -932,7 +934,7 @@ export default function AdminDashboard() {
   const fetchSupportSettings = async () => {
     setSupportSettingsLoading(true);
     try {
-      const res = await fetch("/api/admin/support/settings");
+      const res = await fetch(`${API_BASE}/api/admin/support/settings`);
       if (res.ok) {
         const data = await res.json();
         setSupportSettings(data);
@@ -947,7 +949,7 @@ export default function AdminDashboard() {
   const saveSupportSettings = async (settingsToSave: any = supportSettings) => {
     setSupportSettingsLoading(true);
     try {
-      const res = await fetch("/api/admin/support/settings", {
+      const res = await fetch(`${API_BASE}/api/admin/support/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settingsToSave)
@@ -969,7 +971,7 @@ export default function AdminDashboard() {
   const fetchAnalytics = async () => {
     setAnalyticsLoading(true);
     try {
-      const res = await fetch("/api/admin/analytics-full");
+      const res = await fetch(`${API_BASE}/api/admin/analytics-full`);
       if (res.ok) {
         setAnalyticsData(await res.json());
       }
@@ -983,7 +985,7 @@ export default function AdminDashboard() {
   const fetchBroadcasts = async () => {
     setBroadcastsLoading(true);
     try {
-      const res = await fetch("/api/admin/broadcasts");
+      const res = await fetch(`${API_BASE}/api/admin/broadcasts`);
       if (res.ok) {
         setBroadcasts(await res.json());
       }
@@ -1030,7 +1032,7 @@ export default function AdminDashboard() {
         setSendStatus('sending');
       }
 
-      const res = await fetch("/api/admin/broadcasts", {
+      const res = await fetch(`${API_BASE}/api/admin/broadcasts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -1085,7 +1087,7 @@ export default function AdminDashboard() {
     setSelfTestError("");
     setSelfTestResults(null);
     try {
-      const res = await fetch("/api/admin/broadcasts/self-test", {
+      const res = await fetch(`${API_BASE}/api/admin/broadcasts/self-test`, {
         method: "POST"
       });
       const data = await res.json();
@@ -1119,7 +1121,7 @@ export default function AdminDashboard() {
     setShowAiView(true);
 
     try {
-      const res = await fetch("/api/admin/broadcasts/improve", {
+      const res = await fetch(`${API_BASE}/api/admin/broadcasts/improve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: originalText })
@@ -1142,7 +1144,7 @@ export default function AdminDashboard() {
     if (aiAnalyzing) return;
     setAiAnalyzing(true);
     try {
-      const res = await fetch(`/api/admin/tickets/${ticketId}/ai-analyze`, {
+      const res = await fetch(`${API_BASE}/api/admin/tickets/${ticketId}/ai-analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" }
       });
@@ -1166,7 +1168,7 @@ export default function AdminDashboard() {
     if (aiReplying) return;
     setAiReplying(true);
     try {
-      const res = await fetch(`/api/admin/tickets/${ticketId}/ai-suggest-reply`, {
+      const res = await fetch(`${API_BASE}/api/admin/tickets/${ticketId}/ai-suggest-reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" }
       });
@@ -1192,7 +1194,7 @@ export default function AdminDashboard() {
     }
     setAiAnnouncing(true);
     try {
-      const res = await fetch("/api/admin/announcements/improve", {
+      const res = await fetch(`${API_BASE}/api/admin/announcements/improve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1221,7 +1223,7 @@ export default function AdminDashboard() {
   const fetchSecurityData = async () => {
     setSecurityLoading(true);
     try {
-      const res = await fetch("/api/admin/security");
+      const res = await fetch(`${API_BASE}/api/admin/security`);
       if (res.ok) {
         const data = await res.json();
         setSecurityLogs(data.logs || []);
@@ -1236,7 +1238,7 @@ export default function AdminDashboard() {
 
   const handleSecurityAction = async (logId: string | null, userId: string | null, action: string, reason?: string) => {
     try {
-      const res = await fetch("/api/admin/security/action", {
+      const res = await fetch(`${API_BASE}/api/admin/security/action`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ logId, userId, action, reason })
@@ -1256,7 +1258,7 @@ export default function AdminDashboard() {
   const fetchActivityLogs = async () => {
     setActivityLogsLoading(true);
     try {
-      const res = await fetch("/api/admin/activity-logs");
+      const res = await fetch(`${API_BASE}/api/admin/activity-logs`);
       if (res.ok) {
         const data = await res.json();
         setActivityLogs(data.logs || []);
@@ -1272,9 +1274,9 @@ export default function AdminDashboard() {
   const fetchBackups = async () => {
     setBackupLoading(true);
     try {
-      const res = await fetch("/api/admin/backups");
+      const res = await fetch(`${API_BASE}/api/admin/backups`);
       if (res.ok) setBackups(await res.json());
-      const settingsRes = await fetch("/api/admin/backup-settings");
+      const settingsRes = await fetch(`${API_BASE}/api/admin/backup-settings`);
       if (settingsRes.ok) setBackupSettings(await settingsRes.json());
     } catch (err) {
       console.error(err);
@@ -1286,7 +1288,7 @@ export default function AdminDashboard() {
   const handleCreateBackup = async () => {
     setBackupLoading(true);
     try {
-      const res = await fetch("/api/admin/backups", {
+      const res = await fetch(`${API_BASE}/api/admin/backups`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: 'Manual' })
@@ -1311,7 +1313,7 @@ export default function AdminDashboard() {
     
     setBackupLoading(true);
     try {
-      const res = await fetch(`/api/admin/backups/${id}/restore`, { method: "POST" });
+      const res = await fetch(`${API_BASE}/api/admin/backups/${id}/restore`, { method: "POST" });
       if (res.ok) {
         alert(`✅ Backup Restored Successfully\n\nBackup ID: ${backupId}`);
         fetchBackups();
@@ -1331,7 +1333,7 @@ export default function AdminDashboard() {
     
     setBackupLoading(true);
     try {
-      const res = await fetch(`/api/admin/backups/${id}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE}/api/admin/backups/${id}`, { method: "DELETE" });
       if (res.ok) {
         fetchBackups();
       } else {
@@ -1348,7 +1350,7 @@ export default function AdminDashboard() {
   const handleUpdateBackupSettings = async (newSettings: any) => {
     setBackupLoading(true);
     try {
-      const res = await fetch("/api/admin/backup-settings", {
+      const res = await fetch(`${API_BASE}/api/admin/backup-settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newSettings)
@@ -1371,7 +1373,7 @@ export default function AdminDashboard() {
     setSmartLinksLoading(true);
     setSmartLinksError("");
     try {
-      const res = await fetch("/api/admin/smart-links");
+      const res = await fetch(`${API_BASE}/api/admin/smart-links`);
       if (res.ok) {
         const data = await res.json();
         setSmartLinks(data || []);
@@ -1388,7 +1390,7 @@ export default function AdminDashboard() {
   const fetchUserShortenerSettings = async () => {
     setUserShortenerSettingsLoading(true);
     try {
-      const res = await fetch("/api/admin/user-shortener-settings");
+      const res = await fetch(`${API_BASE}/api/admin/user-shortener-settings`);
       if (res.ok) {
         const data = await res.json();
         setUserShortenerSettings(data);
@@ -1404,7 +1406,7 @@ export default function AdminDashboard() {
     setUserShortenerSettingsSaving(true);
     try {
       const configToSave = updatedConfig || userShortenerSettings;
-      const res = await fetch("/api/admin/user-shortener-settings", {
+      const res = await fetch(`${API_BASE}/api/admin/user-shortener-settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(configToSave)
@@ -1645,7 +1647,7 @@ export default function AdminDashboard() {
         body = { type: parsed.type, content: parsed.content };
       }
 
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
         method: method,
         headers: { "Content-Type": "application/json" },
         body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined
@@ -2282,7 +2284,7 @@ export default function AdminDashboard() {
                                   onClick={() => {
                                     if (confirm('Are you sure you want to delete this announcement?')) {
                                       // inline delete for simplicity since it's just one request
-                                      fetch(`/api/admin/announcements/${a.id}`, { method: 'DELETE' }).then(() => fetchAnnouncements());
+                                      fetch(`${API_BASE}/api/admin/announcements/${a.id}`, { method: 'DELETE' }).then(() => fetchAnnouncements());
                                     }
                                   }}
                                   className="p-1.5 bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded-lg transition-colors"
@@ -2435,7 +2437,7 @@ export default function AdminDashboard() {
                                     <button 
                                       onClick={() => {
                                         const newStatus = t.status === '🟢 Active' ? '🔴 Disabled' : '🟢 Active';
-                                        fetch(`/api/admin/tasks/${t.id}`, { 
+                                        fetch(`${API_BASE}/api/admin/tasks/${t.id}`, { 
                                           method: 'PUT', 
                                           headers: { 'Content-Type': 'application/json' },
                                           body: JSON.stringify({ status: newStatus }) 
@@ -2449,7 +2451,7 @@ export default function AdminDashboard() {
                                     <button 
                                       onClick={() => {
                                         if (confirm('Are you sure you want to delete this task?')) {
-                                          fetch(`/api/admin/tasks/${t.id}`, { method: 'DELETE' }).then(() => fetchTasks());
+                                          fetch(`${API_BASE}/api/admin/tasks/${t.id}`, { method: 'DELETE' }).then(() => fetchTasks());
                                         }
                                       }}
                                       className="p-1.5 bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded-lg transition-colors"
@@ -3248,7 +3250,7 @@ export default function AdminDashboard() {
                                     <button onClick={() => { setShowAdPreview(false); setAdForm(ad); setModalAction('edit_ad'); }} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 text-xs transition-colors">✏️ Edit</button>
                                     <button onClick={async () => {
                                       if(confirm('Delete ad?')) {
-                                        await fetch(`/api/admin/ads/${ad.id}`, { method: 'DELETE' });
+                                        await fetch(`${API_BASE}/api/admin/ads/${ad.id}`, { method: 'DELETE' });
                                         fetchAds();
                                       }
                                     }} className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded border border-red-500/20 text-xs transition-colors">🗑 Delete</button>
@@ -3460,7 +3462,7 @@ export default function AdminDashboard() {
                                         onClick={async () => {
                                           if (confirm("Are you sure you want to delete this smart link?")) {
                                             try {
-                                              const res = await fetch(`/api/admin/smart-links/${link.id}`, { method: 'DELETE' });
+                                              const res = await fetch(`${API_BASE}/api/admin/smart-links/${link.id}`, { method: 'DELETE' });
                                               if (res.ok) {
                                                 fetchSmartLinks();
                                                 alert("Smart Link Deleted");
@@ -4100,7 +4102,7 @@ export default function AdminDashboard() {
                                 <td className="px-4 py-3 text-right space-x-2">
                                   <button onClick={async () => {
                                     if(confirm('Delete broadcast history?')) {
-                                      await fetch(`/api/admin/broadcasts/${b.id}`, { method: 'DELETE' });
+                                      await fetch(`${API_BASE}/api/admin/broadcasts/${b.id}`, { method: 'DELETE' });
                                       fetchBroadcasts();
                                     }
                                   }} className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded border border-red-500/20 text-xs transition-colors">🗑 Delete</button>

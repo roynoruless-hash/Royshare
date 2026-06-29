@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { API_BASE } from "../config/api";
 import { motion } from "motion/react";
 import { Save, Terminal, ShieldCheck, Link, Trash2, Webhook } from "lucide-react";
 
@@ -29,7 +30,7 @@ export default function TelegramSettingsPage() {
 
   const handleSave = async () => {
     console.log("Saving configuration:", configs);
-    await fetch("/api/telegram/settings", { 
+    await fetch(`${API_BASE}/api/telegram/settings`, { 
         method: "POST", 
         headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify(configs) 
@@ -44,7 +45,7 @@ export default function TelegramSettingsPage() {
     setFeedback("Running membership test...");
     setDiagnosticsResults(null);
     try {
-        const res = await fetch("/api/telegram/membership-test", { 
+        const res = await fetch(`${API_BASE}/api/telegram/membership-test`, { 
             method: "POST", 
             headers: { "Content-Type": "application/json" }, 
             body: JSON.stringify({ 
@@ -68,7 +69,7 @@ export default function TelegramSettingsPage() {
     setFeedback("Fetching diagnostics...");
     setDiagnosticsResults(null);
     try {
-        const res = await fetch("/api/telegram/diagnostics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(configs) });
+        const res = await fetch(`${API_BASE}/api/telegram/diagnostics`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(configs) });
         const data = await res.json();
         
         if (!res.ok) throw new Error(data.error || "Server error occurred");
@@ -86,7 +87,7 @@ export default function TelegramSettingsPage() {
 
   const getWebhook = async () => {
       try {
-          const res = await fetch("/api/telegram/webhook/get", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ botToken: configs.botToken }) });
+          const res = await fetch(`${API_BASE}/api/telegram/webhook/get`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ botToken: configs.botToken }) });
           if (!res.ok) return;
           const data = await res.json();
           setWebhookInfo(data);
@@ -97,7 +98,7 @@ export default function TelegramSettingsPage() {
 
   const setWebhook = async () => {
       try {
-          const res = await fetch("/api/telegram/webhook/set", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ botToken: configs.botToken, url: webhookUrl }) });
+          const res = await fetch(`${API_BASE}/api/telegram/webhook/set`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ botToken: configs.botToken, url: webhookUrl }) });
           const data = await res.json();
           if (!res.ok) throw new Error(data.description || "Failed to set webhook");
           
@@ -110,7 +111,7 @@ export default function TelegramSettingsPage() {
 
   const deleteWebhook = async () => {
       try {
-          const res = await fetch("/api/telegram/webhook/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ botToken: configs.botToken }) });
+          const res = await fetch(`${API_BASE}/api/telegram/webhook/delete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ botToken: configs.botToken }) });
           const data = await res.json();
           if (!res.ok) throw new Error(data.description || "Failed to delete webhook");
 
@@ -122,11 +123,11 @@ export default function TelegramSettingsPage() {
   };
 
   useEffect(() => {
-    fetch("/api/telegram/settings").then(res => res.json()).then(data => {
+    fetch(`${API_BASE}/api/telegram/settings`).then(res => res.json()).then(data => {
         if (data.botToken) setConfigs(data);
     });
     const interval = setInterval(async () => {
-        const res = await fetch("/api/telegram/polling/status");
+        const res = await fetch(`${API_BASE}/api/telegram/polling/status`);
         if (res.ok) setPollingStatus(await res.json());
     }, 2000);
     getWebhook();
@@ -165,11 +166,11 @@ export default function TelegramSettingsPage() {
       )}
       
       <div className="flex flex-wrap gap-4 mb-6 p-4 bg-slate-950 rounded-xl border border-white/10">
-        <button onClick={() => fetch("/api/telegram/polling/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ botToken: configs.botToken }) })} 
+        <button onClick={() => fetch(`${API_BASE}/api/telegram/polling/start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ botToken: configs.botToken }) })} 
                 className="px-4 py-2 bg-green-600 rounded-lg text-white font-bold">Start Polling</button>
-        <button onClick={() => fetch("/api/telegram/polling/stop", { method: "POST" })} 
+        <button onClick={() => fetch(`${API_BASE}/api/telegram/polling/stop`, { method: "POST" })} 
                 className="px-4 py-2 bg-red-600 rounded-lg text-white font-bold">Stop Polling</button>
-        <button onClick={() => fetch("/api/telegram/polling/restart", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ botToken: configs.botToken }) })} 
+        <button onClick={() => fetch(`${API_BASE}/api/telegram/polling/restart`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ botToken: configs.botToken }) })} 
                 className="px-4 py-2 bg-blue-600 rounded-lg text-white font-bold">Restart Polling</button>
       </div>
 

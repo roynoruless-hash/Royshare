@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { API_BASE } from "./config/api";
 import AnimatedBackground from "./components/AnimatedBackground";
 import Hero from "./components/Hero";
 import Stats from "./components/Stats";
@@ -45,7 +46,7 @@ export default function App() {
       console.log("[App.tsx] Running in a standard browser environment (No Telegram WebApp detected)");
     }
 
-    fetch("/api/system-settings")
+    fetch(`${API_BASE}/api/system-settings`)
       .then(res => res.json())
       .then(() => {
         setLoadingConfig(false);

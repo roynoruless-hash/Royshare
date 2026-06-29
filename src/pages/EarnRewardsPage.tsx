@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, User, Award, AlertTriangle, CheckCircle2, ExternalLink, ShieldAlert, AlertCircle, Play, Zap } from "lucide-react";
 import AdRenderer from "../components/AdRenderer";
@@ -133,7 +134,7 @@ export default function EarnRewardsPage() {
     if (!userId || !taskId) return;
 
     setLoading(true);
-    fetch(`/api/earn-rewards/settings?userId=${userId}`)
+    fetch(`${API_BASE}/api/earn-rewards/settings?userId=${userId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {
@@ -227,7 +228,7 @@ export default function EarnRewardsPage() {
     if (adWatchedSuccessfully && !isCompletedSuccess && !submitting) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
+          const res = await fetch(`${API_BASE}/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
           const data = await res.json();
           if (data.completed) {
             setIsCompletedSuccess(true);
@@ -347,7 +348,7 @@ export default function EarnRewardsPage() {
     setMonetagError(null);
     
     try {
-      const res = await fetch(`/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
+      const res = await fetch(`${API_BASE}/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
       const data = await res.json();
       
       if (data.completed) {
@@ -389,9 +390,8 @@ export default function EarnRewardsPage() {
 
   const submitTaskCompletion = () => {
     if (!userId || !taskId) return;
-
     setSubmitting(true);
-    fetch("/api/earn-rewards/complete", {
+    fetch(`${API_BASE}/api/earn-rewards/complete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, taskId })
@@ -573,37 +573,15 @@ export default function EarnRewardsPage() {
                 )}
               </button>
             ) : (
-              <button
-                onClick={handleClaimMonetagReward}
-                disabled={isCompletedSuccess || submitting}
-                className={`w-full py-6 rounded-[2.5rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden ${
-                  isCompletedSuccess 
-                    ? "bg-emerald-600/20 border border-emerald-500/30 text-emerald-400" 
-                    : "bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-amber-900/40"
-                }`}
+              <div
+                className="w-full py-6 rounded-[2.5rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-xl bg-slate-900/60 border border-blue-500/30 text-blue-400 shadow-blue-900/20"
               >
-                {isCompletedSuccess ? (
-                  <>
-                    <CheckCircle2 size={32} />
-                    <span>Reward Credited</span>
-                  </>
-                ) : submitting ? (
-                  <>
-                    <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin mb-1" />
-                    <span>Claiming...</span>
-                  </>
-                ) : (
-                  <>
-                    <motion.div
-                      animate={{ scale: [1, 1.2, 1] }}
-                      transition={{ repeat: Infinity, duration: 1.5 }}
-                    >
-                      <Zap size={36} className="text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" />
-                    </motion.div>
-                    <span>Claim Reward</span>
-                  </>
-                )}
-              </button>
+                <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-1" />
+                <span>Verifying Ad Completion...</span>
+                <p className="text-xs font-normal text-slate-400 px-4">
+                  Please wait, checking with ad network server. Your reward will be credited automatically.
+                </p>
+              </div>
             )}
 
             {/* Status & Errors */}

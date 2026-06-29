@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config/api';
 import { motion } from 'framer-motion';
 import AdRenderer from '../components/AdRenderer';
 
@@ -13,7 +14,7 @@ export default function VerifyWithdrawalPage({ userId }: { userId: string }) {
   const [error, setError] = useState('');
   
   useEffect(() => {
-    fetch(`/api/withdrawal/captcha?userId=${userId}`)
+    fetch(`${API_BASE}/api/withdrawal/captcha?userId=${userId}`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -47,7 +48,7 @@ export default function VerifyWithdrawalPage({ userId }: { userId: string }) {
     setError('');
     
     try {
-      const res = await fetch('/api/withdrawal/verify', {
+      const res = await fetch(`${API_BASE}/api/withdrawal/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, answer })
