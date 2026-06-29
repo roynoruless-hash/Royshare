@@ -4038,6 +4038,33 @@ Bonus added successfully.`;
       });
       console.log(`[MONETAG POSTBACK] SUCCESS: Balance updated for user ${telegram_id}. New Balance: ${newBalance}`);
 
+      // Send Telegram notification after successful balance update
+      try {
+        const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+        const botToken = settingsDoc.data()?.botToken;
+        if (botToken) {
+          const messageText = `🎉 Reward Added Successfully!\n\n` +
+            `💰 Reward: ₹${rewardAmount.toFixed(2)}\n` +
+            `💳 Reward Balance: ₹${newRewardBalance.toFixed(2)}\n` +
+            `🏦 Available Balance: ₹${newBalance.toFixed(2)}\n\n` +
+            `Thank you for watching the rewarded advertisement.`;
+
+          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: Number(telegram_id),
+              text: messageText
+            })
+          });
+          console.log(`[MONETAG POSTBACK] Telegram notification successfully sent to user ${telegram_id}`);
+        } else {
+          console.warn("[MONETAG POSTBACK] Telegram bot token not found in settings/telegram. Notification skipped.");
+        }
+      } catch (tgError) {
+        console.error("[MONETAG POSTBACK] Error sending Telegram notification:", tgError);
+      }
+
       // Create Task Completion Record (Marked as already credited)
       const completionsRef = collection(db, "task_completions");
       const completionId = `${userId}_${taskId}_${ymid}`;

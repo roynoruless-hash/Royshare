@@ -2535,17 +2535,18 @@ async function processEarnRewards(botToken: string, chatId: number, user: any) {
     const userDoc = await getDoc(doc(db, "users", String(user.id)));
     const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
 
-    // Fetch completed tasks for this user
+    // Fetch completed/credited tasks for this user
     const q = query(
         collection(db, "task_completions"),
-        where("userId", "==", String(user.id)),
-        where("status", "==", "completed")
+        where("userId", "==", String(user.id))
     );
     const qSnap = await getDocs(q);
     const completedTaskIds = new Set<string>();
     qSnap.forEach(d => {
         const c = d.data();
-        if (c.taskId) completedTaskIds.add(c.taskId);
+        if (c.taskId && (c.status === "completed" || c.reward_credited === true)) {
+            completedTaskIds.add(c.taskId);
+        }
     });
 
     const appUrl = getAppUrl();
@@ -2569,37 +2570,39 @@ async function processEarnRewards(botToken: string, chatId: number, user: any) {
         console.error("Error fetching dynamic tasks in bot.ts:", e);
     }
 
-    // Only show Active tasks
-    const mergedTasks = dbTasks.filter(t => 
+    // Filter to only show Active tasks
+    const activeTasks = dbTasks.filter(t => 
         t.status === "🟢 Active" || 
         String(t.status || "").toLowerCase().includes("active")
     );
     
-    if (mergedTasks.length === 0) {
+    if (activeTasks.length === 0) {
         await sendTelegramMessage(botToken, chatId, "No reward tasks available.", { parse_mode: "Markdown" });
+        return;
+    }
+
+    // Filter out completed tasks so we only show tasks the user has never completed
+    const nonCompletedTasks = activeTasks.filter(t => !completedTaskIds.has(t.id));
+
+    if (nonCompletedTasks.length === 0) {
+        const msg = `✅ You have already completed this reward task.\n\nPlease wait until a new reward task becomes available.`;
+        await sendTelegramMessage(botToken, chatId, msg, { parse_mode: "Markdown" });
         return;
     }
 
     let message = `💰 *Reward Tasks*\n\n`;
     const buttons: any[] = [];
 
-    for (const t of mergedTasks) {
-        const isCompleted = completedTaskIds.has(t.id);
+    for (const t of nonCompletedTasks) {
         const formattedAmount = formatCurrency(t.amount, currency);
         const isMonetag = t.adNetwork === "Monetag Mini App";
         
-        message += `${t.name} - ${formattedAmount}${isCompleted ? " (Completed ✅)" : ""}\n`;
+        message += `${t.name} - ${formattedAmount}\n`;
 
-        const btnText = isCompleted 
-            ? `✅ ${t.name} Completed` 
-            : (isMonetag ? `🎁 Open ${t.name}` : `🌐 Open ${t.name} In Chrome`);
+        const btnText = isMonetag ? `🎁 Open ${t.name}` : `🌐 Open ${t.name} In Chrome`;
         const webAppUrl = `${appUrl}/earn-rewards?userId=${user.id}&taskId=${t.id}`;
         
-        if (isMonetag && !isCompleted) {
-            buttons.push([{ text: btnText, web_app: { url: webAppUrl } }]);
-        } else {
-            buttons.push([{ text: btnText, web_app: { url: webAppUrl } }]);
-        }
+        buttons.push([{ text: btnText, web_app: { url: webAppUrl } }]);
     }
 
     message += `\n━━━━━━━━━━━━━━━\nSelect a task below to start earning rewards!`;
