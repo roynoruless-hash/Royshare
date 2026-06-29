@@ -5486,11 +5486,14 @@ Bonus added successfully.`;
 
       const accountData: any = {
         userId: String(state),
+        telegramId: String(state),
         name: name,
         email: email,
+        gmail: email,
         googleUserId: googleUserId,
         accessToken: tokens.access_token || "",
         expiryTime: tokens.expiry_date || 0,
+        expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : "",
         connectedAt: new Date().toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" }),
         status: "connected"
       };
@@ -5508,7 +5511,7 @@ Bonus added successfully.`;
         const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
         const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
         if (botToken) {
-          const messageText = `✅ *Google Drive Connected Successfully*\n\n*Email:*\n${email}\n\nYour Google Drive is now connected with RoyShare.`;
+          const messageText = `✅ Google Drive connected successfully.\nGmail: ${email}`;
           await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

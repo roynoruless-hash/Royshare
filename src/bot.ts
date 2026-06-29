@@ -262,7 +262,25 @@ Supported Files:
 
 Maximum File Size:
 2 GB`;
-            await sendTelegramMessage(botToken, chatId, message);
+            const gdocRef = doc(db, "google_drive_accounts", String(user.id));
+            const gsnap = await getDoc(gdocRef);
+            let inlineKeyboard;
+            if (gsnap.exists() && gsnap.data()?.status === "connected") {
+                inlineKeyboard = {
+                    inline_keyboard: [
+                        [{ text: "🟢 Google Drive: Connected", callback_data: "settings_google_drive" }]
+                    ]
+                };
+            } else {
+                const appUrl = getActualAppUrl();
+                const connectUrl = `${appUrl}/api/google-drive/connect?tg_id=${user.id}`;
+                inlineKeyboard = {
+                    inline_keyboard: [
+                        [{ text: "🔗 Connect Google Drive", url: connectUrl }]
+                    ]
+                };
+            }
+            await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
         } else if (msg.text === "📁 My Content") {
             console.log("User selected My Content");
             await processMyContent(botToken, chatId, user);
@@ -5328,7 +5346,7 @@ function getActualAppUrl(): string {
     return process.env.APP_URL || process.env.VITE_APP_URL || "https://royshare.onrender.com";
 }
 
-async function processGoogleDriveSettings(botToken: string, chatId: number, userId: string, messageIdToEdit: number) {
+async function processGoogleDriveSettings(botToken: string, chatId: number, userId: string, messageIdToEdit?: number) {
     const db = getDb();
     const docRef = doc(db, "google_drive_accounts", userId);
     const snap = await getDoc(docRef);
@@ -5367,7 +5385,11 @@ Click the button below to authenticate.`;
         { text: "🔙 Back to Settings", callback_data: "settings_back" }
     ]);
 
-    await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+    if (messageIdToEdit) {
+        await editTelegramMessage(botToken, chatId, messageIdToEdit, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+    } else {
+        await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
+    }
 }
 
 async function handleGoogleDriveDisconnect(botToken: string, chatId: number, userId: string, messageIdToEdit: number) {
