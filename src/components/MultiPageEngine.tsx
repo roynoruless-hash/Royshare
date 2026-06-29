@@ -415,9 +415,33 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
       console.warn("[MultiPageEngine] Cannot claim. Missing sessionId.");
       return;
     }
-    console.log(`[MultiPageEngine] handleClaim triggered for sessionId: "${sessionId}"`);
+    console.log(`[MultiPageEngine] handleClaim triggered for sessionId: "${sessionId}", currentPage: ${currentPage}, totalPages: ${totalPages}`);
     setRedirecting(true);
     try {
+      // If we are on the last step of a shortener, we must first report this last page as complete to the server!
+      if (type === "shortener" && currentPage === totalPages) {
+        console.log(`[MultiPageEngine] Reporting final page (${currentPage}) as complete before claiming...`);
+        const pCompRes = await fetch(`${API_BASE}/api/smart-links/session/page-complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            pageNumber: currentPage
+          })
+        });
+        const pCompData = await pCompRes.json();
+        console.log("[MultiPageEngine] Final page-complete response:", pCompData);
+        if (!pCompRes.ok || !pCompData.success) {
+          const errMsg = pCompData.message || "Failed to complete final step verification.";
+          console.error("[MultiPageEngine] Final page complete failed:", errMsg);
+          setError(errMsg);
+          setRedirecting(false);
+          return;
+        }
+        // Sync current page state to nextPage
+        setCurrentPage(pCompData.nextPage || (currentPage + 1));
+      }
+
       console.log("[MultiPageEngine] Calling session claim API...");
       const res = await fetch(`${API_BASE}/api/smart-links/session/claim`, {
         method: "POST",
