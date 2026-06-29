@@ -5795,6 +5795,38 @@ Bonus added successfully.`;
     }
   });
 
+  // Google Drive Recover File ID from resumable upload session URL
+  app.post("/api/google-drive/recover-file-id", async (req, res) => {
+    const { uploadUrl, tg_id } = req.body;
+    if (!uploadUrl) {
+      return res.status(400).json({ error: "Missing uploadUrl" });
+    }
+    try {
+      console.log(`[Recovery Endpoint] Querying Google Drive upload status for session: ${uploadUrl}`);
+      const statusRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Length": "0",
+          "Content-Range": `bytes */*`
+        }
+      });
+      const statusText = await statusRes.text();
+      console.log(`[Recovery Endpoint] Status Query HTTP response code: ${statusRes.status}`);
+      console.log(`[Recovery Endpoint] Status Query response body:`, statusText);
+      
+      if (statusRes.status === 200 || statusRes.status === 201) {
+        const metadata = JSON.parse(statusText);
+        if (metadata.id) {
+          return res.json({ driveFileId: metadata.id });
+        }
+      }
+      return res.status(400).json({ error: "Could not retrieve file ID from session, status: " + statusRes.status, details: statusText });
+    } catch (err: any) {
+      console.error("[Recovery Endpoint] Error:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // Google Drive Finalize upload, set permissions, and register in uploads collection
   app.post("/api/google-drive/finalize-upload", async (req, res) => {
     console.log(`[Google API Trace] === START FINALIZE UPLOAD ===`);
@@ -5990,7 +6022,8 @@ Bonus added successfully.`;
         const botToken = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botToken : null;
         if (botToken) {
           const formattedSize = formatBytes(Number(fileSize));
-          const messageText = `✅ *Large File Uploaded Successfully*\n\n📄 *File Name:* \`${fileName}\`\n📦 *File Size:* ${formattedSize}\n☁ *Storage:* Google Drive\n\n🔗 *RoyShare Link:* ${royshareLink}`;
+          const escapedName = fileName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          const messageText = `✅ <b>Large File Uploaded Successfully</b>\n\n📄 <b>File Name:</b> <code>${escapedName}</code>\n📦 <b>File Size:</b> ${formattedSize}\n☁ <b>Storage:</b> Google Drive\n\n🔗 <b>RoyShare Link:</b> ${royshareLink}`;
           
           const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
@@ -5998,7 +6031,7 @@ Bonus added successfully.`;
             body: JSON.stringify({
               chat_id: Number(tg_id),
               text: messageText,
-              parse_mode: "Markdown",
+              parse_mode: "HTML",
               reply_markup: {
                 inline_keyboard: [
                   [

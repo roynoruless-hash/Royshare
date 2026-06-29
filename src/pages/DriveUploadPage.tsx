@@ -119,12 +119,43 @@ export default function DriveUploadPage() {
     setPhase("finalizing");
     setError(null);
 
-    const targetDriveFileId = fileId || currentDriveFileId;
+    let targetDriveFileId = fileId || currentDriveFileId;
     const targetFileName = selectedFile.name;
     const targetFileSize = selectedFile.size;
 
     console.log("=== Google Drive Upload Completed ===");
-    console.log("driveFileId received:", targetDriveFileId);
+    console.log("driveFileId received initially:", targetDriveFileId);
+
+    // If driveFileId is missing because the browser does not expose the response,
+    // recover it from the resumable upload session using uploadUrl before validation.
+    if (!targetDriveFileId && url) {
+      console.log("[Recovery Trace] driveFileId is empty. Attempting server-side session query using uploadUrl:", url);
+      try {
+        const recoveryResponse = await fetch("/api/google-drive/recover-file-id", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ uploadUrl: url, tg_id: tgId })
+        });
+        
+        if (recoveryResponse.ok) {
+          const recoveryData = await recoveryResponse.json();
+          if (recoveryData.driveFileId) {
+            targetDriveFileId = recoveryData.driveFileId;
+            setCurrentDriveFileId(targetDriveFileId);
+            console.log("[Recovery Trace] Successfully recovered driveFileId from server:", targetDriveFileId);
+          } else {
+            console.warn("[Recovery Trace] Server-side recovery returned ok, but driveFileId was missing in response.");
+          }
+        } else {
+          const recoveryErrorText = await recoveryResponse.text();
+          console.error("[Recovery Trace] Server-side recovery failed with status:", recoveryResponse.status, recoveryErrorText);
+        }
+      } catch (recoveryErr) {
+        console.error("[Recovery Trace] Error recovering driveFileId from server:", recoveryErr);
+      }
+    }
 
     // Validate that none of the values are null or undefined
     const missingParams: string[] = [];
