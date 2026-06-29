@@ -6,17 +6,33 @@
     <title>My Google AI Studio App</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script>
-      // Load Monetag SDK for Telegram Mini App
+      // Proactive Telegram Initialization
       (function() {
-        const tg = window.Telegram?.WebApp;
-        if (tg && tg.initData) {
-          const script = document.createElement('script');
-          script.src = "//libtl.com/sdk.js";
-          script.setAttribute('data-zone', '11210088');
-          script.setAttribute('data-sdk', 'show_11210088');
-          document.head.appendChild(script);
-          console.log("[MONETAG] SDK script injected");
+        function initTg() {
+          const tg = window.Telegram?.WebApp;
+          if (tg) {
+            console.log("[INDEX] Telegram SDK Found. Calling ready/expand...");
+            tg.ready();
+            tg.expand();
+            
+            // Inject Monetag SDK only if inside Telegram
+            if (tg.initData && !document.getElementById('monetag-sdk')) {
+              const script = document.createElement('script');
+              script.id = 'monetag-sdk';
+              script.src = "//libtl.com/sdk.js";
+              script.setAttribute('data-zone', '11210088');
+              script.setAttribute('data-sdk', 'show_11210088');
+              document.head.appendChild(script);
+              console.log("[MONETAG] SDK script injected via Index Init");
+            }
+          }
         }
+        
+        initTg();
+        window.addEventListener('load', initTg);
+        // Retry a few times
+        setTimeout(initTg, 500);
+        setTimeout(initTg, 1500);
       })();
     </script>
   </head>

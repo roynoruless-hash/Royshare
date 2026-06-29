@@ -3866,10 +3866,56 @@ Bonus added successfully.`;
     console.log(`[MONETAG POSTBACK] Received ${method} request at ${new Date().toISOString()}`);
     console.log(`[MONETAG POSTBACK] Full Raw Params:`, JSON.stringify(params, null, 2));
 
-    // Support multiple macro names for common fields from various Monetag configurations
-    const telegram_id = params.telegram_id || params.ext_id || params.subid || params.click_id || params.sub_id || params.visitor_id;
-    const ymid = params.ymid || params.clickid || params.transaction_id || params.visitor_id || params.click_id;
-    const request_var = params.request_var || params.custom_var || params.taskId || params.subid1;
+    // Helper function to clean values and discard placeholder macros
+    const cleanValue = (val: any): string | null => {
+      if (val === undefined || val === null) return null;
+      const str = String(val).trim();
+      if (
+        str === "" ||
+        str === "undefined" ||
+        str === "null" ||
+        str === "Unknown" ||
+        (str.startsWith("{") && str.endsWith("}"))
+      ) {
+        return null;
+      }
+      return str;
+    };
+
+    const clean_telegram_id = cleanValue(params.telegram_id) || 
+                              cleanValue(params.ext_id) || 
+                              cleanValue(params.subid) || 
+                              cleanValue(params.click_id) || 
+                              cleanValue(params.sub_id) || 
+                              cleanValue(params.visitor_id);
+                              
+    const clean_ymid = cleanValue(params.ymid) || 
+                       cleanValue(params.clickid) || 
+                       cleanValue(params.transaction_id) || 
+                       cleanValue(params.visitor_id) || 
+                       cleanValue(params.click_id);
+                       
+    const clean_request_var = cleanValue(params.request_var) || 
+                              cleanValue(params.custom_var) || 
+                              cleanValue(params.taskId) || 
+                              cleanValue(params.subid1);
+
+    // Try to extract from custom underscore-separated ymid format if any other parts are missing or placeholders
+    let extracted_tg_id: string | null = null;
+    let extracted_task_id: string | null = null;
+
+    if (clean_ymid && clean_ymid.includes("_")) {
+      const parts = clean_ymid.split("_");
+      if (parts.length >= 2) {
+        extracted_tg_id = parts[0];
+        extracted_task_id = parts[1];
+        console.log(`[MONETAG POSTBACK] Extracted parameters from ymid (${clean_ymid}): TG=${extracted_tg_id}, TASK=${extracted_task_id}`);
+      }
+    }
+
+    const telegram_id = clean_telegram_id || extracted_tg_id;
+    const ymid = clean_ymid;
+    const request_var = clean_request_var || extracted_task_id;
     
     const zone_id = params.zone_id || params.zoneid;
     const sub_zone_id = params.sub_zone_id || params.subzoneid || "unknown";
@@ -3892,21 +3938,21 @@ Bonus added successfully.`;
 
     try {
       // Basic validation
-      if (!telegram_id || telegram_id === "{ext_id}" || telegram_id === "Unknown" || telegram_id === "null" || telegram_id === "{subid}") {
-        console.error(`[MONETAG POSTBACK] FAILURE: Missing or macro-placeholder telegram_id. Value: ${telegram_id}`);
+      if (!telegram_id) {
+        console.error(`[MONETAG POSTBACK] FAILURE: Missing or macro-placeholder telegram_id.`);
         logEntry.status = "failed";
-        logEntry.error = `Invalid telegram_id: ${telegram_id}. Check if ext_id or subid was passed to show()`;
+        logEntry.error = `Invalid or missing telegram_id. Check if ext_id, subid, or ymid was passed to show()`;
         await addDoc(postbackRef, logEntry);
         
         return res.status(400).json({ 
           error: "Missing telegram_id", 
-          received: telegram_id,
-          hint: "Ensure ext_id or subid is passed in the frontend SDK call" 
+          received: params,
+          hint: "Ensure ext_id, subid or ymid is passed in the frontend SDK call" 
         });
       }
 
-      if (!ymid || ymid === "{ymid}" || ymid === "{clickid}") {
-        console.error(`[MONETAG POSTBACK] FAILURE: Missing or macro-placeholder ymid. Value: ${ymid}`);
+      if (!ymid) {
+        console.error(`[MONETAG POSTBACK] FAILURE: Missing or macro-placeholder ymid.`);
         logEntry.status = "failed";
         logEntry.error = "Missing ymid (transaction id)";
         await addDoc(postbackRef, logEntry);
@@ -4001,7 +4047,21 @@ Bonus added successfully.`;
 
       console.log(`[MONETAG POSTBACK] Reward Amount determined: ${rewardAmount}`);
 
-      // Create Task Completion Record (Verified but not yet claimed)
+      // AUTOMATIC BALANCE UPDATE: Crediting the user immediately
+      const currentBalance = Number(userData.availableBalance || userData.balance || 0);
+      const currentTotalEarnings = Number(userData.totalEarnings || 0);
+      const newBalance = currentBalance + rewardAmount;
+      const newTotalEarnings = currentTotalEarnings + rewardAmount;
+
+      await updateDoc(userDocRef, {
+        availableBalance: newBalance,
+        balance: newBalance,
+        totalEarnings: newTotalEarnings,
+        lastActive: new Date().toISOString()
+      });
+      console.log(`[MONETAG POSTBACK] SUCCESS: Balance updated for user ${telegram_id}. New Balance: ${newBalance}`);
+
+      // Create Task Completion Record (Marked as already credited)
       const completionsRef = collection(db, "task_completions");
       const completionId = `${userId}_${taskId}_${ymid}`;
       
@@ -4018,15 +4078,15 @@ Bonus added successfully.`;
         rewardAmount: rewardAmount,
         status: "verified",
         verified: true,
-        reward_credited: false,
-        claimed: false,
+        reward_credited: true, // Marked as credited
+        claimed: true,         // Marked as claimed (since it's automatic)
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         adNetwork: "Monetag"
       };
 
       await setDoc(doc(completionsRef, completionId), completionData);
-      console.log(`[MONETAG POSTBACK] Task Completion Created: ID=${completionId}, Status=verified`);
+      console.log(`[MONETAG POSTBACK] Task Completion Record Created (Auto-Credited): ID=${completionId}`);
 
       // Update Postback Analytics
       const today = new Date().toISOString().split("T")[0];
@@ -4239,9 +4299,8 @@ Bonus added successfully.`;
       const recentSnapshot = await getDocs(recentQuery);
       const recentEvents = recentSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
-      const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
-      // Update URL to use more common macros as fallbacks
-      const postbackUrl = `${appUrl}/api/monetag/postback?ext_id={ext_id}&ymid={ymid}&zone_id={zone_id}&event_type={event_type}&reward_event_type={reward_event_type}&estimated_price={estimated_price}&request_var={request_var}`;
+      // Always generate the postback URL targeting the production Render backend
+      const postbackUrl = `https://royshare.onrender.com/api/monetag/postback?telegram_id={telegram_id}&ymid={ymid}&zone_id={zone_id}&event_type={event_type}&reward_event_type={reward_event_type}&estimated_price={estimated_price}&request_var={request_var}`;
 
       res.json({
         success: true,
@@ -4261,10 +4320,9 @@ Bonus added successfully.`;
       const { telegramId } = req.body;
       if (!telegramId) return res.status(400).json({ success: false, message: "Missing telegramId" });
 
-      const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
       const testYmid = "test_" + Math.random().toString(36).substring(7);
       
-      const testUrl = `${appUrl}/api/monetag/postback?telegram_id=${telegramId}&zone_id=12345&sub_zone_id=67890&event_type=ad_completed&reward_event_type=yes&estimated_price=0.01&ymid=${testYmid}&request_var=monetag_default_task`;
+      const testUrl = `https://royshare.onrender.com/api/monetag/postback?telegram_id=${telegramId}&zone_id=12345&sub_zone_id=67890&event_type=ad_completed&reward_event_type=yes&estimated_price=0.01&ymid=${testYmid}&request_var=monetag_default_task`;
 
       console.log("Simulating Monetag Postback:", testUrl);
       
@@ -5022,7 +5080,10 @@ Bonus added successfully.`;
       }
 
       const newLinkId = "LNK_" + Math.random().toString(36).substring(2, 10).toUpperCase();
-      const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+      const rawAppUrl = process.env.APP_URL || "https://royshare.onrender.com";
+      const appUrl = (rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") 
+        ? "https://royshare.onrender.com" 
+        : rawAppUrl;
       const baseDomain = appUrl.replace(/\/$/, "");
       const shortUrl = `${baseDomain}/s/${alias}`;
 
@@ -5087,7 +5148,10 @@ Bonus added successfully.`;
         }
       }
 
-      const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+      const rawAppUrl = process.env.APP_URL || "https://royshare.onrender.com";
+      const appUrl = (rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") 
+        ? "https://royshare.onrender.com" 
+        : rawAppUrl;
       const baseDomain = appUrl.replace(/\/$/, "");
       const shortUrl = `${baseDomain}/s/${alias}`;
 

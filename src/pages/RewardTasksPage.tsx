@@ -54,28 +54,57 @@ export default function RewardTasksPage() {
     const checkTelegram = () => {
       const tg = (window as any).Telegram?.WebApp;
       
-      // Improved Detection: Check for WebApp, initData, and user
-      const hasTgWebApp = !!(tg && tg.initData && tg.initDataUnsafe?.user);
-      setIsTelegramApp(hasTgWebApp);
-      
+      const diagnostics = {
+        typeof_window_Telegram: typeof (window as any).Telegram,
+        typeof_window_Telegram_WebApp: typeof tg,
+        version: tg?.version || 'N/A',
+        platform: tg?.platform || 'N/A',
+        has_initData: !!tg?.initData,
+        has_initDataUnsafe: !!tg?.initDataUnsafe,
+        has_user: !!tg?.initDataUnsafe?.user,
+        user_id: tg?.initDataUnsafe?.user?.id || 'NOT_FOUND',
+        timestamp: new Date().toISOString()
+      };
+
+      console.log("[TELEGRAM_ENV_AUDIT]", diagnostics);
+      (window as any).TG_AUDIT = diagnostics;
+
       if (tg) {
-        console.log("Telegram WebApp Version:", tg.version);
-        console.log("Telegram Platform:", tg.platform);
-        console.log("Telegram initData:", tg.initData);
-        console.log("Telegram user:", tg.initDataUnsafe?.user);
-        
         tg.ready();
         tg.expand();
+        
+        const user = tg.initDataUnsafe?.user;
+        // Logic: If we have window.Telegram.WebApp, we treat it as Telegram even if initData is missing (could be local test in real TG)
+        // But for rewards, we STRICTLY need user.id
+        const hasTgWebApp = !!tg;
+        const hasUserId = !!user?.id;
+        
+        setIsTelegramApp(hasTgWebApp && hasUserId);
+        
+        if (user?.id) {
+          console.log("[RewardTasksPage] SUCCESS: Telegram User ID detected:", user.id);
+        } else {
+          console.warn("[RewardTasksPage] WARNING: Telegram SDK found but User ID is missing in initDataUnsafe.");
+        }
       } else {
-        console.log("Telegram WebApp not detected yet in RewardTasksPage");
+        console.log("[RewardTasksPage] Telegram SDK not found.");
+        setIsTelegramApp(false);
       }
     };
 
+    // Check immediately
     checkTelegram();
-    // Retry once after 500ms to ensure SDK is fully initialized
-    const retryTimer = setTimeout(checkTelegram, 500);
-
-    return () => clearTimeout(retryTimer);
+    
+    // Multiple retries to handle late script loading
+    const timer1 = setTimeout(checkTelegram, 500);
+    const timer2 = setTimeout(checkTelegram, 1500);
+    const timer3 = setTimeout(checkTelegram, 3000);
+    
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+    };
   }, []);
 
   const handleVideoError = () => {
@@ -107,9 +136,6 @@ export default function RewardTasksPage() {
     const queryTaskId = params.get("taskId");
 
     const tg = (window as any).Telegram?.WebApp;
-    if (tg) {
-      tg.expand();
-    }
     const tgUserId = tg?.initDataUnsafe?.user?.id;
 
     const resolvedUserId = queryUserId || (tgUserId ? String(tgUserId) : null);
@@ -131,6 +157,16 @@ export default function RewardTasksPage() {
     const initializePage = async () => {
       try {
         setLoading(true);
+        // Only fetch if we are in Telegram or if explicitly allowed (for debugging)
+        const tg = (window as any).Telegram?.WebApp;
+        const isActuallyInTelegram = !!(tg && tg.initDataUnsafe?.user?.id);
+        
+        if (!isActuallyInTelegram) {
+          console.warn("[RewardTasksPage] Access denied: Not a Telegram Mini App environment.");
+          setLoading(false);
+          return;
+        }
+
         // Fetch Settings & User Information
         const settingsRes = await fetch(`/api/earn-rewards/settings?userId=${userId}`);
         const data = await settingsRes.json();
@@ -359,31 +395,28 @@ export default function RewardTasksPage() {
     if (isMonetagAdRunning || adWatchedSuccessfully || submitting) return;
 
     const tg = (window as any).Telegram?.WebApp;
-    if (!tg || !tg.initDataUnsafe?.user) {
-      setMonetagError("This reward task is only available inside the Telegram Mini App.");
+    const user = tg?.initDataUnsafe?.user;
+    
+    console.log("[MONETAG_FLOW_START] Initiating show()...");
+    console.log("[MONETAG_FLOW_START] TG_AUDIT:", (window as any).TG_AUDIT);
+    
+    if (!tg || !user?.id) {
+      const errorMsg = "Telegram User ID missing. Please ensure you open this page via the official Mini App button in the bot.";
+      console.error("[MONETAG_FLOW_ERROR]", errorMsg);
+      setMonetagError(errorMsg);
       return;
     }
 
-    const telegramId = String(tg.initDataUnsafe.user.id);
-    console.log("[MONETAG] Real Telegram ID detected:", telegramId);
-
-    if (!telegramId || telegramId === 'undefined' || telegramId === 'null' || telegramId === '') {
-      setMonetagError("Telegram User ID not found. Please restart the bot.");
-      console.error("[MONETAG] Blocked ad request: Missing or invalid Telegram ID");
-      return;
-    }
+    const telegramId = String(user.id);
+    console.log("[MONETAG_FLOW_ID_DETECTION] Final Telegram ID for Monetag:", telegramId);
 
     setIsMonetagAdRunning(true);
     setMonetagError(null);
     
     try {
-      console.log(`[MONETAG] Preparing ad request for User: ${telegramId}, Task: ${taskId}`);
-      
-      if (telegramId.includes("{ext_id}") || telegramId.includes("{subid}")) {
-        throw new Error("CRITICAL ERROR: Placeholder detected in Telegram ID. Please clear cache and restart.");
-      }
-
+      const uniqueYmid = `${telegramId}_${taskId}_${Date.now()}`;
       const adOptions = { 
+        ymid: uniqueYmid,
         request_var: taskId,
         ext_id: telegramId,
         subid: telegramId,
@@ -391,48 +424,50 @@ export default function RewardTasksPage() {
       };
 
       setMonetagDebug({
-        event: "SDK_INIT",
+        event: "SDK_CALL_TRIGGERED",
         timestamp: new Date().toISOString(),
         tg_id: telegramId,
+        tg_version: tg.version,
+        tg_platform: tg.platform,
         payload: adOptions,
-        sdk_found: typeof (window as any).show_11210088 === 'function'
+        sdk_status: typeof (window as any).show_11210088 === 'function' ? 'FOUND' : 'NOT_FOUND'
       });
 
       if (typeof (window as any).show_11210088 === 'function') {
-        console.log("[MONETAG] Calling SDK with options:", JSON.stringify(adOptions));
+        console.log("[MONETAG] Monetag SDK found. Calling show_11210088...");
+        console.log("[MONETAG] Payload:", JSON.stringify(adOptions));
         
         await (window as any).show_11210088(adOptions).then((result: any) => {
-          console.log("[MONETAG] Ad Show Success Callback Result:", result);
+          console.log("[MONETAG] Success callback received:", result);
           setMonetagDebug((prev: any) => ({
             ...prev,
-            event: "SDK_SUCCESS",
+            event: "SDK_CALLBACK_SUCCESS",
             result: result
           }));
           setAdWatchedSuccessfully(true);
           setShowSuccessPopup(true);
           setTimeout(() => setShowSuccessPopup(false), 3000);
         }).catch((error: any) => {
-          console.error("[MONETAG] Ad Show Promise Catch:", error);
+          console.error("[MONETAG] SDK Error caught:", error);
           setMonetagDebug((prev: any) => ({
             ...prev,
-            event: "SDK_ERROR",
+            event: "SDK_CALLBACK_ERROR",
             error: error
           }));
-          if (error) {
-            setMonetagError("Advertisement interrupted. Please watch completely to earn rewards.");
-          }
+          setMonetagError("Advertisement interrupted. Please watch completely to earn rewards.");
         });
       } else {
+        console.error("[MONETAG] show_11210088 is not a function.");
         setMonetagDebug((prev: any) => ({
           ...prev,
           event: "SDK_MISSING",
-          error: "show_11210088 function not found"
+          error: "show_11210088 not found on window object"
         }));
-        throw new Error("Monetag SDK show function not found. Ensure you are using the Telegram Mini App.");
+        throw new Error("Monetag SDK not loaded. Try clearing Telegram cache or restarting the app.");
       }
     } catch (err: any) {
-      console.error("[MONETAG] Ad execution error:", err);
-      setMonetagError(err.message || "Advertisement interrupted.");
+      console.error("[MONETAG] Execution failed:", err);
+      setMonetagError(err.message || "Failed to launch advertisement.");
     } finally {
       setIsMonetagAdRunning(false);
     }
@@ -519,6 +554,31 @@ export default function RewardTasksPage() {
     );
   }
 
+  // Universal Telegram Environment Check
+  if (!loading && !isTelegramApp && (userId || taskId)) {
+    return (
+      <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col items-center justify-center py-6 px-4 text-center">
+        <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mb-6 text-amber-500">
+          <AlertCircle size={40} />
+        </div>
+        <h1 className="text-2xl font-bold text-white mb-2">Telegram Mini App Required</h1>
+        <p className="text-slate-400 max-w-xs mb-8">
+          This reward page is only accessible within the official Telegram Mini App. Please open it from the Telegram bot using the Mini App button.
+        </p>
+        <button
+          onClick={() => window.location.href = `https://t.me/${botUsername}`}
+          className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30 transition-all active:scale-95 flex items-center gap-2"
+        >
+          <Play size={18} className="fill-current" />
+          Open In Telegram Bot
+        </button>
+        <div className="mt-8 text-[10px] text-slate-600 font-mono">
+          Environment: Browser/Desktop Detected
+        </div>
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#0b0f19] text-white p-6 text-center">
@@ -575,26 +635,6 @@ export default function RewardTasksPage() {
   const renderedAdIds = renderedAds.map(ad => ad.id);
 
   if (currentTask?.adNetwork === 'Monetag Mini App') {
-    if (!isTelegramApp) {
-      return (
-        <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col items-center justify-center py-6 px-4 text-center">
-          <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mb-6 text-amber-500">
-            <AlertCircle size={40} />
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-2">Mini App Required</h1>
-          <p className="text-slate-400 max-w-xs mb-8">
-            Please open this reward inside Telegram Mini App.
-          </p>
-          <button
-            onClick={() => window.location.href = `https://t.me/${botUsername}`}
-            className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30 transition-all active:scale-95 flex items-center gap-2"
-          >
-            <Play size={18} className="fill-current" />
-            Open In Telegram
-          </button>
-        </div>
-      );
-    }
     return (
       <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col items-center justify-center py-6 px-4">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-blue-500/10 blur-[100px] rounded-full pointer-events-none"></div>
@@ -753,30 +793,75 @@ export default function RewardTasksPage() {
               <motion.div 
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
-                className="mt-6 p-4 bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden"
+                className="mt-6 p-4 bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden text-left"
               >
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                    <Terminal size={12} /> Monetag Debugger
+                    <Terminal size={12} /> Monetag Debugger & Environment Audit
                   </h4>
                   <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                    monetagDebug.event === 'SDK_SUCCESS' ? 'bg-emerald-500/10 text-emerald-400' : 
-                    monetagDebug.event === 'SDK_ERROR' ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'
+                    monetagDebug.event?.includes('SUCCESS') ? 'bg-emerald-500/10 text-emerald-400' : 
+                    monetagDebug.event?.includes('ERROR') ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'
                   }`}>
                     {monetagDebug.event}
                   </span>
                 </div>
                 <div className="space-y-3">
+                  {/* Environment Audit Section */}
+                  <div className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-2xl space-y-2">
+                    <p className="text-[9px] font-bold text-blue-400 uppercase tracking-tight">Telegram Env Audit</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[9px]">
+                          <span className="text-slate-500">typeof Telegram:</span>
+                          <span className="text-white font-mono">{(window as any).TG_AUDIT?.typeof_window_Telegram}</span>
+                        </div>
+                        <div className="flex justify-between text-[9px]">
+                          <span className="text-slate-500">typeof WebApp:</span>
+                          <span className="text-white font-mono">{(window as any).TG_AUDIT?.typeof_window_Telegram_WebApp}</span>
+                        </div>
+                        <div className="flex justify-between text-[9px]">
+                          <span className="text-slate-500">TG Platform:</span>
+                          <span className="text-white font-mono">{(window as any).TG_AUDIT?.platform}</span>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[9px]">
+                          <span className="text-slate-500">initData:</span>
+                          <span className={(window as any).TG_AUDIT?.has_initData ? "text-emerald-400" : "text-red-400"}>{(window as any).TG_AUDIT?.has_initData ? "PRESENT" : "MISSING"}</span>
+                        </div>
+                        <div className="flex justify-between text-[9px]">
+                          <span className="text-slate-500">User Object:</span>
+                          <span className={(window as any).TG_AUDIT?.has_user ? "text-emerald-400" : "text-red-400"}>{(window as any).TG_AUDIT?.has_user ? "PRESENT" : "MISSING"}</span>
+                        </div>
+                        <div className="flex justify-between text-[9px]">
+                          <span className="text-slate-500">User ID:</span>
+                          <span className="text-emerald-400 font-mono font-bold">{(window as any).TG_AUDIT?.user_id}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-2 bg-black/40 rounded-xl border border-slate-800/50">
-                      <p className="text-[8px] text-slate-500 uppercase mb-1">Telegram ID</p>
-                      <p className="text-[10px] font-mono font-bold text-white truncate">{monetagDebug.tg_id || 'NULL'}</p>
+                      <p className="text-[8px] text-slate-500 uppercase mb-1">Pass to SDK (ext_id)</p>
+                      <p className="text-[10px] font-mono font-bold text-emerald-400 truncate">{monetagDebug.tg_id || 'NULL'}</p>
                     </div>
                     <div className="p-2 bg-black/40 rounded-xl border border-slate-800/50">
-                      <p className="text-[8px] text-slate-500 uppercase mb-1">SDK Found</p>
-                      <p className={`text-[10px] font-bold ${monetagDebug.sdk_found ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {monetagDebug.sdk_found ? 'YES' : 'NO'}
+                      <p className="text-[8px] text-slate-500 uppercase mb-1">SDK Status</p>
+                      <p className={`text-[10px] font-bold ${monetagDebug.sdk_status === 'FOUND' ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {monetagDebug.sdk_status || 'UNKNOWN'}
                       </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2 bg-black/40 rounded-xl border border-slate-800/50">
+                      <p className="text-[8px] text-slate-500 uppercase mb-1">TG Version</p>
+                      <p className="text-[10px] font-mono font-bold text-blue-400">{monetagDebug.tg_version || 'N/A'}</p>
+                    </div>
+                    <div className="p-2 bg-black/40 rounded-xl border border-slate-800/50">
+                      <p className="text-[8px] text-slate-500 uppercase mb-1">TG Platform</p>
+                      <p className="text-[10px] font-mono font-bold text-blue-400">{monetagDebug.tg_platform || 'N/A'}</p>
                     </div>
                   </div>
                   <div>
@@ -787,7 +872,7 @@ export default function RewardTasksPage() {
                   </div>
                   {monetagDebug.result && (
                     <div>
-                      <p className="text-[8px] text-slate-500 uppercase mb-1">SDK Response</p>
+                      <p className="text-[8px] text-slate-500 uppercase mb-1">SDK Response (Callback)</p>
                       <pre className="text-[9px] font-mono text-emerald-400 bg-black/60 p-2 rounded-xl overflow-x-auto border border-slate-800">
                         {JSON.stringify(monetagDebug.result, null, 2)}
                       </pre>
@@ -795,12 +880,15 @@ export default function RewardTasksPage() {
                   )}
                   {monetagDebug.error && (
                     <div>
-                      <p className="text-[8px] text-slate-500 uppercase mb-1">SDK Error</p>
+                      <p className="text-[8px] text-slate-500 uppercase mb-1">SDK Error Log</p>
                       <pre className="text-[9px] font-mono text-red-400 bg-black/60 p-2 rounded-xl overflow-x-auto border border-slate-800">
                         {JSON.stringify(monetagDebug.error, null, 2)}
                       </pre>
                     </div>
                   )}
+                  <div className="pt-2 border-t border-slate-800 mt-2">
+                     <p className="text-[8px] text-slate-600 font-mono">Last Check: {new Date(monetagDebug.timestamp).toLocaleTimeString()}</p>
+                  </div>
                 </div>
               </motion.div>
             )}

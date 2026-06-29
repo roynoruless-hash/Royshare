@@ -80,27 +80,30 @@ export default function EarnRewardsPage() {
     const checkTelegram = () => {
       const tg = (window as any).Telegram?.WebApp;
       
-      // Improved Detection: Check for WebApp, initData, and user
-      const hasTgWebApp = !!(tg && tg.initData && tg.initDataUnsafe?.user);
-      setIsTelegramApp(hasTgWebApp);
-      
+      console.log("[EarnRewardsPage] Checking Telegram context...");
       if (tg) {
-        console.log("Telegram WebApp Version:", tg.version);
-        console.log("Telegram Platform:", tg.platform);
-        console.log("Telegram initData:", tg.initData);
-        console.log("Telegram user:", tg.initDataUnsafe?.user);
-        
         tg.ready();
         tg.expand();
+        
+        const user = tg.initDataUnsafe?.user;
+        const hasTgWebApp = !!(tg.initData && user?.id);
+        setIsTelegramApp(hasTgWebApp);
+        
+        console.log("[EarnRewardsPage] Telegram Version:", tg.version);
+        console.log("[EarnRewardsPage] Telegram User ID detected:", user?.id);
       } else {
-        console.log("Telegram WebApp not detected yet in EarnRewardsPage");
+        console.log("[EarnRewardsPage] Telegram SDK not found yet");
+        setIsTelegramApp(false);
       }
     };
 
+    // Check immediately
     checkTelegram();
-    // Retry once after 500ms to ensure SDK is fully initialized
-    const retryTimer = setTimeout(checkTelegram, 500);
-
+    
+    // Multiple retries to handle late script loading
+    const timer1 = setTimeout(checkTelegram, 500);
+    const timer2 = setTimeout(checkTelegram, 1500);
+    
     const tg = (window as any).Telegram?.WebApp;
     const tgUserId = tg?.initDataUnsafe?.user?.id;
 
@@ -119,7 +122,10 @@ export default function EarnRewardsPage() {
       setLoading(false);
     }
 
-    return () => clearTimeout(retryTimer);
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+    };
   }, []);
 
   // Fetch settings, user information, and tasks
@@ -248,19 +254,28 @@ export default function EarnRewardsPage() {
       return;
     }
 
+    const tg = (window as any).Telegram?.WebApp;
+    const telegramId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : String(userId);
+
+    if (!telegramId || telegramId === "null" || telegramId === "undefined") {
+      setMonetagError("Telegram User ID missing. Please ensure you open this page inside the Telegram bot.");
+      return;
+    }
+
     setIsMonetagAdRunning(true);
     setMonetagError(null);
     try {
-      // Pass the taskId as request_var to Monetag for server-side verification
-      if (typeof (window as any).show_11210088 === 'function') {
-        // Set request_var if the SDK supports it via global or params
-        // For Monetag Mini App, passing it to the function or setting a data attribute is common.
-        // We'll assume the SDK uses the data-ext-id we set in index.html for user, 
-        // and we can try passing taskId in the call.
-        await (window as any).show_11210088({ request_var: taskId });
-      } else {
-        await (window as any).show_11210088();
-      }
+      const uniqueYmid = `${telegramId}_${taskId}_${Date.now()}`;
+      const adOptions = { 
+        ymid: uniqueYmid,
+        request_var: taskId,
+        ext_id: telegramId,
+        subid: telegramId,
+        subid1: taskId
+      };
+
+      console.log("[MONETAG] Calling show_11210088 with options:", JSON.stringify(adOptions));
+      await (window as any).show_11210088(adOptions);
       
       setAdWatchedSuccessfully(true);
       setShowSuccessPopup(true);
@@ -368,6 +383,31 @@ export default function EarnRewardsPage() {
     );
   }
 
+  // Universal Telegram Environment Check
+  if (!loading && !isTelegramApp && (userId || taskId)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1118] text-white p-6 text-center">
+        <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mb-6 text-amber-500">
+          <AlertCircle size={40} />
+        </div>
+        <h1 className="text-2xl font-bold text-white mb-2">Telegram Mini App Required</h1>
+        <p className="text-gray-400 max-w-xs mb-8">
+          This reward page is only accessible within the official Telegram Mini App. Please open it from the Telegram bot using the Mini App button.
+        </p>
+        <button
+          onClick={() => window.location.href = `https://t.me/${botUsername}`}
+          className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30 transition-all active:scale-95 flex items-center gap-2"
+        >
+          <Play size={18} className="fill-current" />
+          Open In Telegram Bot
+        </button>
+        <div className="mt-8 text-[10px] text-slate-600 font-mono">
+          Environment: Browser/Desktop Detected
+        </div>
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1118] text-white p-6 text-center">
@@ -425,26 +465,6 @@ export default function EarnRewardsPage() {
   }
 
   if (currentTask?.adNetwork === 'Monetag Mini App') {
-    if (!isTelegramApp) {
-      return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1118] text-white p-6 text-center">
-          <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mb-6 text-amber-500">
-            <AlertCircle size={40} />
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-2">Mini App Required</h1>
-          <p className="text-gray-400 max-w-xs mb-8">
-            Please open this reward inside Telegram Mini App.
-          </p>
-          <button
-            onClick={() => window.location.href = `https://t.me/${botUsername}`}
-            className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30 transition-all active:scale-95 flex items-center gap-2"
-          >
-            <Play size={18} className="fill-current" />
-            Open In Telegram
-          </button>
-        </div>
-      );
-    }
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1118] text-white p-6 text-center">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-blue-600/10 blur-[120px] rounded-full pointer-events-none"></div>

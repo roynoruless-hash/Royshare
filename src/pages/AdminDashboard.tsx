@@ -5091,15 +5091,31 @@ export default function AdminDashboard() {
                           <p className="text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">Telegram Identity</p>
                           <div className="space-y-2">
                             <div className="flex justify-between items-center">
-                              <span className="text-xs text-slate-400">Detected ID:</span>
-                              <span className={`text-xs font-mono font-bold ${typeof (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id !== 'undefined' ? 'text-emerald-400' : 'text-red-400'}`}>
+                              <span className="text-xs text-slate-400">typeof Telegram:</span>
+                              <span className="text-xs font-mono font-bold text-blue-400">{typeof (window as any).Telegram}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-400">typeof WebApp:</span>
+                              <span className="text-xs font-mono font-bold text-blue-400">{typeof (window as any).Telegram?.WebApp}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-400">TG Version:</span>
+                              <span className="text-xs font-mono font-bold text-blue-400">{(window as any).Telegram?.WebApp?.version || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-400">TG Platform:</span>
+                              <span className="text-xs font-mono font-bold text-blue-400">{(window as any).Telegram?.WebApp?.platform || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between items-center border-t border-slate-800 pt-2 mt-2">
+                              <span className="text-xs text-slate-400 font-bold">User ID:</span>
+                              <span className={`text-xs font-mono font-bold ${(window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id ? 'text-emerald-400' : 'text-red-400'}`}>
                                 {(window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id || 'NOT DETECTED'}
                               </span>
                             </div>
                             <div className="flex justify-between items-center">
                               <span className="text-xs text-slate-400">Environment:</span>
-                              <span className="text-xs font-bold text-blue-400">
-                                {typeof (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id !== 'undefined' ? 'Telegram Mini App' : 'Browser/Desktop'}
+                              <span className={`text-xs font-bold ${(window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {(window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id ? 'Telegram Mini App' : 'Browser/Desktop'}
                               </span>
                             </div>
                           </div>
@@ -5118,6 +5134,12 @@ export default function AdminDashboard() {
                               <span className="text-xs text-slate-400">Postback Ready:</span>
                               <span className="text-xs font-bold text-emerald-400">✅ Enabled</span>
                             </div>
+                            <div className="pt-2 border-t border-slate-800 mt-2">
+                               <p className="text-[10px] text-slate-500 uppercase mb-1">User Object</p>
+                               <div className="bg-black/40 p-2 rounded text-[9px] font-mono text-blue-300 overflow-x-auto">
+                                 {JSON.stringify((window as any).Telegram?.WebApp?.initDataUnsafe?.user || "No User Object", null, 2)}
+                               </div>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -5125,10 +5147,19 @@ export default function AdminDashboard() {
                       <div className="space-y-4">
                         <div className="group">
                           <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Raw initData</p>
+                            <span className="text-[10px] text-slate-600 font-mono">ENCODED STRING</span>
+                          </div>
+                          <div className="bg-black/60 rounded-xl p-4 font-mono text-[9px] text-emerald-500/80 max-h-20 overflow-y-auto scrollbar-hide border border-slate-800">
+                             {(window as any).Telegram?.WebApp?.initData || "Empty"}
+                          </div>
+                        </div>
+                        <div className="group">
+                          <div className="flex items-center justify-between mb-2">
                             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Raw initDataUnsafe</p>
                             <span className="text-[10px] text-slate-600 font-mono">JSON</span>
                           </div>
-                          <div className="bg-black/60 rounded-xl p-4 font-mono text-[10px] text-emerald-500/80 max-h-40 overflow-y-auto scrollbar-hide border border-slate-800 group-hover:border-slate-700 transition-colors">
+                          <div className="bg-black/60 rounded-xl p-4 font-mono text-[9px] text-emerald-500/80 max-h-40 overflow-y-auto scrollbar-hide border border-slate-800 group-hover:border-slate-700 transition-colors">
                             <pre>{JSON.stringify((window as any).Telegram?.WebApp?.initDataUnsafe || { error: "No Telegram context" }, null, 2)}</pre>
                           </div>
                         </div>
@@ -5139,15 +5170,15 @@ export default function AdminDashboard() {
                           </h4>
                           <div className="space-y-2">
                             <div className="flex items-start gap-2">
-                              <div className={`mt-1 w-3 h-3 rounded-full flex-shrink-0 ${typeof (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id !== 'undefined' ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                              <div className={`mt-1 w-3 h-3 rounded-full flex-shrink-0 ${(window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
                               <p className="text-[10px] text-slate-400 leading-relaxed">
-                                <span className="font-bold text-white">Telegram ID Check:</span> {typeof (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id !== 'undefined' ? 'Successfully identified as numeric ID. Postback will be attributed correctly.' : 'MISSING ID. Monetag will receive "{ext_id}" or "Unknown", which will FAIL verification.'}
+                                <span className="font-bold text-white">Telegram ID Check:</span> {(window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id ? 'Successfully identified as numeric ID. Postback will be attributed correctly.' : 'MISSING ID. Monetag will receive "{ext_id}" or "Unknown", which will FAIL verification.'}
                               </p>
                             </div>
                             <div className="flex items-start gap-2">
                               <div className={`mt-1 w-3 h-3 rounded-full flex-shrink-0 ${typeof (window as any).show_11210088 === 'function' ? 'bg-emerald-500' : 'bg-slate-600'}`}></div>
                               <p className="text-[10px] text-slate-400 leading-relaxed">
-                                <span className="font-bold text-white">SDK Show Function:</span> {typeof (window as any).show_11210088 === 'function' ? 'Function window.show_11210088 is globally available and ready to trigger rewarded ads.' : 'SDK not found. This is normal on desktop browser; it only loads inside real Telegram app.'}
+                                <span className="font-bold text-white">SDK Show Function:</span> {typeof (window as any).show_11210088 === 'function' ? 'Function window.show_11210088 is globally available and ready to trigger rewarded ads.' : 'SDK not found. Ensure you are using the official Monetag script for Mini Apps.'}
                               </p>
                             </div>
                           </div>

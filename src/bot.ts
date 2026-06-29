@@ -13,6 +13,14 @@ function formatCurrency(amount: number, currency: string = "INR", includeSymbol:
     }
 }
 
+function getAppUrl(): string {
+    const rawAppUrl = process.env.VITE_APP_URL || process.env.APP_URL || "https://royshare.onrender.com";
+    if (!rawAppUrl || rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") {
+        return "https://royshare.onrender.com";
+    }
+    return rawAppUrl;
+}
+
 async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string): Promise<string> {
     let endpoint = "";
     let responseText = "";
@@ -873,7 +881,7 @@ async function processRealUpload(botToken: string, chatId: number, user: any, ms
     const uniqueFileId = "FL" + Math.random().toString(36).substring(2, 10).toUpperCase();
     
     // 5. Generate public link
-    const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+    const appUrl = getAppUrl();
     const baseDomain = appUrl.replace(/\/$/, "");
     const generatedLink = `${baseDomain}/download/${uniqueFileId}`;
     
@@ -992,7 +1000,7 @@ async function processShortenUrl(botToken: string, chatId: number, user: any, ur
     }
     
     const linkId = "LN" + Math.random().toString(36).substring(2, 10).toUpperCase();
-    const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+    const appUrl = getAppUrl();
     const baseDomain = appUrl.replace(/\/$/, "");
     const localShortLink = `${baseDomain}/lnk/${linkId}`;
     
@@ -1281,7 +1289,7 @@ async function processReferAndEarn(botToken: string, chatId: number, user: any) 
     const refQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
     const refSnap = await getDocs(refQuery);
 
-    const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+    const appUrl = getAppUrl();
     const baseDomain = appUrl.replace(/\/$/, "");
     const referralLink = `${baseDomain}/ref/${userId}`;
 
@@ -2501,7 +2509,7 @@ async function processDailyBonus(botToken: string, chatId: number, user: any) {
     const userDoc = await getDoc(doc(db, "users", String(user.id)));
     const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
 
-    const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+    const appUrl = getAppUrl();
     const webAppUrl = `${appUrl}/daily-bonus?userId=${user.id}`;
 
     const maxRewardStr = formatCurrency(5, currency);
@@ -2540,7 +2548,7 @@ async function processEarnRewards(botToken: string, chatId: number, user: any) {
         if (c.taskId) completedTaskIds.add(c.taskId);
     });
 
-    const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+    const appUrl = getAppUrl();
 
     // Fetch dynamic tasks from Firestore tasks collection
     let dbTasks: any[] = [];
@@ -2590,7 +2598,7 @@ async function processEarnRewards(botToken: string, chatId: number, user: any) {
         if (isMonetag && !isCompleted) {
             buttons.push([{ text: btnText, web_app: { url: webAppUrl } }]);
         } else {
-            buttons.push([{ text: btnText, url: webAppUrl }]);
+            buttons.push([{ text: btnText, web_app: { url: webAppUrl } }]);
         }
     }
 
@@ -3210,7 +3218,7 @@ Processing Time:
 
 async function initiateHumanVerification(botToken: string, chatId: number, userId: string, state: any) {
     const db = getDb();
-    const appUrl = process.env.VITE_APP_URL || process.env.APP_URL || "https://royshare.onrender.com";
+    const appUrl = getAppUrl();
     const verifyUrl = `${appUrl}/verify-withdrawal/${userId}`;
     
     // Generate captcha
@@ -5072,7 +5080,7 @@ https://youtube.com`;
             await processDashboard(botToken, chatId, callbackQuery.from);
         } else if (data.startsWith("referral_copy_")) {
             const rUserId = data.replace("referral_copy_", "");
-            const appUrl = process.env.APP_URL || "https://royshare.onrender.com";
+            const appUrl = getAppUrl();
             const baseDomain = appUrl.replace(/\/$/, "");
             const referralLink = `${baseDomain}/ref/${rUserId}`;
             

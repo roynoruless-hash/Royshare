@@ -28,6 +28,23 @@ export default function App() {
   const [loadingConfig, setLoadingConfig] = useState(true);
 
   useEffect(() => {
+    // Initialize Telegram WebApp
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg) {
+      console.log("[App.tsx] Telegram WebApp detected. Initializing...");
+      tg.ready();
+      tg.expand();
+      
+      const userId = tg.initDataUnsafe?.user?.id;
+      if (userId) {
+        console.log("[App.tsx] Running inside Telegram. User ID:", userId);
+      } else {
+        console.log("[App.tsx] Telegram WebApp detected but user data is missing (initDataUnsafe.user.id)");
+      }
+    } else {
+      console.log("[App.tsx] Running in a standard browser environment (No Telegram WebApp detected)");
+    }
+
     fetch("/api/system-settings")
       .then(res => res.json())
       .then(() => {
