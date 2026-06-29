@@ -136,12 +136,15 @@ export default function DriveUploadPage() {
         })
       });
 
+      const initData = await initResponse.json();
       if (!initResponse.ok) {
-        const errData = await initResponse.json();
-        throw new Error(errData.error || "Failed to initiate resumable upload session.");
+        const errorDetails = initData.details 
+          ? (typeof initData.details === "object" ? JSON.stringify(initData.details, null, 2) : initData.details)
+          : "";
+        throw new Error(errorDetails ? `${initData.error || "Upload failed"}: ${errorDetails}` : (initData.error || "Failed to initiate resumable upload session."));
       }
 
-      const { uploadUrl } = await initResponse.json();
+      const { uploadUrl } = initData;
 
       // Step 2: Upload directly to Google's Resumable session URL
       const xhr = new XMLHttpRequest();

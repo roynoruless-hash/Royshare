@@ -5474,7 +5474,7 @@ Bonus added successfully.`;
                     Go to <strong>APIs & Services > OAuth consent screen</strong>:
                     <ul style="padding-left:1.2rem;list-style-type:circle;margin-top:0.4rem;">
                       <li>Choose <strong>External</strong> user type, fill in required fields, and save.</li>
-                      <li>In the <strong>Scopes</strong> step, add <code>.../auth/drive.readonly</code>, <code>.../auth/userinfo.email</code>, and <code>.../auth/userinfo.profile</code>.</li>
+                      <li>In the <strong>Scopes</strong> step, add <code>.../auth/drive.file</code>, <code>.../auth/drive.readonly</code>, <code>.../auth/userinfo.email</code>, and <code>.../auth/userinfo.profile</code>.</li>
                       <li>In the <strong>Test users</strong> step, add your developer email address (e.g., <code>ritikrai2625@gmail.com</code>) so you can authenticate while the app is in testing.</li>
                     </ul>
                   </li>
@@ -5524,6 +5524,7 @@ Bonus added successfully.`;
         access_type: "offline",
         prompt: "consent",
         scope: [
+          "https://www.googleapis.com/auth/drive.file",
           "https://www.googleapis.com/auth/drive.readonly",
           "https://www.googleapis.com/auth/userinfo.email",
           "https://www.googleapis.com/auth/userinfo.profile"
@@ -5675,21 +5676,29 @@ Bonus added successfully.`;
 
     let accessToken = data.accessToken;
     if (isExpired) {
-      console.log(`[Google API] Access token for tg_id ${tgId} is expired or expiring soon. Refreshing...`);
-      const { credentials } = await oauth2Client.refreshAccessToken();
-      if (credentials.access_token) {
-        accessToken = credentials.access_token;
-        const expiryTime = credentials.expiry_date || (Date.now() + 3600 * 1000);
-        const updateData: any = {
-          accessToken: accessToken,
-          expiryTime: expiryTime,
-          expiryDate: new Date(expiryTime).toISOString()
-        };
-        await setDoc(docRef, updateData, { merge: true });
-        console.log(`[Google API] Successfully refreshed access token for tg_id ${tgId}.`);
-      } else {
-        throw new Error("Failed to refresh Google access token.");
+      console.log(`[Google API Trace] [Step 6] Access token for tg_id ${tgId} is expired or expiring soon. Attempting token refresh...`);
+      try {
+        const { credentials } = await oauth2Client.refreshAccessToken();
+        if (credentials.access_token) {
+          accessToken = credentials.access_token;
+          const expiryTime = credentials.expiry_date || (Date.now() + 3600 * 1000);
+          const updateData: any = {
+            accessToken: accessToken,
+            expiryTime: expiryTime,
+            expiryDate: new Date(expiryTime).toISOString()
+          };
+          await setDoc(docRef, updateData, { merge: true });
+          console.log(`[Google API Trace] [Step 6] Token refresh outcome for tg_id ${tgId}: SUCCESS. New access token secured.`);
+        } else {
+          console.error(`[Google API Trace] [Step 6] Token refresh outcome for tg_id ${tgId}: FAILED. No access token in credentials response.`);
+          throw new Error("Failed to refresh Google access token: Response was empty.");
+        }
+      } catch (refreshErr: any) {
+        console.error(`[Google API Trace] [Step 6] Token refresh outcome for tg_id ${tgId}: FAILED. Error:`, refreshErr);
+        throw new Error(`Failed to refresh Google access token: ${refreshErr.message}`);
       }
+    } else {
+      console.log(`[Google API Trace] [Step 6] Token refresh check for tg_id ${tgId}: Active token exists. Expiry: ${new Date(data.expiryTime || 0).toISOString()}. No refresh needed.`);
     }
 
     return { accessToken, email: data.email || "" };
@@ -5721,9 +5730,27 @@ Bonus added successfully.`;
         return res.status(400).json({ error: "Missing required parameters (tg_id, fileName, fileSize)" });
       }
 
+      console.log(`[Google API Trace] [Step 1] Initiating upload trace for tg_id ${tg_id}, file: ${fileName} (${fileSize} bytes)`);
+
       const { accessToken } = await getActiveGoogleToken(tg_id);
 
-      const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable", {
+      const targetUrl = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable";
+      const requestHeaders = {
+        "Authorization": `Bearer [HIDDEN]`,
+        "X-Upload-Content-Type": mimeType || "application/octet-stream",
+        "X-Upload-Content-Length": String(fileSize),
+        "Content-Type": "application/json; charset=UTF-8"
+      };
+      const requestBody = {
+        name: fileName,
+        mimeType: mimeType || "application/octet-stream"
+      };
+
+      console.log(`[Google API Trace] 1. Exact POST request URL sent to Google Drive API: ${targetUrl}`);
+      console.log(`[Google API Trace] 2. Request Headers (sensitive token hidden):`, JSON.stringify(requestHeaders, null, 2));
+      console.log(`[Google API Trace] 3. Request Body:`, JSON.stringify(requestBody, null, 2));
+
+      const response = await fetch(targetUrl, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${accessToken}`,
@@ -5731,16 +5758,28 @@ Bonus added successfully.`;
           "X-Upload-Content-Length": String(fileSize),
           "Content-Type": "application/json; charset=UTF-8"
         },
-        body: JSON.stringify({
-          name: fileName,
-          mimeType: mimeType || "application/octet-stream"
-        })
+        body: JSON.stringify(requestBody)
       });
 
+      const statusCode = response.status;
+      const responseText = await response.text();
+
+      console.log(`[Google API Trace] 4. HTTP Status Code returned by Google: ${statusCode}`);
+      console.log(`[Google API Trace] 5. Complete response body from Google:`, responseText);
+
       if (!response.ok) {
-        const errText = await response.text();
-        console.error("[Google Resumable] Failed to initiate session:", errText);
-        return res.status(response.status).json({ error: "Failed to initiate Google Drive upload session", details: errText });
+        let errorJson: any = null;
+        try {
+          errorJson = JSON.parse(responseText);
+        } catch (e) {}
+
+        console.error("[Google Resumable] Failed to initiate session. Google error response:", responseText);
+        
+        // Return the exact Google error JSON as part of details for user requirement 7
+        return res.status(statusCode).json({ 
+          error: "Google Drive API error initiating upload", 
+          details: errorJson || responseText 
+        });
       }
 
       const uploadUrl = response.headers.get("Location");
@@ -5748,6 +5787,7 @@ Bonus added successfully.`;
         return res.status(500).json({ error: "Google Drive API did not return a Location header for resumable upload" });
       }
 
+      console.log(`[Google API Trace] Success: Location header returned: ${uploadUrl}`);
       return res.json({ uploadUrl });
     } catch (err: any) {
       console.error("[Google Resumable] Error:", err);
