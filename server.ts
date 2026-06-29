@@ -5017,10 +5017,28 @@ Bonus added successfully.`;
         const botUsername = telegramSettingsSnap.exists() ? telegramSettingsSnap.data()?.botUsername : null;
         
         let downloadUrl = "";
-        if (botToken && botUsername && itemData.storageChannelId && itemData.telegramMessageId && itemData.telegramMessageId !== "NOT_SET") {
-          downloadUrl = `https://t.me/${botUsername}?start=dl_${linkId}`;
-        } else {
-          downloadUrl = itemData.generatedLink || "";
+        if (botToken && itemData.telegramFileId) {
+          try {
+            console.log(`[DEBUG CLAIM] Fetching direct Telegram download URL using telegramFileId: ${itemData.telegramFileId}`);
+            const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${itemData.telegramFileId}`);
+            const getFileData = await getFileRes.json();
+            if (getFileData.ok && getFileData.result?.file_path) {
+              downloadUrl = `https://api.telegram.org/file/bot${botToken}/${getFileData.result.file_path}`;
+              console.log(`[DEBUG CLAIM] Successfully retrieved direct Telegram download URL: ${downloadUrl}`);
+            } else {
+              console.warn(`[DEBUG CLAIM] Failed to get file path from Telegram API: ${JSON.stringify(getFileData)}`);
+            }
+          } catch (e) {
+            console.error("[DEBUG CLAIM] Error fetching direct download URL from Telegram getFile API:", e);
+          }
+        }
+
+        if (!downloadUrl) {
+          if (botToken && botUsername && itemData.storageChannelId && itemData.telegramMessageId && itemData.telegramMessageId !== "NOT_SET") {
+            downloadUrl = `https://t.me/${botUsername}?start=dl_${linkId}`;
+          } else {
+            downloadUrl = itemData.generatedLink || "";
+          }
         }
 
         res.json({

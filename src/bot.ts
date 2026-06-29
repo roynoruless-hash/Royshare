@@ -895,6 +895,7 @@ async function processRealUpload(botToken: string, chatId: number, user: any, ms
     // 7. Save to Firestore
     await setDoc(doc(db, "uploads", uniqueFileId), {
         fileId: uniqueFileId,
+        telegramFileId: fileId,
         userId: String(user.id),
         fileName,
         fileSize,
