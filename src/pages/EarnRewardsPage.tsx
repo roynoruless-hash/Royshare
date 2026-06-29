@@ -249,8 +249,13 @@ export default function EarnRewardsPage() {
       return;
     }
 
-    if (typeof (window as any).show_11210088 !== 'function') {
-      setMonetagError("Please watch the complete advertisement to unlock your reward.");
+    // 1. Log SDK loaded status
+    const sdkLoaded = typeof (window as any).show_11210088 === 'function';
+    console.log("[MONETAG_FLOW] SDK loaded check:", sdkLoaded ? "LOADED" : "NOT_LOADED");
+
+    if (!sdkLoaded) {
+      console.log("[MONETAG_FLOW] Final UI decision: Cannot run ad because SDK is not loaded.");
+      setMonetagError("Monetag Ad SDK is still loading or could not be loaded. Please ensure you are inside the Telegram Mini App and have a stable internet connection.");
       return;
     }
 
@@ -274,15 +279,61 @@ export default function EarnRewardsPage() {
         subid1: taskId
       };
 
-      console.log("[MONETAG] Calling show_11210088 with options:", JSON.stringify(adOptions));
-      await (window as any).show_11210088(adOptions);
+      // 2. Log show() called
+      console.log("[MONETAG_FLOW] Calling show_11210088 with options:", JSON.stringify(adOptions));
       
-      setAdWatchedSuccessfully(true);
-      setShowSuccessPopup(true);
-      setTimeout(() => setShowSuccessPopup(false), 3000);
+      const result = await (window as any).show_11210088(adOptions);
+      
+      // 3. Log callback result
+      console.log("[MONETAG_FLOW] Callback result received (resolved):", result, "Type:", typeof result);
+      
+      // 4. Log callback status
+      let callbackStatus = "unknown";
+      if (result === true) {
+        callbackStatus = "completed";
+      } else if (result === false) {
+        callbackStatus = "skipped_or_closed";
+      } else if (result && typeof result === 'object') {
+        callbackStatus = result.status || result.event || "resolved_object";
+      } else if (typeof result === 'string') {
+        callbackStatus = result;
+      }
+      console.log("[MONETAG_FLOW] Parsed callback status:", callbackStatus);
+
+      // Determine if skipped or closed explicitly
+      const isSkippedOrClosed = 
+        result === false || 
+        callbackStatus === "skipped" || 
+        callbackStatus === "closed" || 
+        callbackStatus === "skipped_or_closed" || 
+        callbackStatus === "dismissed";
+
+      if (isSkippedOrClosed) {
+        // 5. Final UI decision on explicit skip/close
+        console.log("[MONETAG_FLOW] Final UI decision: User skipped or closed the ad. Showing watch complete error.");
+        setMonetagError("Please watch the complete advertisement to unlock your reward.");
+      } else {
+        // 5. Final UI decision on success
+        console.log("[MONETAG_FLOW] Final UI decision: Ad watched successfully.");
+        setAdWatchedSuccessfully(true);
+        setShowSuccessPopup(true);
+        setTimeout(() => setShowSuccessPopup(false), 3000);
+      }
     } catch (err: any) {
-      console.error("Monetag ad error:", err);
-      setMonetagError("Please watch the complete advertisement to unlock your reward.");
+      // 3. Log callback result in catch
+      console.error("[MONETAG_FLOW] SDK Error caught:", err);
+      
+      // Check if error message explicitly points to skip or close
+      const errStr = String(err).toLowerCase();
+      const isExplicitSkipOrClose = errStr.includes("skip") || errStr.includes("close") || errStr.includes("dismiss") || errStr.includes("cancel");
+
+      if (isExplicitSkipOrClose) {
+        console.log("[MONETAG_FLOW] Final UI decision: Caught explicit skip/close in error. Showing watch complete error.");
+        setMonetagError("Please watch the complete advertisement to unlock your reward.");
+      } else {
+        console.log("[MONETAG_FLOW] Final UI decision: General error occurred.");
+        setMonetagError(err.message || "Failed to launch advertisement.");
+      }
     } finally {
       setIsMonetagAdRunning(false);
     }
