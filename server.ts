@@ -3949,10 +3949,11 @@ Bonus added successfully.`;
       }
 
       // Check reward eligibility
-      if (reward_event_type !== "yes") {
+      const isEligibleReward = reward_event_type === "yes" || reward_event_type === "valued";
+      if (!isEligibleReward) {
         console.log(`[MONETAG POSTBACK] Event ignored: reward_event_type is '${reward_event_type}'`);
         logEntry.status = "ignored";
-        logEntry.reason = "reward_event_type is not 'yes'";
+        logEntry.reason = `reward_event_type '${reward_event_type}' is neither 'yes' nor 'valued'`;
         await addDoc(postbackRef, logEntry);
         return res.status(200).send("Event ignored (no reward requested)");
       }
