@@ -2168,6 +2168,36 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  app.get("/api/public/stats", async (req, res) => {
+    try {
+      const getCount = async (collName: string) => {
+        try {
+          const coll = collection(db, collName);
+          return (await getCountFromServer(coll)).data().count;
+        } catch (e) {
+          return 0;
+        }
+      };
+
+      const [totalUsers, totalUploads, totalLinks] = await Promise.all([
+        getCount("users"),
+        getCount("uploads"),
+        getCount("links")
+      ]);
+
+      // If we had a global settings doc with overall stats, we'd fetch it here.
+      // For now, we return document counts.
+      res.json({
+        totalUsers,
+        totalUploads,
+        totalLinks,
+        totalDownloads: 0 // Will handle "Growing Every Day" if 0
+      });
+    } catch (e) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
   // Admin Broadcast endpoints
   app.get("/api/admin/broadcasts", async (req, res) => {
     try {

@@ -36,7 +36,6 @@ export default function TelegramOrb({ onTriggerAdmin }: { onTriggerAdmin: () => 
     if (e.type === "touchstart") {
       isTouch.current = true;
     } else if (e.type === "mousedown" && isTouch.current) {
-      // Ignore simulated mouse event on mobile/touch screens
       return;
     }
 
@@ -47,7 +46,6 @@ export default function TelegramOrb({ onTriggerAdmin }: { onTriggerAdmin: () => 
     let startTime = Date.now();
     pressTimer.current = window.setInterval(() => {
       const elapsed = Date.now() - startTime;
-      // Triggers precisely at 2 seconds (2000ms)
       const newProgress = Math.min((elapsed / 2000) * 100, 100);
       setProgress(newProgress);
       if (newProgress >= 100) {
@@ -63,7 +61,6 @@ export default function TelegramOrb({ onTriggerAdmin }: { onTriggerAdmin: () => 
 
   const endPress = (e: React.MouseEvent | React.TouchEvent) => {
     if (e.type === "touchend" || e.type === "touchcancel") {
-      // Allow simulated events to pass before resetting the touch flag
       setTimeout(() => {
         isTouch.current = false;
       }, 500);
@@ -85,54 +82,57 @@ export default function TelegramOrb({ onTriggerAdmin }: { onTriggerAdmin: () => 
       onTouchStart={startPress}
       onTouchEnd={endPress}
       onTouchCancel={endPress}
-      whileHover={{ scale: 1.1 }}
-      className="relative flex items-center justify-center w-32 h-32 mb-10 mx-auto cursor-pointer"
+      whileHover={{ scale: 1.05 }}
+      className="relative flex items-center justify-center w-24 h-24 sm:w-32 sm:h-32 mb-8 mx-auto cursor-pointer"
       animate={{ y: [0, -10, 0] }}
-      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+      transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
     >
       {/* Progress Ring */}
-      <svg className="absolute w-full h-full -rotate-90">
+      <svg className="absolute w-full h-full -rotate-90 z-20 pointer-events-none">
           <circle 
-            cx="64" cy="64" r="60" 
-            className="stroke-slate-800 fill-none"
-            strokeWidth="4"
+            cx="50%" cy="50%" r="48%" 
+            className="stroke-white/5 fill-none"
+            strokeWidth="2"
           />
           <motion.circle 
-            cx="64" cy="64" r="60" 
+            cx="50%" cy="50%" r="48%" 
             className="stroke-blue-500 fill-none"
-            strokeWidth="4"
+            strokeWidth="2"
             style={{ pathLength: progress / 100 }}
           />
       </svg>
 
-      {/* Glow Ring */}
+      {/* Main Glow */}
       <motion.div
-        animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0.8, 0.5] }}
-        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute inset-0 rounded-full bg-blue-500 blur-2xl"
+        animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
+        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+        className="absolute inset-0 rounded-full bg-blue-500 blur-3xl z-0"
       />
       
-      {/* Orb Body */}
-      <div className="relative w-24 h-24 bg-gradient-to-br from-blue-600 to-blue-700 rounded-full flex items-center justify-center shadow-2xl shadow-blue-500/50 overflow-hidden border border-white/10">
+      {/* Orb Body - Glassmorphism */}
+      <div className="relative w-20 h-20 sm:w-28 sm:h-28 bg-gradient-to-br from-blue-500/20 to-purple-500/20 backdrop-blur-xl rounded-full flex items-center justify-center shadow-2xl border border-white/20 z-10">
         <motion.div
-          animate={{ x: ["-100%", "100%"] }}
-          transition={{ duration: 1.5, repeat: Infinity, ease: "linear", repeatDelay: 2 }}
-          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent skew-x-[-30deg]"
+          animate={{ scale: [1, 1.1, 1] }}
+          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute inset-2 rounded-full bg-blue-500/10 blur-md"
         />
-        <Send className="w-10 h-10 text-white relative z-10" />
+        <div className="relative bg-gradient-to-br from-blue-500 to-purple-600 p-4 rounded-full shadow-inner">
+          <Send className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+        </div>
       </div>
 
-       {/* Particles */}
-       {[...Array(6)].map((_, i) => (
+       {/* Floating Particles */}
+       {[...Array(8)].map((_, i) => (
         <motion.div
           key={i}
-          className="absolute w-2 h-2 bg-blue-400 rounded-full"
+          className="absolute w-1 h-1 bg-blue-300 rounded-full z-0"
           animate={{
-            x: [0, Math.sin(i) * 80],
-            y: [0, Math.cos(i) * 80],
-            opacity: [0, 1, 0],
+            x: [0, (Math.random() - 0.5) * 160],
+            y: [0, (Math.random() - 0.5) * 160],
+            opacity: [0, 0.8, 0],
+            scale: [0, 1.5, 0]
           }}
-          transition={{ duration: 3, repeat: Infinity, delay: i * 0.3 }}
+          transition={{ duration: 3 + Math.random() * 2, repeat: Infinity, delay: i * 0.4 }}
         />
       ))}
     </motion.button>
