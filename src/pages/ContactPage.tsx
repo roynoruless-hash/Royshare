@@ -45,12 +45,12 @@ const contactMethods = [
     color: "emerald"
   },
   {
-    icon: Bug,
-    title: "Report a Bug",
-    description: "Found an issue? Let us know so we can fix it.",
-    buttonText: "Report Bug",
+    icon: MessageSquare,
+    title: "Contact Support",
+    description: "Need immediate assistance? Reach out to our team.",
+    buttonText: "Contact Support",
     url: "https://t.me/Roysharearn_bot",
-    color: "rose"
+    color: "indigo"
   }
 ];
 

@@ -1,68 +1,63 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../config/api";
-import { motion, AnimatePresence } from "framer-motion";
-import { Gift, Disc, RotateCw, AlertTriangle, ArrowLeft, Clock, CheckCircle, ShieldCheck, Star } from "lucide-react";
-import AdRenderer from "../components/AdRenderer";
+import { motion, AnimatePresence } from "motion/react";
+import { Gift, Disc, RotateCw, AlertTriangle, ArrowLeft, Clock, CheckCircle, ShieldCheck, Star, Package, CreditCard, ChevronRight, Trophy } from "lucide-react";
+import confetti from "canvas-confetti";
 
-// Reward wheel sectors
-const REWARDS = [
-  { amount: 0.10, label: "₹0.10" },
-  { amount: 0.20, label: "₹0.20" },
-  { amount: 0.50, label: "₹0.50" },
-  { amount: 1.00, label: "₹1.00" },
-  { amount: 2.00, label: "₹2.00" },
-  { amount: 5.00, label: "₹5.00" }
-];
+// --- Types ---
+interface BonusModuleStatus {
+  enabled: boolean;
+  dailyLimit: number;
+  usageCount: number;
+  cooldown: number;
+  lastClaimAt: string | null;
+  remaining: number;
+  nextAvailableAt: string | null;
+  isOnCooldown: boolean;
+  cooldownRemaining: number;
+}
+
+interface BonusStatusResponse {
+  success: boolean;
+  dailyBonusEnabled: boolean;
+  modules: {
+    wheel: BonusModuleStatus;
+    box: BonusModuleStatus;
+    scratch: BonusModuleStatus;
+  };
+  currency: string;
+}
+
+// --- Components ---
 
 export default function DailyBonusPage() {
   const [userId, setUserId] = useState<string | null>(null);
-  const [remainingSpins, setRemainingSpins] = useState<number>(0);
-  const [dailySpinCount, setDailySpinCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
-  const [currency, setCurrency] = useState<string>("INR");
-
-  // Dynamic Settings states loaded from Firestore settings
-  const [rewards, setRewards] = useState<{ amount: number; label: string }[]>([]);
-  const [claimTimerConfig, setClaimTimerConfig] = useState<number>(25);
-  const [freeSpinsPerDayConfig, setFreeSpinsPerDayConfig] = useState<number>(3);
-  const [dailyBonusEnabled, setDailyBonusEnabled] = useState<boolean>(true);
-
-  const formatCurrency = (amount: number) => {
-    if (currency === "USD") {
-      const usd = amount * 0.0118;
-      if (usd < 0.01) {
-        return `$${usd.toFixed(4)}`;
-      }
-      return `$${usd.toFixed(2)}`;
-    }
-    return `₹${amount.toFixed(2)}`;
-  };
+  const [status, setStatus] = useState<BonusStatusResponse | null>(null);
+  const [activeView, setActiveView] = useState<'selection' | 'wheel' | 'box' | 'scratch'>('selection');
   
-  // Wheel State
-  const [rotation, setRotation] = useState<number>(0);
-  const [isSpinning, setIsSpinning] = useState<boolean>(false);
-  const [wonReward, setWonReward] = useState<number | null>(null);
-  const [showCongratsPopup, setShowCongratsPopup] = useState<boolean>(false);
+  // Reward States
+  const [revealing, setRevealing] = useState(false);
+  const [revealedReward, setRevealedReward] = useState<any>(null);
+  const [claiming, setClaiming] = useState(false);
+  const [claimSuccess, setClaimSuccess] = useState(false);
 
-  // Verification Screen State
-  const [isVerificationPage, setIsVerificationPage] = useState<boolean>(false);
-  const [timer, setTimer] = useState<number>(25);
-  const [isTimerCompleted, setIsTimerCompleted] = useState<boolean>(false);
-  const [isClaiming, setIsClaiming] = useState<boolean>(false);
-  const [isClaimedSuccess, setIsClaimedSuccess] = useState<boolean>(false);
+  // Wheel States
+  const [wheelRotation, setWheelRotation] = useState(0);
+  
+  // Scratch Card States
+  const [scratchedPercent, setScratchedPercent] = useState(0);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Initialization
   useEffect(() => {
-    // Determine User ID
     const params = new URLSearchParams(window.location.search);
     const queryUserId = params.get("userId");
-    
     const tg = (window as any).Telegram?.WebApp;
-    if (tg) {
-      tg.expand();
-    }
+    if (tg) tg.expand();
     const tgUserId = tg?.initDataUnsafe?.user?.id;
-
     const resolvedId = queryUserId || (tgUserId ? String(tgUserId) : null);
+    
     if (resolvedId) {
       setUserId(resolvedId);
     } else {
@@ -70,579 +65,517 @@ export default function DailyBonusPage() {
     }
   }, []);
 
-  useEffect(() => {
+  const fetchStatus = async () => {
     if (!userId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/daily-bonus/status?userId=${userId}`);
+      const data = await res.json();
+      if (data.success) setStatus(data);
+    } catch (err) {
+      console.error("Error fetching bonus status:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    // Fetch initial status from Firestore backend
-    fetch(`${API_BASE}/api/daily-bonus/status?userId=${userId}`)
-      .then(res => res.json())
-      .then(data => {
-        console.log("================= DAILY BONUS STATUS TRACE (FRONTEND) =================");
-        console.log("[DB STATUS] Response from server:", data);
-        
-        if (data && data.remainingSpins !== undefined) {
-          setRemainingSpins(data.remainingSpins);
-          setDailySpinCount(data.dailySpinCount);
-        }
-        if (data && data.currency) {
-          setCurrency(data.currency);
-        }
-        if (data && data.settings) {
-          const activeRewards = (data.settings.rewardList || [])
-            .filter((r: any) => r.status === "Active")
-            .map((r: any) => ({
-              amount: Number(r.amount),
-              label: `₹${Number(r.amount).toFixed(2)}`
-            }));
-          
-          console.log("[DB STATUS] Active dynamic rewards loaded:", activeRewards);
-          
-          if (activeRewards.length > 0) {
-            setRewards(activeRewards);
-          } else {
-            console.warn("[DB STATUS] No active rewards found in Firestore, using dynamic wheel fallback.");
-            setRewards([
-              { amount: 0.10, label: "₹0.10" },
-              { amount: 0.20, label: "₹0.20" },
-              { amount: 0.50, label: "₹0.50" },
-              { amount: 1.00, label: "₹1.00" },
-              { amount: 2.00, label: "₹2.00" },
-              { amount: 5.00, label: "₹5.00" }
-            ]);
-          }
-
-          setClaimTimerConfig(Number(data.settings.claimTimer ?? 25));
-          setTimer(Number(data.settings.claimTimer ?? 25));
-          setFreeSpinsPerDayConfig(Number(data.settings.freeSpinsPerDay ?? 3));
-          setDailyBonusEnabled(data.settings.dailyBonusEnabled ?? true);
-
-          console.log(`[DB STATUS] Loaded config values: enabled=${data.settings.dailyBonusEnabled}, spinsPerDay=${data.settings.freeSpinsPerDay}, claimTimer=${data.settings.claimTimer}s`);
-        }
-        console.log("=======================================================================");
-      })
-      .catch(err => {
-        console.error("Error loading daily bonus state:", err);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+  useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000); // Auto refresh every 30s
+    return () => clearInterval(interval);
   }, [userId]);
 
-  // Handle verification timer
-  useEffect(() => {
-    if (!isVerificationPage || timer <= 0) {
-      if (isVerificationPage && timer === 0) {
-        setIsTimerCompleted(true);
-      }
-      return;
-    }
-    const interval = setInterval(() => {
-      setTimer(prev => prev - 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isVerificationPage, timer]);
+  // --- Actions ---
 
-  const handleSpin = async () => {
-    if (isSpinning || remainingSpins <= 0 || !userId) return;
-
-    setIsSpinning(true);
-    const randomIndex = Math.floor(Math.random() * REWARDS.length);
-    const selectedReward = REWARDS[randomIndex];
-
-    // Landing target: we want the pointer at top to point to selected index
-    // sector i is centered at (i * 60 + 30) deg. 
-    // Wheel stops with sector at top when finalRotation is 360 * spins - (i * 60 + 30).
-    const newRotation = rotation + (360 * 6) - (rotation % 360) - (randomIndex * 60 + 30);
-    setRotation(newRotation);
+  const handleReveal = async (type: string) => {
+    if (revealing || !userId) return;
+    setRevealing(true);
+    setRevealedReward(null);
+    setClaimSuccess(false);
 
     try {
-      // Backend spin deduction
-      const res = await fetch(`${API_BASE}/api/daily-bonus/spin`, {
+      const res = await fetch(`${API_BASE}/api/daily-bonus/reveal`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, rewardAmount: selectedReward.amount })
+        body: JSON.stringify({ userId, type })
       });
       const data = await res.json();
       
       if (!res.ok) {
-        alert(data.error || "Spin failed");
-        setIsSpinning(false);
+        alert(data.error || "Failed to reveal reward");
+        setRevealing(false);
         return;
       }
 
-      // Wait for spin animation (5 seconds)
-      setTimeout(() => {
-        setWonReward(selectedReward.amount);
-        setRemainingSpins(data.remainingSpins);
-        setDailySpinCount(data.dailySpinCount);
-        setShowCongratsPopup(true);
-        setIsSpinning(false);
-      }, 5000);
-
+      if (type === 'wheel') {
+        // Find index of reward in the wheel (we need settings for this)
+        // For now, let's just do a generic rotation
+        const spinTime = 4000;
+        const extraSpins = 5;
+        const newRotation = wheelRotation + (360 * extraSpins) + Math.random() * 360;
+        setWheelRotation(newRotation);
+        
+        setTimeout(() => {
+          setRevealedReward(data.reward);
+          setRevealing(false);
+        }, spinTime);
+      } else if (type === 'box') {
+        setTimeout(() => {
+          setRevealedReward(data.reward);
+          setRevealing(false);
+        }, 1500);
+      } else if (type === 'scratch') {
+        setRevealedReward(data.reward);
+        setRevealing(false);
+        initScratchCard();
+      }
     } catch (err) {
-      console.error("Error spinning wheel:", err);
-      setIsSpinning(false);
+      console.error("Reveal error:", err);
+      setRevealing(false);
     }
   };
 
-  const handleClaimReward = () => {
-    setShowCongratsPopup(false);
-    setIsVerificationPage(true);
-    setTimer(25);
-    setIsTimerCompleted(false);
+  const showMonetagAd = () => {
+    return new Promise<boolean>((resolve) => {
+      const tg = (window as any).Telegram?.WebApp;
+      if (!tg) {
+        console.log("Monetag Ad Simulator: Success");
+        resolve(true);
+        return;
+      }
+
+      const monetagFn = (window as any).show_11210088;
+      if (monetagFn) {
+         monetagFn().then(() => {
+            resolve(true);
+         }).catch((e: any) => {
+            console.error("Monetag Ad Error:", e);
+            alert("Ad failed to load or was closed early. Please try again to claim your reward.");
+            resolve(false);
+         });
+      } else {
+         console.warn("Monetag SDK function not found. Proceeding with claim.");
+         resolve(true); 
+      }
+    });
   };
 
-  const handleClaimBonus = async () => {
-    if (isClaiming || !userId || wonReward === null) return;
-    setIsClaiming(true);
+  const handleClaim = async () => {
+    if (claiming || !userId || !revealedReward) return;
+    
+    // 1. Show Monetag Rewarded Ad
+    const adCompleted = await showMonetagAd();
+    if (!adCompleted) return;
 
+    setClaiming(true);
     try {
       const res = await fetch(`${API_BASE}/api/daily-bonus/claim`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId,
-          rewardAmount: wonReward,
-          remainingSpins,
-          dailySpinCount
+        body: JSON.stringify({ 
+          userId, 
+          type: activeView,
+          adStatus: 'Verified' // In a real scenario, the backend handles this via postback, 
+                             // but we call the claim endpoint to check if postback arrived or credit directly
         })
       });
       const data = await res.json();
+      
       if (res.ok) {
-        setIsClaimedSuccess(true);
+        setClaimSuccess(true);
+        confetti({
+          particleCount: 150,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#6366f1', '#a855f7', '#ec4899']
+        });
+        fetchStatus();
       } else {
-        alert(data.error || "Failed to claim reward");
+        alert(data.error || "Failed to claim reward. Ensure you watched the ad fully.");
       }
     } catch (err) {
       console.error("Claim error:", err);
     } finally {
-      setIsClaiming(false);
+      setClaiming(false);
     }
   };
 
-  const handleCloseWebApp = () => {
-    const tg = (window as any).Telegram?.WebApp;
-    if (tg) {
-      tg.close();
-    } else {
-      window.close();
+  // --- UI Helpers ---
+
+  const initScratchCard = () => {
+    setTimeout(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Fill with gray silver color
+      ctx.fillStyle = '#475569';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Add text pattern
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center';
+      for(let i=0; i<5; i++) {
+        for(let j=0; j<5; j++) {
+          ctx.fillText('SCRATCH', 40 + i*60, 30 + j*50);
+        }
+      }
+
+      setScratchedPercent(0);
+    }, 100);
+  };
+
+  const handleScratch = (e: any) => {
+    const canvas = canvasRef.current;
+    if (!canvas || revealedReward?.claimed || claimSuccess) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
+    const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
+
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath();
+    ctx.arc(x, y, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Check percent
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let transparent = 0;
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      if (imageData.data[i + 3] === 0) transparent++;
     }
+    const percent = (transparent / (canvas.width * canvas.height)) * 100;
+    setScratchedPercent(percent);
+  };
+
+  const formatTime = (seconds: number) => {
+    if (!seconds || isNaN(seconds)) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white font-sans p-6">
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6">
         <Disc className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
-        <p className="text-slate-400">Loading Daily Bonus wheel...</p>
+        <p className="text-slate-400 font-medium">Synchronizing Bonus System...</p>
       </div>
     );
   }
 
-  if (!userId) {
+  if (!userId || !status || !status.dailyBonusEnabled) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white font-sans p-6 text-center">
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
         <AlertTriangle className="w-16 h-16 text-rose-500 mb-4" />
-        <h1 className="text-2xl font-bold mb-2">Access Denied</h1>
+        <h1 className="text-2xl font-bold mb-2">{!userId ? "Access Denied" : "System Maintenance"}</h1>
         <p className="text-slate-400 max-w-sm mb-6">
-          Please open this page directly from the RoyShare Telegram Bot menu to access your daily spins.
+          {!userId ? "Please open this page directly from the RoyShare Telegram Bot menu." : "Daily Bonus system is currently disabled by administrator. Please check back later."}
         </p>
-        <button
-          onClick={handleCloseWebApp}
-          className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 transition rounded-full text-sm font-semibold"
-        >
-          Close
-        </button>
       </div>
     );
   }
 
-  // Render claimed success screen
-  if (isClaimedSuccess) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white font-sans p-6 flex flex-col items-center justify-center text-center">
-        <motion.div
-          initial={{ scale: 0.5, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="bg-slate-900 border border-emerald-500/30 p-8 rounded-3xl max-w-sm w-full shadow-2xl relative overflow-hidden"
-        >
-          {/* Sparkle background effects */}
-          <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-emerald-500 to-teal-500" />
-          
-          <CheckCircle className="w-20 h-20 text-emerald-400 mx-auto mb-6 drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]" />
-          
-          <h1 className="text-2xl font-bold mb-3 text-emerald-300">🎉 Bonus Claimed!</h1>
-          <p className="text-slate-300 text-sm mb-6 leading-relaxed">
-            Your reward of <span className="font-extrabold text-white text-lg">{formatCurrency(wonReward || 0)}</span> has been successfully credited to your RoyShare balance.
-          </p>
-          
-          <div className="bg-slate-950/60 rounded-2xl p-4 mb-6 border border-slate-800 text-left text-xs text-slate-400 space-y-2">
-            <div className="flex justify-between">
-              <span>Status:</span>
-              <span className="font-semibold text-emerald-400">Success</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Remaining Spins:</span>
-              <span className="font-semibold text-white">{remainingSpins} / 3</span>
-            </div>
-          </div>
+  // --- Sub-Views ---
 
-          <div className="space-y-3">
-            {remainingSpins > 0 ? (
-              <button
-                onClick={() => {
-                  setIsVerificationPage(false);
-                  setIsTimerCompleted(false);
-                  setIsClaimedSuccess(false);
-                  setWonReward(null);
-                }}
-                className="w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 transition-all rounded-xl font-bold text-sm shadow-lg shadow-indigo-600/20"
-              >
-                🔄 Spin Again
-              </button>
-            ) : null}
-            
-            <button
-              onClick={handleCloseWebApp}
-              className="w-full py-3 bg-slate-800 hover:bg-slate-700 transition rounded-xl font-semibold text-sm text-slate-300"
-            >
-              🚪 Close Daily Bonus
-            </button>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
-
-  // Render verification page
-  if (isVerificationPage) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white font-sans flex flex-col">
-        {/* Top Header Section with Timer */}
-        <div className="p-4 border-b border-slate-900 bg-slate-900/60 sticky top-0 z-10 flex flex-col items-center">
-          <div className="flex items-center gap-2 mb-1">
-            <Clock className="w-5 h-5 text-indigo-400 animate-pulse" />
-            <span className="text-sm text-slate-400 font-semibold tracking-wide uppercase">Reward Unlock Timer</span>
-          </div>
-          
-          <div className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400 font-mono">
-            {timer > 0 ? `${timer} Seconds` : "✅ Ready to Claim"}
-          </div>
-        </div>
-
-        {/* Content Box containing Ads */}
-        <div className="flex-1 max-w-md mx-auto w-full p-4 space-y-4">
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 shadow-xl">
-            <h2 className="text-center font-semibold text-slate-300 text-sm mb-4 tracking-wider uppercase">
-              🛡️ Sponsor Verification
-            </h2>
-            
-            <p className="text-xs text-slate-400 text-center mb-6">
-              Complete verification to release your reward. Please view the sponsors below while the unlock timer counts down.
-            </p>
-
-            <div className="space-y-5">
-              {/* Native Ad Slot 1 */}
-              <AdRenderer targetPage="Daily Bonus Page"
-                placementKey="Native Slot 1" 
-                fallback={
-                  <div className="bg-slate-950 rounded-xl p-4 border border-indigo-500/20 shadow-md hover:border-indigo-500/30 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 bg-indigo-600/20 rounded-xl flex items-center justify-center text-indigo-400 font-bold border border-indigo-500/30 shrink-0">
-                        RS
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-indigo-400 font-bold tracking-wider uppercase">Ad • Sponsored</span>
-                          <div className="flex text-amber-400">
-                            <Star className="w-3 h-3 fill-current" />
-                            <Star className="w-3 h-3 fill-current" />
-                            <Star className="w-3 h-3 fill-current" />
-                            <Star className="w-3 h-3 fill-current" />
-                            <Star className="w-3 h-3 fill-current" />
-                          </div>
-                        </div>
-                        <h3 className="text-sm font-bold text-white mt-1">RoyShare Fast Downloader</h3>
-                        <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                          Download files up to 5x faster with the official RoyShare client! Fast, free, and secure.
-                        </p>
-                      </div>
-                    </div>
-                    <button className="w-full mt-3 py-2 bg-indigo-600/10 hover:bg-indigo-600/20 transition rounded-lg text-xs font-bold text-indigo-400 border border-indigo-500/20">
-                      ⚡ Install Now
-                    </button>
-                  </div>
-                }
-              />
-
-              {/* Native Ad Slot 2 */}
-              <AdRenderer targetPage="Daily Bonus Page"
-                placementKey="Native Slot 2"
-                fallback={
-                  <div className="bg-slate-950 rounded-xl p-4 border border-purple-500/20 shadow-md hover:border-purple-500/30 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 bg-purple-600/20 rounded-xl flex items-center justify-center text-purple-400 font-bold border border-purple-500/30 shrink-0">
-                        BTC
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-purple-400 font-bold tracking-wider uppercase">Ad • Sponsored</span>
-                          <div className="flex text-amber-400">
-                            <Star className="w-3 h-3 fill-current" />
-                            <Star className="w-3 h-3 fill-current" />
-                            <Star className="w-3 h-3 fill-current" />
-                            <Star className="w-3 h-3 fill-current" />
-                            <Star className="w-3 h-3 fill-current text-slate-700" />
-                          </div>
-                        </div>
-                        <h3 className="text-sm font-bold text-white mt-1">Free Crypto Faucet</h3>
-                        <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                          Stake and earn up to 15% APY on stable USDT. Zero hidden platform fees. Instant claims.
-                        </p>
-                      </div>
-                    </div>
-                    <button className="w-full mt-3 py-2 bg-purple-600/10 hover:bg-purple-600/20 transition rounded-lg text-xs font-bold text-purple-400 border border-purple-500/20">
-                      🎁 Claim Free Crypto
-                    </button>
-                  </div>
-                }
-              />
-
-              {/* Banner Ad Slot 1 */}
-              <AdRenderer targetPage="Daily Bonus Page"
-                placementKey="Banner Slot"
-                fallback={
-                  <div className="bg-gradient-to-r from-slate-950 to-slate-900 rounded-xl p-3 border border-slate-800 text-center">
-                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest block mb-1">Banner Ad Slot 1</span>
-                    <p className="text-xs text-slate-300 font-medium">
-                      🌐 Need cloud hosting? Get 3 months free VPS on signup!
-                    </p>
-                  </div>
-                }
-              />
-
-              {/* Banner Ad Slot 2 */}
-              <AdRenderer targetPage="Daily Bonus Page"
-                placementKey="Secondary Banner"
-                fallback={
-                  <div className="bg-gradient-to-r from-slate-900 to-slate-950 rounded-xl p-3 border border-slate-800 text-center">
-                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest block mb-1">Banner Ad Slot 2</span>
-                    <p className="text-xs text-slate-300 font-medium">
-                      📱 Join the official Telegram news channel for instant updates.
-                    </p>
-                  </div>
-                }
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom Claim Control Bar */}
-        <div className="p-4 bg-slate-900/60 border-t border-slate-900 sticky bottom-0">
-          <div className="max-w-md mx-auto">
-            {isTimerCompleted ? (
-              <div className="space-y-3">
-                <div className="text-center text-sm font-semibold text-emerald-400 flex items-center justify-center gap-1.5">
-                  <ShieldCheck className="w-5 h-5" />
-                  <span>Verification Complete! Reward unlocked.</span>
-                </div>
-                <button
-                  onClick={handleClaimBonus}
-                  disabled={isClaiming}
-                  className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 active:scale-[0.98] transition-all rounded-2xl font-bold text-md text-white shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
-                >
-                  {isClaiming ? (
-                    <>
-                      <RotateCw className="w-5 h-5 animate-spin" />
-                      <span>Crediting Reward...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="w-5 h-5" />
-                      <span>✅ Claim Bonus</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            ) : (
-              <button
-                disabled
-                className="w-full py-4 bg-slate-800 rounded-2xl font-bold text-md text-slate-500 flex items-center justify-center gap-2 cursor-not-allowed"
-              >
-                <Clock className="w-5 h-5 animate-spin" />
-                <span>Waiting for Timer ({timer}s)</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Render primary wheel screen
-  return (
-    <div className="min-h-screen bg-slate-950 text-white font-sans flex flex-col justify-between">
-      {/* Top Header Section */}
-      <div className="p-4 border-b border-slate-900 bg-slate-900/60 sticky top-0 z-10">
-        <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 bg-indigo-600/20 rounded-lg text-indigo-400">
-              <Gift className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-base font-bold text-white tracking-wide">🎁 RoyShare Daily Bonus</h1>
-              <p className="text-xs text-slate-400">Wheel of Fortune</p>
-            </div>
-          </div>
-
-          <button
-            onClick={handleCloseWebApp}
-            className="p-2 bg-slate-900 hover:bg-slate-800 transition rounded-xl text-xs font-semibold text-slate-300"
-          >
-            Close
-          </button>
-        </div>
+  const SelectionView = () => (
+    <div className="space-y-6">
+      <div className="text-center space-y-2">
+        <h1 className="text-2xl font-black text-white tracking-tight">🎁 Daily Bonus</h1>
+        <p className="text-slate-400 text-sm">Choose your luck and win real rewards!</p>
       </div>
 
-      {/* Main Wheel Viewport */}
-      <div className="flex-1 max-w-md mx-auto w-full p-4 flex flex-col justify-center items-center space-y-6">
-        {/* Top Ad Banner */}
-        <AdRenderer targetPage="Daily Bonus Page"
-          placementKey="Header Banner"
-          fallback={
-            <div className="w-full bg-gradient-to-r from-slate-900 to-indigo-950/40 rounded-xl p-3 border border-indigo-950/60 shadow text-center relative overflow-hidden">
-              <div className="absolute top-0 right-0 bg-indigo-600/30 text-[9px] font-bold text-indigo-300 px-2 py-0.5 rounded-bl">AD</div>
-              <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider block mb-0.5">Header Banner Area</span>
-              <p className="text-xs font-semibold text-white">
-                🚀 Upgrade to premium to enjoy unlimited bandwidth & zero banner ads!
-              </p>
-            </div>
-          }
-        />
-
-        {/* Spins Remaining Count */}
-        <div className="bg-slate-900/80 border border-slate-800/60 px-5 py-2.5 rounded-full text-sm font-semibold tracking-wide flex items-center gap-2 text-indigo-300">
-          <span>🎡 Free Spins Remaining Today:</span>
-          <span className="text-white font-bold text-base px-2 py-0.5 bg-indigo-600/40 rounded-full font-mono">
-            {remainingSpins} / 3
-          </span>
-        </div>
-
-        {remainingSpins > 0 ? (
-          /* Wheel spin UI */
-          <div className="flex flex-col items-center space-y-8 py-4">
-            <div className="relative">
-              {/* Pointer */}
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[20px] border-t-rose-500 z-10 drop-shadow-[0_4px_6px_rgba(0,0,0,0.4)]" />
-
-              {/* Rotatable wheel */}
-              <div
-                className="relative w-72 h-72 rounded-full border-[8px] border-indigo-600 shadow-2xl overflow-hidden"
-                style={{
-                  transform: `rotate(${rotation}deg)`,
-                  transition: isSpinning ? "transform 5000ms cubic-bezier(0.25, 0.1, 0.25, 1)" : "none",
-                  background: 'conic-gradient(#4f46e5 0deg 60deg, #7c3aed 60deg 120deg, #9333ea 120deg 180deg, #c084fc 180deg 240deg, #2563eb 240deg 300deg, #3b82f6 300deg 360deg)'
-                }}
-              >
-                {REWARDS.map((reward, i) => (
-                  <div
-                    key={i}
-                    className="absolute top-0 left-0 w-full h-full flex items-start justify-center"
-                    style={{
-                      transform: `rotate(${i * 60 + 30}deg)`,
-                      transformOrigin: '50% 50%',
-                    }}
-                  >
-                    <span className="mt-10 font-black text-white text-[11px] select-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] tracking-wide">
-                      {formatCurrency(reward.amount)}
-                    </span>
-                  </div>
-                ))}
-                
-                {/* Central Circle Button Cap */}
-                <div className="absolute inset-0 m-auto w-14 h-14 rounded-full bg-white border-[5px] border-indigo-600 shadow-xl flex items-center justify-center">
-                  <div className="w-5 h-5 rounded-full bg-indigo-600 animate-pulse" />
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={handleSpin}
-              disabled={isSpinning || remainingSpins <= 0}
-              className={`w-48 py-4 rounded-2xl font-black text-lg tracking-wider uppercase transition shadow-xl ${
-                isSpinning
-                  ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                  : "bg-gradient-to-r from-rose-500 to-orange-500 hover:from-rose-600 hover:to-orange-600 active:scale-95 text-white shadow-rose-500/10"
+      <div className="grid gap-4">
+        {[
+          { id: 'wheel', name: 'Wheel Spin', icon: Disc, color: 'from-indigo-600 to-blue-600', emoji: '🎡' },
+          { id: 'box', name: 'Mystery Box', icon: Package, color: 'from-purple-600 to-pink-600', emoji: '📦' },
+          { id: 'scratch', name: 'Scratch Card', icon: CreditCard, color: 'from-amber-600 to-orange-600', emoji: '🎫' }
+        ].map((mod) => {
+          const modStatus = status?.modules?.[mod.id as keyof typeof status.modules];
+          const isLocked = !modStatus?.enabled || modStatus?.remaining === 0 || modStatus?.isOnCooldown;
+          
+          return (
+            <motion.button
+              key={mod.id}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => !isLocked && setActiveView(mod.id as any)}
+              className={`relative overflow-hidden p-5 rounded-3xl border text-left transition-all ${
+                isLocked ? 'bg-slate-900/50 border-slate-800 opacity-60' : 'bg-slate-900 border-slate-800 hover:border-slate-700 shadow-xl'
               }`}
             >
-              {isSpinning ? "Spinning..." : "SPIN WHEEL"}
-            </button>
-          </div>
-        ) : (
-          /* Out of spins screen block */
-          <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl w-full text-center space-y-4">
-            <div className="text-4xl">❌</div>
-            <h2 className="text-xl font-bold text-slate-200">No Spins Remaining</h2>
-            <p className="text-sm text-slate-400 leading-relaxed">
-              Come back tomorrow for more free spins. Daily limit resets every 24 hours.
-            </p>
-            <div className="pt-2">
-              <button
-                onClick={handleCloseWebApp}
-                className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-sm font-semibold text-slate-300"
-              >
-                🚪 Exit Wheel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Bottom Ad Banner */}
-        <AdRenderer targetPage="Daily Bonus Page"
-          placementKey="Footer Banner"
-          fallback={
-            <div className="w-full bg-gradient-to-r from-slate-900 to-purple-950/40 rounded-xl p-3 border border-purple-950/60 shadow text-center relative overflow-hidden">
-              <div className="absolute top-0 right-0 bg-purple-600/30 text-[9px] font-bold text-purple-300 px-2 py-0.5 rounded-bl">AD</div>
-              <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider block mb-0.5">Footer Banner Area</span>
-              <p className="text-xs font-semibold text-white">
-                👥 Invite your friends and earn up to 10% commission on all files they upload!
-              </p>
-            </div>
-          }
-        />
-      </div>
-
-      {/* Congrats Popup Overlay */}
-      <AnimatePresence>
-        {showCongratsPopup && wonReward !== null && (
-          <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50">
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              className="bg-slate-900 border border-indigo-500/30 p-8 rounded-3xl max-w-sm w-full shadow-2xl text-center relative overflow-hidden"
-            >
-              {/* Top ambient color strip */}
-              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-rose-500" />
-              
-              <div className="text-5xl mb-4">🎉</div>
-              
-              <h2 className="text-2xl font-black text-white mb-2">Congratulations</h2>
-              <p className="text-slate-400 text-sm mb-6">You Won:</p>
-              
-              <div className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-amber-400 to-orange-400 mb-8 font-mono">
-                {formatCurrency(wonReward)}
+              <div className={`absolute top-0 left-0 w-2 h-full bg-gradient-to-b ${mod.color}`} />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`p-3 rounded-2xl bg-gradient-to-br ${mod.color} text-white shadow-lg`}>
+                    <mod.icon className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-white flex items-center gap-2">
+                      {mod.name} {mod.emoji}
+                    </h3>
+                    <p className="text-xs text-slate-400 font-medium">
+                      {!status ? 'Loading...' : modStatus?.isOnCooldown ? `Cooldown: ${formatTime(modStatus.cooldownRemaining)}` : `${modStatus?.remaining || 0} of ${modStatus?.dailyLimit || 0} available today`}
+                    </p>
+                  </div>
+                </div>
+                <div className="bg-slate-950 p-2 rounded-xl border border-slate-800">
+                  <ChevronRight className="w-4 h-4 text-slate-500" />
+                </div>
               </div>
               
-              <button
-                onClick={handleClaimReward}
-                className="w-full py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 active:scale-[0.98] transition-all rounded-2xl font-bold text-base text-white shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2"
-              >
-                <span>🎁 Claim Reward</span>
-              </button>
-            </motion.div>
+              {/* Progress Bar */}
+              <div className="mt-4 h-1.5 bg-slate-950 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full bg-gradient-to-r ${mod.color} transition-all duration-500`}
+                  style={{ width: `${Math.min(100, Math.max(0, ((Number(modStatus?.usageCount) || 0) / (Number(modStatus?.dailyLimit) || 1)) * 100))}%` }}
+                />
+              </div>
+            </motion.button>
+          );
+        })}
+      </div>
+
+      <div className="bg-indigo-500/5 border border-indigo-500/10 p-4 rounded-2xl flex items-center gap-3">
+        <Trophy className="w-8 h-8 text-indigo-400 shrink-0" />
+        <div>
+          <p className="text-xs font-bold text-white uppercase tracking-wider">Pro Tip</p>
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            All rewards are credited instantly. Complete every bonus to maximize your daily earnings!
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  const WheelView = () => (
+    <div className="flex flex-col items-center space-y-8 py-4">
+      <div className="relative">
+        {/* Pointer */}
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[20px] border-t-rose-500 z-10 drop-shadow-[0_4px_6px_rgba(0,0,0,0.4)]" />
+        
+        {/* Visual Wheel */}
+        <div
+          className="relative w-72 h-72 rounded-full border-[8px] border-indigo-600 shadow-[0_0_50px_rgba(79,70,229,0.2)] overflow-hidden transition-transform duration-[4000ms] cubic-bezier(0.25, 0.1, 0.25, 1)"
+          style={{ transform: `rotate(${wheelRotation}deg)` }}
+        >
+          {/* Conic background pattern */}
+          <div className="absolute inset-0" style={{ background: 'conic-gradient(#4f46e5 0deg 60deg, #6366f1 60deg 120deg, #7c3aed 120deg 180deg, #9333ea 180deg 240deg, #4f46e5 240deg 300deg, #6366f1 300deg 360deg)' }} />
+          
+          {/* Values on wheel */}
+          {[1,2,3,4,5,6].map((v, i) => (
+             <div key={i} className="absolute top-0 left-0 w-full h-full flex items-start justify-center" style={{ transform: `rotate(${i * 60 + 30}deg)` }}>
+                <span className="mt-8 font-black text-white text-xs drop-shadow-md">₹?</span>
+             </div>
+          ))}
+
+          {/* Center */}
+          <div className="absolute inset-0 m-auto w-12 h-12 bg-white rounded-full border-4 border-indigo-600 shadow-xl z-10 flex items-center justify-center">
+             <div className="w-4 h-4 bg-indigo-600 rounded-full animate-pulse" />
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      </div>
+
+      <button
+        onClick={() => handleReveal('wheel')}
+        disabled={revealing || !!revealedReward}
+        className={`w-56 py-4 rounded-2xl font-black text-lg uppercase tracking-wider transition shadow-xl ${
+          revealing || !!revealedReward ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/20 active:scale-95'
+        }`}
+      >
+        {revealing ? 'Spinning...' : 'Spin Wheel'}
+      </button>
+    </div>
+  );
+
+  const BoxView = () => (
+    <div className="flex flex-col items-center space-y-12 py-10">
+      <div className="grid grid-cols-3 gap-4 w-full">
+        {[0, 1, 2].map((i) => (
+          <motion.button
+            key={i}
+            whileHover={{ y: -5 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => !revealedReward && handleReveal('box')}
+            disabled={revealing || !!revealedReward}
+            className={`aspect-square rounded-3xl border flex flex-col items-center justify-center gap-2 transition-all ${
+              revealing && i === 1 ? 'animate-bounce' : ''
+            } ${
+              revealedReward ? (i === 1 ? 'bg-indigo-600/20 border-indigo-500' : 'bg-slate-900 border-slate-800 opacity-40') : 'bg-slate-900 border-slate-800 hover:border-slate-600 shadow-xl'
+            }`}
+          >
+            <Package className={`w-10 h-10 ${revealing && i === 1 ? 'text-indigo-400' : 'text-slate-500'}`} />
+            <span className="text-[10px] font-black text-slate-500 uppercase">Box {i+1}</span>
+          </motion.button>
+        ))}
+      </div>
+      <p className="text-slate-400 text-xs font-medium text-center">Tap any box to reveal your mystery reward!</p>
+    </div>
+  );
+
+  const ScratchView = () => (
+    <div className="flex flex-col items-center space-y-8 py-4">
+      <div className="relative w-full max-w-[280px] aspect-[4/3] bg-slate-900 rounded-3xl border-4 border-amber-600 shadow-2xl overflow-hidden group">
+         {/* Underlying Reward */}
+         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950">
+            <Trophy className="w-12 h-12 text-amber-500 mb-2 opacity-20" />
+            <span className="text-3xl font-black text-white">
+               {revealedReward ? `₹${revealedReward.amount}` : '₹??'}
+            </span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase mt-2 tracking-widest">Mystery Reward</span>
+         </div>
+
+         {/* Scratch Layer */}
+         <canvas
+            ref={canvasRef}
+            width={280}
+            height={210}
+            className="absolute inset-0 cursor-crosshair touch-none"
+            onMouseMove={handleScratch}
+            onTouchMove={handleScratch}
+         />
+
+         {scratchedPercent > 50 && !revealedReward?.claimed && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-transparent pointer-events-none flex items-center justify-center">
+                <div className="bg-emerald-500 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase">Cleared!</div>
+            </motion.div>
+         )}
+      </div>
+      <p className="text-slate-400 text-xs font-medium">Scratch at least 50% of the area to reveal reward.</p>
+      
+      {!revealedReward && (
+        <button 
+          onClick={() => handleReveal('scratch')} 
+          className="w-56 py-3.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl shadow-amber-900/20"
+        >
+          Get Scratch Card
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-[#020617] text-white font-sans flex flex-col">
+      {/* Header */}
+      <header className="p-5 border-b border-slate-900 bg-slate-950/50 backdrop-blur-md sticky top-0 z-40">
+        <div className="max-w-md mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {activeView !== 'selection' ? (
+              <button onClick={() => { setActiveView('selection'); setRevealedReward(null); setClaimSuccess(false); }} className="p-2 bg-slate-900 rounded-xl border border-slate-800 text-slate-400">
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            ) : (
+              <div className="p-2 bg-indigo-600/20 rounded-xl border border-indigo-500/20 text-indigo-400">
+                <Gift className="w-5 h-5" />
+              </div>
+            )}
+            <div>
+              <h1 className="text-sm font-black tracking-wide uppercase">RoyShare Bonus</h1>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                {activeView === 'selection' ? 'Menu' : activeView.toUpperCase()}
+              </p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 rounded-full border border-slate-800">
+            <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" />
+            <span className="text-xs font-black text-white">Daily Rewards</span>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 max-w-md mx-auto w-full p-6">
+        <AnimatePresence mode="wait">
+          {activeView === 'selection' && (
+            <motion.div key="selection" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+              <SelectionView />
+            </motion.div>
+          )}
+          {activeView === 'wheel' && (
+            <motion.div key="wheel" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}>
+              <WheelView />
+            </motion.div>
+          )}
+          {activeView === 'box' && (
+            <motion.div key="box" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}>
+              <BoxView />
+            </motion.div>
+          )}
+          {activeView === 'scratch' && (
+            <motion.div key="scratch" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}>
+              <ScratchView />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Claim Reward Popup */}
+        <AnimatePresence>
+          {revealedReward && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="mt-10 bg-slate-900 border border-indigo-500/30 p-6 rounded-3xl text-center relative overflow-hidden shadow-2xl"
+            >
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
+              
+              {!claimSuccess ? (
+                <>
+                  <h2 className="text-xl font-black text-white mb-1">🎉 You Won!</h2>
+                  <p className="text-slate-400 text-xs mb-4">Complete verification to claim reward</p>
+                  
+                  <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 mb-6">
+                    <span className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
+                      ₹{Number(revealedReward.amount).toFixed(2)}
+                    </span>
+                  </div>
+                  
+                  <button
+                    onClick={handleClaim}
+                    disabled={claiming}
+                    className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-2xl font-black uppercase tracking-wider active:scale-[0.98] transition-all flex items-center justify-center gap-3 shadow-lg shadow-emerald-900/20"
+                  >
+                    {claiming ? (
+                      <>
+                        <RotateCw className="w-5 h-5 animate-spin" />
+                        <span>Verifying...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-5 h-5" />
+                        <span>Claim Reward</span>
+                      </>
+                    )}
+                  </button>
+                  <p className="mt-3 text-[10px] text-slate-500 font-medium">Watch a short ad to credit your balance</p>
+                </>
+              ) : (
+                <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} className="py-4">
+                  <CheckCircle className="w-16 h-16 text-emerald-400 mx-auto mb-4" />
+                  <h2 className="text-2xl font-black text-white mb-2">Claimed!</h2>
+                  <p className="text-slate-400 text-sm mb-6">Reward added to your wallet successfully.</p>
+                  <button 
+                    onClick={() => { setActiveView('selection'); setRevealedReward(null); setClaimSuccess(false); }} 
+                    className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold text-xs uppercase"
+                  >
+                    Continue
+                  </button>
+                </motion.div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      {/* Footer Ad Placeholder */}
+      <footer className="p-4 text-center">
+         <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-3 inline-block">
+            <span className="text-[9px] font-bold text-slate-600 uppercase tracking-[0.2em]">Sponsor Ad Space</span>
+         </div>
+      </footer>
     </div>
   );
 }

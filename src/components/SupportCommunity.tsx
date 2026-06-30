@@ -24,7 +24,7 @@ const supportCards = [
   {
     id: 1,
     title: "Telegram Support",
-    description: "Get instant help from our official Telegram support.",
+    description: "Get instant help from our official Telegram support bot.",
     buttonText: "Open Telegram",
     url: "https://t.me/Roysharearn_bot",
     icon: Send,
@@ -50,24 +50,6 @@ const supportCards = [
   },
   {
     id: 4,
-    title: "Bug Report",
-    description: "Found a bug or issue? Report it directly to our team.",
-    buttonText: "Report Bug",
-    url: "https://t.me/Roysharearn_bot",
-    icon: Bug,
-    color: "rose"
-  },
-  {
-    id: 5,
-    title: "Feature Request",
-    description: "Suggest new features to improve RoyShare.",
-    buttonText: "Send Suggestion",
-    url: "https://t.me/royshare_official",
-    icon: Lightbulb,
-    color: "amber"
-  },
-  {
-    id: 6,
     title: "System Status",
     description: "Check if all RoyShare services are online.",
     status: "🟢 All Systems Operational",
@@ -75,6 +57,15 @@ const supportCards = [
     url: "/status",
     icon: Activity,
     color: "cyan"
+  },
+  {
+    id: 5,
+    title: "Contact Support",
+    description: "Need help? Reach out to our official support team.",
+    buttonText: "Contact Support",
+    url: "https://t.me/Roysharearn_bot",
+    icon: MessageSquare,
+    color: "indigo"
   }
 ];
 
@@ -134,7 +125,7 @@ SupportCard.displayName = "SupportCard";
 
 const SupportCommunity = ({ featuredOnly = false }: { featuredOnly?: boolean }) => {
   const displayCards = featuredOnly 
-    ? supportCards.filter(c => [1, 2, 3, 6].includes(c.id))
+    ? supportCards.filter(c => [1, 2, 3, 4].includes(c.id))
     : supportCards;
 
   return (

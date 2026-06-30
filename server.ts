@@ -9,7 +9,7 @@ import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 import { createServer as createViteServer } from "vite";
 import { getDb } from "./src/lib/firebase";
-import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment } from "firebase/firestore";
 import { REWARD_TASKS } from "./src/lib/tasks";
 import { GoogleGenAI } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./src/lib/gemini";
@@ -339,15 +339,120 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
   app.post("/api/admin/withdrawals/:id/reject", async (req, res) => {
     try {
       const { id } = req.params;
-      const { rejectReason } = req.body;
+      const { rejectReason, rejectionType } = req.body;
       const ref = doc(db, "withdrawals", id);
       const snap = await getDoc(ref);
       if (!snap.exists()) return res.status(404).json({ error: "Not found" });
       
-      await setDoc(ref, { status: "Rejected", rejectReason, adminRemark: rejectReason }, { merge: true });
-      
-      const data = snap.data();
-      await sendTgMessage(data.userId, `🔴 <b>Withdrawal Rejected</b>\n\nReason:\n${rejectReason}`);
+      const wData = snap.data();
+      if (wData.status === "Rejected" || wData.status === "Cancelled") {
+          return res.status(400).json({ error: "Withdrawal already processed" });
+      }
+
+      // Fetch settings for tax
+      const settingsSnap = await getDoc(doc(db, "settings", "system"));
+      const settings = settingsSnap.data();
+      const taxSettings = settings?.withdrawalTaxSettings || {
+        upiTax: 5,
+        bankTax: 10,
+        usdtTax: 15
+      };
+
+      let taxPercent = 0;
+      let finalReason = rejectReason || "Rejected by administrator";
+
+      if (rejectionType === "upi") {
+          taxPercent = Number(taxSettings.upiTax || 5);
+      } else if (rejectionType === "bank") {
+          taxPercent = Number(taxSettings.bankTax || 10);
+      } else if (rejectionType === "usdt") {
+          taxPercent = Number(taxSettings.usdtTax || 15);
+      } else {
+          taxPercent = 0;
+      }
+
+      const requestedAmount = Number(wData.amount || 0);
+      const taxAmount = (requestedAmount * taxPercent) / 100;
+      const refundAmount = requestedAmount - taxAmount;
+
+      // Update withdrawal doc
+      await setDoc(ref, { 
+          status: "Rejected", 
+          rejectReason: finalReason, 
+          adminRemark: finalReason,
+          taxPercent,
+          taxAmount,
+          refundAmount,
+          rejectionType: rejectionType || "other",
+          rejectedAt: new Date().toISOString()
+      }, { merge: true });
+
+      // Update user balance and pendingWithdrawals
+      const userRef = doc(db, "users", wData.userId);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+          const userData = userSnap.data();
+          
+          // Important: pendingWithdrawals is in INR
+          const isUsdt = (wData.method || "").toUpperCase().includes("USDT") || !!wData.walletAddress;
+          const USDT_RATE = 90; 
+          
+          const inrRequestedAmount = isUsdt ? (requestedAmount * USDT_RATE) : requestedAmount;
+          const inrTaxAmount = isUsdt ? (taxAmount * USDT_RATE) : taxAmount;
+          const inrRefundAmount = isUsdt ? (refundAmount * USDT_RATE) : refundAmount;
+
+          const currentPending = Number(userData.pendingWithdrawals || 0);
+          const currentBalance = Number(userData.balance || 0);
+          
+          const newPending = Math.max(0, currentPending - inrRequestedAmount);
+          const newBalance = currentBalance - inrTaxAmount; 
+          
+          // Recalculate availableBalance
+          const fileEarnings = userData?.fileEarnings || 0;
+          const linkEarnings = userData?.linkEarnings || 0;
+          const referralEarnings = userData?.referralEarnings || 0;
+          const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : (userData?.bonus || 0);
+          const rewardBalance = userData?.rewardBalance || 0;
+          const withdrawnAmount = userData?.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData?.totalWithdrawn || 0);
+          
+          const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + newBalance - withdrawnAmount - newPending;
+
+          await setDoc(userRef, { 
+              pendingWithdrawals: newPending, 
+              balance: newBalance,
+              availableBalance,
+              updatedAt: new Date().toISOString()
+          }, { merge: true });
+
+          // Transaction History Record
+          await addDoc(collection(db, "transactions"), {
+              userId: wData.userId,
+              type: "Withdrawal Rejected",
+              requestedAmount: requestedAmount,
+              taxPercent: taxPercent,
+              taxAmount: taxAmount,
+              refundAmount: refundAmount,
+              reason: finalReason,
+              method: wData.method,
+              currency: isUsdt ? "USDT" : "INR",
+              timestamp: new Date().toISOString(),
+              withdrawalId: id
+          });
+
+          // Notify User via Telegram
+          const currencySymbol = isUsdt ? "USDT" : "₹";
+          const tgMessage = `❌ <b>Withdrawal Rejected</b>\n\n` +
+                          `<b>Reason:</b>\n${finalReason}\n\n` +
+                          `<b>Requested Amount:</b>\n${currencySymbol}${requestedAmount.toFixed(2)}\n\n` +
+                          `<b>Tax Applied:</b>\n${taxPercent}%\n\n` +
+                          `<b>Tax Deducted:</b>\n${currencySymbol}${taxAmount.toFixed(2)}\n\n` +
+                          `<b>Refunded Amount:</b>\n${currencySymbol}${refundAmount.toFixed(2)}\n\n` +
+                          `The refund has been added back to your Available Balance.\n\n` +
+                          `Please update your payment details before requesting another withdrawal.`;
+          
+          await sendTgMessage(wData.userId, tgMessage);
+      }
+
       res.json({ success: true });
     } catch (e: any) {
       console.error("Admin reject error:", e);
@@ -1406,17 +1511,10 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const docSnap = await getDoc(docRef);
       const defaultSettings = {
         dailyBonusEnabled: true,
-        freeSpinsPerDay: 1,
         resetTime: "00:00",
-        claimTimer: 0,
-        rewardList: [
-          { id: "1", amount: "0.10", probability: "10", status: "Active" },
-          { id: "2", amount: "0.20", probability: "20", status: "Active" },
-          { id: "3", amount: "0.50", probability: "30", status: "Active" },
-          { id: "4", amount: "1.00", probability: "20", status: "Active" },
-          { id: "5", amount: "2.00", probability: "10", status: "Active" },
-          { id: "6", amount: "5.00", probability: "10", status: "Active" },
-        ],
+        wheel: { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] },
+        box: { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] },
+        scratch: { enabled: true, dailyLimit: 3, cooldown: 0, rewards: [] },
         totalSpins: 0,
         totalRewardsDistributed: 0,
       };
@@ -1429,6 +1527,36 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     } catch (e: any) {
       console.error("Admin daily bonus settings fetch error:", e);
       res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.get("/api/admin/daily-bonus/stats", async (req, res) => {
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const statsSnap = await getDoc(doc(db, "daily_bonus_stats", today));
+      const todayStats = statsSnap.exists() ? statsSnap.data() : {};
+      
+      const globalSnap = await getDoc(doc(db, "settings", "daily_bonus"));
+      const globalStats = globalSnap.exists() ? globalSnap.data() : {};
+      
+      res.json({
+        today: {
+          wheelSpins: todayStats.totalSpins || 0,
+          boxOpens: todayStats.totalOpens || 0,
+          scratchClaims: todayStats.totalScratches || 0,
+          uniqueUsers: todayStats.uniqueUsers || 0,
+          totalClaims: todayStats.totalClaims || 0,
+          totalRewards: todayStats.totalRewards || 0
+        },
+        global: {
+          totalSpins: globalStats.totalSpins || 0,
+          totalRewardsDistributed: globalStats.totalRewardsDistributed || 0,
+          totalClaims: globalStats.totalClaims || 0
+        }
+      });
+    } catch (e) {
+      console.error("Error in /api/admin/daily-bonus/stats:", e);
+      res.status(500).json({ error: "Failed to fetch stats" });
     }
   });
 
@@ -1870,6 +1998,11 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
           bonusSettings: {},
           notificationSettings: {},
           websiteSettings: {},
+          withdrawalTaxSettings: {
+            upiTax: 5,
+            bankTax: 10,
+            usdtTax: 15
+          },
           urlShortener: {
             enabled: false,
             provider: "GPLinks",
@@ -3471,22 +3604,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       const settings = settingsSnap.data();
       const enabled = settings.dailyBonusEnabled ?? true;
-      const freeSpinsPerDay = Number(settings.freeSpinsPerDay ?? 1);
-      const resetTime = settings.resetTime ?? "00:00";
-      const claimTimer = Number(settings.claimTimer ?? 0);
-      const rewardList = settings.rewardList ?? [];
-
-      console.log("================= DAILY BONUS STATUS TRACE =================");
-      console.log(`[DB TRACE] Loaded settings dynamically from Firestore for user ${userId}:`);
-      console.log(` - enabled: ${enabled}`);
-      console.log(` - freeSpinsPerDay: ${freeSpinsPerDay}`);
-      console.log(` - resetTime: ${resetTime}`);
-      console.log(` - claimTimer: ${claimTimer}s`);
-      console.log(` - rewardList: ${JSON.stringify(rewardList)}`);
+      
+      // Default modular settings
+      const wheelConfig = settings.wheel || { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] };
+      const boxConfig = settings.box || { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] };
+      const scratchConfig = settings.scratch || { enabled: true, dailyLimit: 3, cooldown: 0, rewards: [] };
 
       if (!enabled) {
-        console.log(`[DB TRACE] Daily Bonus is disabled globally.`);
-        console.log("============================================================");
         return res.json({ enabled: false, message: "Daily Bonus is currently disabled by administrator." });
       }
 
@@ -3498,107 +3622,84 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const userSnap = await getDoc(userDocRef);
       const currency = userSnap.exists() ? (userSnap.data()?.currency || "INR") : "INR";
 
-      // Reset Time in IST helper
-      const getMostRecentResetTimeInIST = (resetTimeStr: string): Date => {
-        const [hours, minutes] = resetTimeStr.split(":").map(Number);
-        const now = new Date();
-        const formatter = new Intl.DateTimeFormat("en-US", {
-          timeZone: "Asia/Kolkata",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        });
-        const parts = formatter.format(now).split("/"); // MM/DD/YYYY
-        const istMonth = parts[0];
-        const istDay = parts[1];
-        const istYear = parts[2];
-
-        const isoStr = `${istYear}-${istMonth}-${istDay}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00+05:30`;
-        const todayReset = new Date(isoStr);
-
-        if (now.getTime() >= todayReset.getTime()) {
-          return todayReset;
-        } else {
-          return new Date(todayReset.getTime() - 24 * 60 * 60 * 1000);
-        }
+      // Reset Time in IST helper (simplified for now to 00:00)
+      const resetTime = settings.resetTime || "00:00";
+      
+      let stateData: any = null;
+      const defaultState = {
+        userId,
+        lastResetDate: todayDateStr,
+        wheel: { count: 0, lastTime: null },
+        box: { count: 0, lastTime: null },
+        scratch: { count: 0, lastTime: null },
+        pendingRewards: {}
       };
 
-      const resetTimeIST = getMostRecentResetTimeInIST(resetTime);
-      console.log(`[DB TRACE] Calculated Most Recent Reset Time (IST): ${resetTimeIST.toISOString()}`);
-
-      let stateData: any = null;
-      let needsReset = false;
-
       if (!stateSnap.exists()) {
-        console.log(`[DB TRACE] No state document found for user: ${userId}. Creating initial state with ${freeSpinsPerDay} spins.`);
-        const initialState = {
-          userId,
-          remainingSpins: freeSpinsPerDay,
-          dailySpinCount: 0,
-          lastSpinDate: todayDateStr,
-          lastSpinTime: null
-        };
-        await setDoc(stateDocRef, initialState);
-        stateData = initialState;
+        await setDoc(stateDocRef, defaultState);
+        stateData = defaultState;
       } else {
         stateData = stateSnap.data();
-        console.log(`[DB TRACE] Existing state loaded for user: ${userId}:`);
-        console.log(` - Remaining Spins: ${stateData.remainingSpins}`);
-        console.log(` - Daily Spin Count: ${stateData.dailySpinCount}`);
-        console.log(` - Last Spin Date: ${stateData.lastSpinDate}`);
-        console.log(` - Last Spin Time: ${stateData.lastSpinTime}`);
-
-        // Evaluate reset condition
-        if (!stateData.lastSpinTime) {
-          if (stateData.lastSpinDate !== todayDateStr) {
-            needsReset = true;
-          }
-        } else {
-          const lastSpinTime = new Date(stateData.lastSpinTime);
-          if (lastSpinTime.getTime() < resetTimeIST.getTime()) {
-            needsReset = true;
-          }
-        }
-
-        console.log(`[DB TRACE] Daily Reset Evaluation: Needs Reset = ${needsReset}`);
-
-        if (needsReset) {
-          console.log(`[DB TRACE] Triggering daily reset. Resetting spins to config value: ${freeSpinsPerDay}.`);
-          const resetState = {
-            userId,
-            remainingSpins: freeSpinsPerDay,
-            dailySpinCount: 0,
-            lastSpinDate: todayDateStr,
-            lastSpinTime: stateData.lastSpinTime || null
-          };
-          await setDoc(stateDocRef, resetState, { merge: true });
-          stateData = resetState;
+        // Check for daily reset
+        if (stateData.lastResetDate !== todayDateStr) {
+          stateData = { ...defaultState, pendingRewards: stateData.pendingRewards || {} };
+          await setDoc(stateDocRef, stateData);
         }
       }
 
-      const finalRemainingSpins = stateData.remainingSpins ?? freeSpinsPerDay;
-      const finalDailySpinCount = stateData.dailySpinCount ?? 0;
+      // Update Unique Users Statistic
+      try {
+        const today = new Date().toISOString().split("T")[0];
+        const statsRef = doc(db, "daily_bonus_stats", today);
+        const statsSnap = await getDoc(statsRef);
+        
+        if (!statsSnap.exists()) {
+          await setDoc(statsRef, { date: today, uniqueUsers: 1, totalClaims: 0, totalRewards: 0 });
+        } else {
+          // Check if this user was already counted today (we can use a separate collection for this or just rely on the first status call)
+          // For simplicity, let's track unique users by checking a 'visitedUsers' array or similar, but for high traffic it's better to use a subcollection.
+          const userVisitRef = doc(db, "daily_bonus_stats", `${today}_visits_${userId}`);
+          const visitSnap = await getDoc(userVisitRef);
+          if (!visitSnap.exists()) {
+            await setDoc(userVisitRef, { visited: true });
+            await setDoc(statsRef, { uniqueUsers: increment(1) }, { merge: true });
+          }
+        }
+      } catch (statErr) {
+        console.error("Error updating unique users stat:", statErr);
+      }
 
-      console.log(`[DB TRACE] Final values actually used for user status response:`);
-      console.log(` - Remaining Spins: ${finalRemainingSpins}`);
-      console.log(` - Daily Spin Count: ${finalDailySpinCount}`);
-      console.log("============================================================");
+      const computeModuleStatus = (config: any, state: any) => {
+        const limit = config?.dailyLimit || 0;
+        const count = state?.count || 0;
+        const lastTime = state?.lastTime ? new Date(state.lastTime).getTime() : 0;
+        const cooldownMs = (config?.cooldown || 0) * 60 * 1000;
+        const now = Date.now();
+        const nextAvailable = lastTime + cooldownMs;
+        const isOnCooldown = now < nextAvailable;
+        
+        return {
+          enabled: config?.enabled ?? false,
+          dailyLimit: limit,
+          usageCount: count,
+          remaining: Math.max(0, limit - count),
+          isOnCooldown,
+          cooldownRemaining: isOnCooldown ? Math.ceil((nextAvailable - now) / 1000) : 0,
+          lastClaimAt: state?.lastTime || null,
+          nextAvailableAt: isOnCooldown ? new Date(nextAvailable).toISOString() : null,
+          rewards: config?.rewards || []
+        };
+      };
 
       return res.json({
-        enabled: true,
-        userId,
-        remainingSpins: finalRemainingSpins,
-        dailySpinCount: finalDailySpinCount,
-        lastSpinDate: stateData.lastSpinDate,
-        lastSpinTime: stateData.lastSpinTime || null,
-        currency,
-        settings: {
-          dailyBonusEnabled: enabled,
-          freeSpinsPerDay,
-          resetTime,
-          claimTimer,
-          rewardList
-        }
+        success: true,
+        dailyBonusEnabled: enabled,
+        modules: {
+          wheel: computeModuleStatus(wheelConfig, stateData.wheel),
+          box: computeModuleStatus(boxConfig, stateData.box),
+          scratch: computeModuleStatus(scratchConfig, stateData.scratch)
+        },
+        currency
       });
     } catch (e: any) {
       console.error("Error in /api/daily-bonus/status:", e);
@@ -3606,282 +3707,155 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  app.post("/api/daily-bonus/spin", async (req, res) => {
+  app.post("/api/daily-bonus/reveal", async (req, res) => {
     try {
-      const { userId, rewardAmount } = req.body;
-      if (!userId) return res.status(400).json({ error: "Missing userId" });
+      const { userId, type } = req.body;
+      if (!userId || !type) return res.status(400).json({ error: "Missing parameters" });
 
-      const settingsDocRef = doc(db, "settings", "daily_bonus");
-      const settingsSnap = await getDoc(settingsDocRef);
-      if (!settingsSnap.exists()) {
-        return res.status(500).json({ error: "Daily Bonus settings not found" });
-      }
-
+      const settingsSnap = await getDoc(doc(db, "settings", "daily_bonus"));
+      if (!settingsSnap.exists()) return res.status(500).json({ error: "Settings not found" });
       const settings = settingsSnap.data();
-      const enabled = settings.dailyBonusEnabled ?? true;
-      const freeSpinsPerDay = Number(settings.freeSpinsPerDay ?? 1);
-      const resetTime = settings.resetTime ?? "00:00";
-      const claimTimer = Number(settings.claimTimer ?? 0);
-      const rewardList = settings.rewardList ?? [];
 
-      console.log("================= DAILY BONUS SPIN TRACE =================");
-      console.log(`[DB TRACE] Spin request received for user: ${userId}, rewardAmount: ${rewardAmount}`);
-      console.log(`[DB TRACE] Loaded Settings: enabled=${enabled}, freeSpinsPerDay=${freeSpinsPerDay}, claimTimer=${claimTimer}s`);
+      const config = settings[type];
+      if (!config || !config.enabled) return res.status(400).json({ error: "Module disabled" });
 
-      if (!enabled) {
-        console.log(`[DB TRACE] Spin rejected: Daily Bonus is disabled globally.`);
-        console.log("==========================================================");
-        return res.status(400).json({ error: "Daily Bonus is currently disabled" });
-      }
-
-      const todayDateStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
       const stateDocRef = doc(db, "daily_bonus_state", userId);
       const stateSnap = await getDoc(stateDocRef);
+      if (!stateSnap.exists()) return res.status(404).json({ error: "State not found" });
+      const stateData = stateSnap.data();
 
-      const getMostRecentResetTimeInIST = (resetTimeStr: string): Date => {
-        const [hours, minutes] = resetTimeStr.split(":").map(Number);
-        const now = new Date();
-        const formatter = new Intl.DateTimeFormat("en-US", {
-          timeZone: "Asia/Kolkata",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        });
-        const parts = formatter.format(now).split("/"); // MM/DD/YYYY
-        const istMonth = parts[0];
-        const istDay = parts[1];
-        const istYear = parts[2];
+      const usage = stateData[type] || { count: 0, lastTime: null };
+      if (usage.count >= config.dailyLimit) return res.status(400).json({ error: "Daily limit reached" });
 
-        const isoStr = `${istYear}-${istMonth}-${istDay}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00+05:30`;
-        const todayReset = new Date(isoStr);
-
-        if (now.getTime() >= todayReset.getTime()) {
-          return todayReset;
-        } else {
-          return new Date(todayReset.getTime() - 24 * 60 * 60 * 1000);
+      // Cooldown check
+      if (usage.lastTime && config.cooldown > 0) {
+        const lastTime = new Date(usage.lastTime).getTime();
+        const now = Date.now();
+        const diffMinutes = (now - lastTime) / (1000 * 60);
+        if (diffMinutes < config.cooldown) {
+          return res.status(400).json({ error: `Please wait ${Math.ceil(config.cooldown - diffMinutes)} more minutes.` });
         }
-      };
+      }
 
-      const resetTimeIST = getMostRecentResetTimeInIST(resetTime);
-      let stateData: any = null;
-      let needsReset = false;
+      // Pick reward based on probability
+      const rewards = config.rewards || [];
+      if (rewards.length === 0) return res.status(500).json({ error: "No rewards configured" });
 
-      if (!stateSnap.exists()) {
-        console.log(`[DB TRACE] No state doc exists during spin. Creating initial state with ${freeSpinsPerDay} spins.`);
-        const initialState = {
-          userId,
-          remainingSpins: freeSpinsPerDay,
-          dailySpinCount: 0,
-          lastSpinDate: todayDateStr,
-          lastSpinTime: null
-        };
-        await setDoc(stateDocRef, initialState);
-        stateData = initialState;
-      } else {
-        stateData = stateSnap.data();
-        
-        // Evaluate reset condition
-        if (!stateData.lastSpinTime) {
-          if (stateData.lastSpinDate !== todayDateStr) {
-            needsReset = true;
-          }
-        } else {
-          const lastSpinTime = new Date(stateData.lastSpinTime);
-          if (lastSpinTime.getTime() < resetTimeIST.getTime()) {
-            needsReset = true;
+      const totalWeight = rewards.reduce((sum: number, r: any) => sum + (Number(r.weight) || 0), 0);
+      let random = Math.random() * totalWeight;
+      let selectedReward = rewards[0];
+      for (const r of rewards) {
+        if (random < (Number(r.weight) || 0)) {
+          selectedReward = r;
+          break;
+        }
+        random -= (Number(r.weight) || 0);
+      }
+
+      const rewardAmount = Number(selectedReward.amount);
+
+      // Save pending reward and update count (don't credit yet)
+      const now = new Date().toISOString();
+      const updatedState = {
+        ...stateData,
+        [type]: {
+          count: usage.count + 1,
+          lastTime: now
+        },
+        pendingRewards: {
+          ...(stateData.pendingRewards || {}),
+          [type]: {
+            amount: rewardAmount,
+            timestamp: now,
+            claimed: false
           }
         }
-
-        console.log(`[DB TRACE] Spin Reset Check: needsReset=${needsReset}`);
-
-        if (needsReset) {
-          console.log(`[DB TRACE] Spin Reset triggered. Resetting spins to config value: ${freeSpinsPerDay}.`);
-          const resetState = {
-            userId,
-            remainingSpins: freeSpinsPerDay,
-            dailySpinCount: 0,
-            lastSpinDate: todayDateStr,
-            lastSpinTime: stateData.lastSpinTime || null
-          };
-          await setDoc(stateDocRef, resetState, { merge: true });
-          stateData = resetState;
-        }
-      }
-
-      let currentRemainingSpins = stateData.remainingSpins ?? freeSpinsPerDay;
-      let currentDailySpinCount = stateData.dailySpinCount ?? 0;
-
-      // Timer validation check (Claim Timer / Cool-down between spins)
-      if (stateData.lastSpinTime) {
-        const lastSpinTime = new Date(stateData.lastSpinTime);
-        const elapsedSeconds = (Date.now() - lastSpinTime.getTime()) / 1000;
-        console.log(`[DB TRACE] Timer check: ${elapsedSeconds.toFixed(1)}s elapsed since last spin (required cooldown: ${claimTimer}s)`);
-        
-        if (elapsedSeconds < claimTimer) {
-          const secondsRemaining = Math.ceil(claimTimer - elapsedSeconds);
-          console.log(`[DB TRACE] Spin rejected: Cooldown active. Wait ${secondsRemaining}s.`);
-          console.log("==========================================================");
-          return res.status(400).json({ error: `Please wait ${secondsRemaining} seconds before spinning again.` });
-        }
-      }
-
-      // Remaining Spins check
-      if (currentRemainingSpins <= 0) {
-        console.log(`[DB TRACE] Spin rejected: No spins remaining. (${currentRemainingSpins}/${freeSpinsPerDay})`);
-        console.log("==========================================================");
-        return res.status(400).json({ error: "No spins remaining today" });
-      }
-
-      // Deduct spin
-      const nextRemainingSpins = currentRemainingSpins - 1;
-      const nextDailySpinCount = currentDailySpinCount + 1;
-      const nowISO = new Date().toISOString();
-
-      const newState = {
-        userId,
-        remainingSpins: nextRemainingSpins,
-        dailySpinCount: nextDailySpinCount,
-        lastSpinDate: todayDateStr,
-        lastSpinTime: nowISO
       };
+      await setDoc(stateDocRef, updatedState);
 
-      await setDoc(stateDocRef, newState, { merge: true });
-      console.log(`[DB TRACE] Spin successful. Saved state: ${JSON.stringify(newState)}`);
-      console.log("==========================================================");
+      // Update statistics
+      try {
+        const today = new Date().toISOString().split("T")[0];
+        const statsRef = doc(db, "daily_bonus_stats", today);
+        const fieldName = type === "wheel" ? "totalSpins" : type === "box" ? "totalOpens" : "totalScratches";
+        await setDoc(statsRef, { [fieldName]: increment(1) }, { merge: true });
+      } catch (e) {}
 
       return res.json({
         ok: true,
-        remainingSpins: nextRemainingSpins,
-        dailySpinCount: nextDailySpinCount,
-        rewardAmount
+        reward: {
+          amount: rewardAmount,
+          label: selectedReward.label || `₹${rewardAmount.toFixed(2)}`
+        },
+        usage: updatedState[type]
       });
     } catch (e: any) {
-      console.error("Error in /api/daily-bonus/spin:", e);
+      console.error("Error in /api/daily-bonus/reveal:", e);
       res.status(500).json({ error: e.message || "Server error" });
     }
   });
 
   app.post("/api/daily-bonus/claim", async (req, res) => {
     try {
-      const { userId, rewardAmount, remainingSpins, dailySpinCount } = req.body;
-      if (!userId) return res.status(400).json({ error: "Missing userId" });
-      if (rewardAmount === undefined) return res.status(400).json({ error: "Missing rewardAmount" });
+      const { userId, type } = req.body;
+      const stateDocRef = doc(db, "daily_bonus_state", userId);
+      const stateSnap = await getDoc(stateDocRef);
+      if (!stateSnap.exists()) return res.status(404).json({ error: "State not found" });
+      const stateData = stateSnap.data();
 
-      console.log("================= DAILY BONUS CLAIM TRACE =================");
-      console.log(`[DB TRACE] Claim request received. User: ${userId}, Reward: ₹${rewardAmount}`);
-      console.log(`[DB TRACE] Remaining spins passed: ${remainingSpins}, Daily count: ${dailySpinCount}`);
+      const pending = stateData.pendingRewards?.[type];
+      if (!pending || pending.claimed) return res.status(400).json({ error: "No pending reward to claim" });
 
-      // Validate if reward configuration permits this amount
-      const settingsDocRef = doc(db, "settings", "daily_bonus");
-      const settingsSnap = await getDoc(settingsDocRef);
-      if (settingsSnap.exists()) {
-        const settings = settingsSnap.data();
-        const rewardList = settings.rewardList ?? [];
-        const isValidReward = rewardList.some((r: any) => Number(r.amount) === Number(rewardAmount) && r.status === "Active");
-        if (!isValidReward) {
-          console.warn(`[DB TRACE] WARNING: Claimed amount ₹${rewardAmount} is not in the active reward settings list!`);
-        } else {
-          console.log(`[DB TRACE] Verified reward amount is valid and active in Firestore.`);
-        }
-      }
-
+      const rewardAmount = Number(pending.amount);
       const userDocRef = doc(db, "users", userId);
-      const userDoc = await getDoc(userDocRef);
-      if (!userDoc.exists()) {
-        console.log(`[DB TRACE] Claim failed: User ${userId} not found in DB.`);
-        console.log("==========================================================");
-        return res.status(404).json({ error: "User not found" });
-      }
+      const userSnap = await getDoc(userDocRef);
+      if (!userSnap.exists()) return res.status(404).json({ error: "User not found" });
+      const uData = userSnap.data();
 
-      const uData = userDoc.data();
-      const fileEarnings = uData?.fileEarnings || 0;
-      const linkEarnings = uData?.linkEarnings || 0;
-      const referralEarnings = uData?.referralEarnings || 0;
-      const oldBonusBalance = uData?.bonusBalance || 0;
-      const bonusBalance = oldBonusBalance + Number(rewardAmount);
-      const withdrawnAmount = uData?.withdrawnAmount || 0;
-      const pendingWithdrawals = uData?.pendingWithdrawals || 0;
-      const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance - withdrawnAmount - pendingWithdrawals;
-      const bonus = (uData?.bonus || 0) + Number(rewardAmount);
-      const earnings = (uData?.earnings || 0) + Number(rewardAmount);
+      const newBonusBalance = (uData.bonusBalance || 0) + rewardAmount;
+      const newAvailableBalance = (uData.availableBalance || 0) + rewardAmount;
+      const newEarnings = (uData.earnings || 0) + rewardAmount;
 
-      console.log(`[DB TRACE] Updating User Document:`);
-      console.log(` - Old Bonus Balance: ₹${oldBonusBalance.toFixed(2)} -> New: ₹${bonusBalance.toFixed(2)}`);
-      console.log(` - Available Balance: ₹${availableBalance.toFixed(2)}`);
-
-      // Save user doc updates
       await setDoc(userDocRef, {
-        bonus,
-        bonusBalance,
-        availableBalance,
-        earnings
+        bonusBalance: newBonusBalance,
+        availableBalance: newAvailableBalance,
+        earnings: newEarnings,
+        rewardBalance: (uData.rewardBalance || 0) + rewardAmount
       }, { merge: true });
 
-      // Store in Firestore exactly what was requested:
-      // userId, rewardAmount, claimDate, remainingSpins, dailySpinCount
-      const claimDate = new Date().toISOString();
-      await addDoc(collection(db, "dailyBonus"), {
-        userId,
-        rewardAmount: Number(rewardAmount),
-        claimDate,
-        remainingSpins: Number(remainingSpins ?? 0),
-        dailySpinCount: Number(dailySpinCount ?? 0)
-      });
-
-      // Format transaction date & time for Indian Standard Time
-      const now = new Date();
-      const dateStr = now.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
-      const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" });
-
-      const txData = {
-        amount: Number(rewardAmount),
-        type: "Daily Bonus",
-        date: dateStr,
-        time: timeStr,
-        userId,
-        createdAt: now.toISOString()
-      };
-
-      await Promise.all([
-        addDoc(collection(db, "transactions"), txData),
-        addDoc(collection(db, "transactionHistory"), txData)
-      ]);
-
-      console.log(`[DB TRACE] Transaction logs saved successfully.`);
-
-      // Fetch Bot Token & Notify user on Telegram
-      const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
-      const botToken = settingsDoc.data()?.botToken;
-
-      if (botToken) {
-        const messageText = `🎉 *Daily Bonus Claimed*
- 
-💰 *Reward:*
-₹${Number(rewardAmount).toFixed(2)}
- 
-🎡 *Remaining Spins:*
-${remainingSpins}
- 
-Bonus added successfully.`;
-
-        try {
-          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: Number(userId),
-              text: messageText,
-              parse_mode: "Markdown"
-            })
-          });
-          console.log(`[DB TRACE] Sent success notification on Telegram.`);
-        } catch (tgErr) {
-          console.error(`[DB TRACE] Telegram notification failed:`, tgErr);
+      // Mark as claimed
+      await setDoc(stateDocRef, {
+        pendingRewards: {
+          ...stateData.pendingRewards,
+          [type]: { ...pending, claimed: true }
         }
-      }
+      }, { merge: true });
 
-      console.log(`[DB TRACE] Claim complete.`);
-      console.log("==========================================================");
+      // Statistics
+      try {
+        const today = new Date().toISOString().split("T")[0];
+        const statsRef = doc(db, "daily_bonus_stats", today);
+        const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : "scratchRewards";
+        await setDoc(statsRef, { 
+          [rewardField]: increment(rewardAmount),
+          totalClaims: increment(1),
+          totalRewards: increment(rewardAmount)
+        }, { merge: true });
+
+        const globalSettingsRef = doc(db, "settings", "daily_bonus");
+        await setDoc(globalSettingsRef, { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
+      } catch (e) {}
+
+      // History
+      const userName = uData.name || uData.firstName || uData.username || "User";
+      await addDoc(collection(db, "claimHistory"), {
+        userId,
+        userName,
+        amount: rewardAmount,
+        type,
+        date: new Date().toISOString(),
+        adStatus: "Verified"
+      });
 
       return res.json({ ok: true });
     } catch (e: any) {
@@ -4324,11 +4298,41 @@ Bonus added successfully.`;
 
       // Determine reward amount
       let rewardAmount = 0.56; 
-      
-      // We use request_var as the taskId if passed from frontend ad call
       const taskId = request_var || "monetag_default_task";
+      let isDailyBonus = false;
+      let dailyBonusType = "";
       
-      if (taskId && taskId !== "monetag_default_task") {
+      if (taskId.startsWith("daily_bonus_")) {
+        isDailyBonus = true;
+        dailyBonusType = taskId.replace("daily_bonus_", "");
+        const stateSnap = await getDoc(doc(db, "daily_bonus_state", userId));
+        if (stateSnap.exists()) {
+          const pending = stateSnap.data().pendingRewards?.[dailyBonusType];
+          if (pending && !pending.claimed) {
+             rewardAmount = Number(pending.amount);
+             // Mark as claimed in state
+             await updateDoc(doc(db, "daily_bonus_state", userId), {
+                [`pendingRewards.${dailyBonusType}.claimed`]: true
+             });
+             
+             // Update daily bonus stats
+             try {
+                const todayStr = new Date().toISOString().split("T")[0];
+                const statsRef = doc(db, "daily_bonus_stats", todayStr);
+                const rewardField = dailyBonusType === "wheel" ? "wheelRewards" : dailyBonusType === "box" ? "boxRewards" : "scratchRewards";
+                await setDoc(statsRef, { 
+                  [rewardField]: increment(rewardAmount),
+                  totalClaims: increment(1),
+                  totalRewards: increment(rewardAmount)
+                }, { merge: true });
+                await setDoc(doc(db, "settings", "daily_bonus"), { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
+             } catch(e){}
+          } else if (pending && pending.claimed) {
+            console.warn(`[MONETAG POSTBACK] Reward already claimed for ${taskId}`);
+            return res.status(200).send("Already claimed");
+          }
+        }
+      } else if (taskId !== "monetag_default_task") {
         const taskDoc = await getDoc(doc(db, "tasks", taskId));
         if (taskDoc.exists()) {
           rewardAmount = Number(taskDoc.data().rewardAmount) || rewardAmount;

@@ -71,6 +71,7 @@ export default function EarnRewardsPage() {
   const [adWatchedSuccessfully, setAdWatchedSuccessfully] = useState<boolean>(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState<boolean>(false);
   const [isTelegramApp, setIsTelegramApp] = useState<boolean>(false);
+  const [showRewardAlreadyClaimed, setShowRewardAlreadyClaimed] = useState<boolean>(false);
 
   // Initialize Telegram WebApp and parse parameters
   useEffect(() => {
@@ -155,7 +156,7 @@ export default function EarnRewardsPage() {
           setCurrentTask(resolvedTask);
           // Check if already completed (anti-abuse)
           if ((data.completedTaskIds || []).includes(taskId)) {
-            setError("You have already completed this task. Duplicate rewards are not allowed.");
+            setShowRewardAlreadyClaimed(true);
           }
         } else {
           setError("Requested task not found.");
@@ -455,6 +456,32 @@ export default function EarnRewardsPage() {
         <div className="mt-8 text-[10px] text-slate-600 font-mono">
           Environment: Browser/Desktop Detected
         </div>
+      </div>
+    );
+  }
+
+  if (showRewardAlreadyClaimed) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1118]/95 backdrop-blur-sm text-white p-6 text-center z-50">
+        <motion.div 
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="max-w-md w-full bg-slate-900 border border-amber-500/30 rounded-3xl p-8 shadow-2xl"
+        >
+          <div className="w-20 h-20 bg-amber-500/20 border border-amber-500/30 rounded-full flex items-center justify-center mx-auto mb-6 text-amber-500">
+            <AlertTriangle size={44} />
+          </div>
+          <h2 className="text-2xl font-black text-amber-400 mb-4">⚠️ Reward Already Claimed</h2>
+          <p className="text-gray-300 mb-8 leading-relaxed">
+            You have already completed this reward task. Each reward task can only be claimed once. Please wait for new tasks to become available.
+          </p>
+          <button
+            onClick={handleBackToBot}
+            className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-bold transition-all shadow-lg shadow-amber-900/20"
+          >
+            OK
+          </button>
+        </motion.div>
       </div>
     );
   }

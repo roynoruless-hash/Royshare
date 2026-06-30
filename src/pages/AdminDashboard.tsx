@@ -34,6 +34,7 @@ export default function AdminDashboard() {
   const [aiAnnouncing, setAiAnnouncing] = useState(false);
   const [modalAction, setModalAction] = useState<string>('none');
   const [modalInput, setModalInput] = useState("");
+  const [rejectionType, setRejectionType] = useState('other');
   const [modalLoading, setModalLoading] = useState(false);
 
   const [announcements, setAnnouncements] = useState<any[]>([]);
@@ -64,8 +65,10 @@ export default function AdminDashboard() {
   const [bonusSettingsLoading, setBonusSettingsLoading] = useState(false);
   const [bonusHistory, setBonusHistory] = useState<any[]>([]);
   const [bonusHistoryLoading, setBonusHistoryLoading] = useState(false);
-  const [bonusView, setBonusView] = useState<'settings' | 'rewards' | 'stats' | 'history'>('settings');
+  const [bonusView, setBonusView] = useState<'settings' | 'wheel-rewards' | 'box-rewards' | 'scratch-rewards' | 'stats' | 'history'>('settings');
   const [bonusSearch, setBonusSearch] = useState("");
+  const [dailyBonusStats, setDailyBonusStats] = useState<any>(null);
+  const [dailyBonusStatsLoading, setDailyBonusStatsLoading] = useState(false);
 
   const [users, setUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -741,7 +744,23 @@ export default function AdminDashboard() {
     setBonusSettingsLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/admin/daily-bonus/settings`);
-      if (res.ok) setBonusSettings(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        const defaults = {
+          dailyBonusEnabled: true,
+          resetTime: "00:00",
+          wheel: { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] },
+          box: { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] },
+          scratch: { enabled: true, dailyLimit: 3, cooldown: 0, rewards: [] }
+        };
+        setBonusSettings({
+          ...defaults,
+          ...data,
+          wheel: { ...defaults.wheel, ...data?.wheel },
+          box: { ...defaults.box, ...data?.box },
+          scratch: { ...defaults.scratch, ...data?.scratch }
+        });
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -761,12 +780,27 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchDailyBonusStats = async () => {
+    setDailyBonusStatsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/daily-bonus/stats`);
+      if (res.ok) setDailyBonusStats(await res.json());
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDailyBonusStatsLoading(false);
+    }
+  };
+
   const saveBonusSettings = async (newSettings: any) => {
     try {
+      // Create a copy and remove statistics to avoid overwriting live data
+      const { totalSpins, totalRewardsDistributed, ...settingsToSave } = newSettings;
+      
       const res = await fetch(`${API_BASE}/api/admin/daily-bonus/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newSettings)
+        body: JSON.stringify(settingsToSave)
       });
       if (res.ok) {
         setBonusSettings(newSettings);
@@ -1515,11 +1549,14 @@ export default function AdminDashboard() {
         fetchTaskLogs();
       }
     } else if (activeTab === '🎁 Daily Bonus') {
-      if (bonusView === 'settings' || bonusView === 'rewards' || bonusView === 'stats') {
+      if (['settings', 'wheel-rewards', 'box-rewards', 'scratch-rewards', 'stats'].includes(bonusView)) {
         fetchBonusSettings();
       }
-      if (bonusView === 'history' || bonusView === 'stats') {
+      if (bonusView === 'history') {
         fetchBonusHistory();
+      }
+      if (bonusView === 'stats') {
+        fetchDailyBonusStats();
       }
     } else if (activeTab === '👥 Users') {
       fetchUsers();
@@ -1538,6 +1575,7 @@ export default function AdminDashboard() {
       fetchSystemSettings();
       fetchTelegramSettings();
       fetchSupportSettings();
+      fetchBonusSettings();
     } else if (activeTab === '🛡 Security Center') {
       fetchSecurityData();
     } else if (activeTab === '📜 Activity Logs') {
@@ -1584,7 +1622,7 @@ export default function AdminDashboard() {
         body = { transactionReference: modalInput };
       } else if (modalAction === 'reject') {
         endpoint = `/api/admin/withdrawals/${selectedWithdrawal.id}/reject`;
-        body = { rejectReason: modalInput };
+        body = { rejectReason: modalInput, rejectionType };
       } else if (modalAction === 'reply_ticket') {
         endpoint = `/api/admin/tickets/${selectedTicket.id}/reply`;
         body = { replyMessage: modalInput };
@@ -2596,132 +2634,214 @@ export default function AdminDashboard() {
                   🎁 Daily Bonus Manager
                 </h2>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <button onClick={() => setBonusView('settings')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'settings' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>⚙️ Bonus Settings</button>
-                  <button onClick={() => setBonusView('rewards')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'rewards' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🎡 Spin Rewards</button>
-                  <button onClick={() => setBonusView('stats')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'stats' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 Statistics</button>
-                  <button onClick={() => setBonusView('history')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'history' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📜 Claim History</button>
-                  <button onClick={() => { if(bonusView === 'history') fetchBonusHistory(); else fetchBonusSettings(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700">🔄 Refresh</button>
+                  <button onClick={() => setBonusView('settings')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'settings' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>⚙️ Settings</button>
+                  <button onClick={() => setBonusView('wheel-rewards')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'wheel-rewards' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🎡 Wheel</button>
+                  <button onClick={() => setBonusView('box-rewards')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'box-rewards' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📦 Box</button>
+                  <button onClick={() => setBonusView('scratch-rewards')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'scratch-rewards' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🎫 Scratch</button>
+                  <button onClick={() => setBonusView('stats')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'stats' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 Stats</button>
+                  <button onClick={() => setBonusView('history')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'history' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📜 History</button>
+                  <button onClick={() => { 
+                    if(bonusView === 'history') fetchBonusHistory(); 
+                    else if(bonusView === 'stats') fetchDailyBonusStats(); 
+                    else fetchBonusSettings(); 
+                  }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700">🔄 Refresh</button>
                 </div>
               </div>
 
-              {bonusSettingsLoading && bonusView !== 'history' ? (
+              {bonusSettingsLoading && bonusView !== 'history' && bonusView !== 'stats' ? (
                 <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>
               ) : bonusView === 'settings' && bonusSettings ? (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl">
-                  <h3 className="text-lg font-bold text-white mb-6 border-b border-slate-800 pb-4">⚙️ General Settings</h3>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-                      <div>
-                        <p className="font-bold text-white">Daily Bonus System</p>
-                        <p className="text-sm text-slate-400">Enable or disable the entire daily bonus feature</p>
+                <div className="space-y-6">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                    <h3 className="text-lg font-bold text-white mb-6 border-b border-slate-800 pb-4">⚙️ General Settings</h3>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
+                        <div>
+                          <p className="font-bold text-white">Daily Bonus System</p>
+                          <p className="text-sm text-slate-400">Enable or disable the entire daily bonus feature</p>
+                        </div>
+                        <button 
+                          onClick={() => saveBonusSettings({...bonusSettings, dailyBonusEnabled: !bonusSettings.dailyBonusEnabled})}
+                          className={`px-4 py-2 font-bold rounded-xl transition-all ${bonusSettings.dailyBonusEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}
+                        >
+                          {bonusSettings.dailyBonusEnabled ? '🟢 Enabled' : '🔴 Disabled'}
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => saveBonusSettings({...bonusSettings, dailyBonusEnabled: !bonusSettings.dailyBonusEnabled})}
-                        className={`px-4 py-2 font-bold rounded-xl transition-all ${bonusSettings.dailyBonusEnabled ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'}`}
-                      >
-                        {bonusSettings.dailyBonusEnabled ? '🟢 Enabled' : '🔴 Disabled'}
-                      </button>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-400 mb-1">🎡 Free Spins Per Day</label>
-                      <input type="number" value={bonusSettings.freeSpinsPerDay} onChange={e => setBonusSettings({...bonusSettings, freeSpinsPerDay: Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-400 mb-1">🕒 Reset Time (UTC)</label>
-                      <input type="time" value={bonusSettings.resetTime} onChange={e => setBonusSettings({...bonusSettings, resetTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-400 mb-1">⏱ Claim Timer (seconds delay between spins)</label>
-                      <input type="number" value={bonusSettings.claimTimer} onChange={e => setBonusSettings({...bonusSettings, claimTimer: Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white" />
-                    </div>
-                    <div className="pt-4">
-                      <button onClick={() => saveBonusSettings(bonusSettings)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all">
-                        💾 Save Settings
-                      </button>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">🕒 Global Reset Time (UTC)</label>
+                        <input type="time" value={bonusSettings.resetTime || "00:00"} onChange={e => setBonusSettings({...bonusSettings, resetTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white" />
+                      </div>
                     </div>
                   </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {['wheel', 'box', 'scratch'].map((type) => (
+                      <div key={type} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                        <div className="p-4 bg-slate-950/50 border-b border-slate-800 flex items-center justify-between">
+                          <h4 className="font-bold text-white capitalize">{type} Module</h4>
+                          <button 
+                            onClick={() => setBonusSettings({...bonusSettings, [type]: { ...(bonusSettings[type] || {}), enabled: !bonusSettings[type]?.enabled }})}
+                            className={`w-10 h-5 rounded-full relative transition-colors ${bonusSettings[type]?.enabled ? 'bg-indigo-600' : 'bg-slate-700'}`}
+                          >
+                            <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${bonusSettings[type]?.enabled ? 'left-6' : 'left-1'}`} />
+                          </button>
+                        </div>
+                        <div className="p-4 space-y-4">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Daily Limit</label>
+                            <input type="number" value={bonusSettings[type]?.dailyLimit ?? 0} onChange={e => setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], dailyLimit: parseInt(e.target.value) || 0 }})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Cooldown (Min)</label>
+                            <input type="number" value={bonusSettings[type]?.cooldown ?? 0} onChange={e => setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], cooldown: parseInt(e.target.value) || 0 }})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm" />
+                          </div>
+                          <div className="flex items-center justify-between pt-2">
+                             <span className="text-xs font-bold text-slate-400">Require Ad</span>
+                             <button 
+                                onClick={() => setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], adRequired: !bonusSettings[type]?.adRequired }})}
+                                className={`text-[10px] px-2 py-1 rounded font-black ${bonusSettings[type]?.adRequired ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-800 text-slate-500'}`}
+                             >
+                                {bonusSettings[type]?.adRequired ? 'YES' : 'NO'}
+                             </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button onClick={() => saveBonusSettings(bonusSettings)} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-indigo-900/20">
+                    💾 Save All Module Settings
+                  </button>
                 </div>
-              ) : bonusView === 'rewards' && bonusSettings ? (
+              ) : (bonusView === 'wheel-rewards' || bonusView === 'box-rewards' || bonusView === 'scratch-rewards') && bonusSettings ? (
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
                   <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-lg font-bold text-white">🎡 Wheel Rewards</h3>
+                    <div>
+                      <h3 className="text-lg font-bold text-white capitalize">
+                        {bonusView.split('-')[0]} Rewards Pool
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1">Configure winning amounts and their relative probabilities.</p>
+                    </div>
                     <button onClick={() => {
-                      const newRewards = [...(bonusSettings.rewardList || []), { id: Date.now().toString(), amount: "0.00", probability: "0", status: "Active" }];
-                      setBonusSettings({...bonusSettings, rewardList: newRewards});
-                    }} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl text-sm">➕ Add Reward</button>
+                      const type = bonusView.split('-')[0];
+                      const newRewards = [...(bonusSettings[type]?.rewards || []), { amount: 1, weight: 10, label: "₹1.00" }];
+                      setBonusSettings({...bonusSettings, [type]: { ...(bonusSettings[type] || {}), rewards: newRewards }});
+                    }} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg shadow-indigo-900/20">➕ Add Reward</button>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm text-slate-300">
                       <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
                         <tr>
-                          <th className="px-4 py-3">Reward Amount (₹)</th>
-                          <th className="px-4 py-3">Probability %</th>
-                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Amount (₹)</th>
+                          <th className="px-4 py-3">Weight (Probability)</th>
+                          <th className="px-4 py-3">Label</th>
                           <th className="px-4 py-3 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {(bonusSettings.rewardList || []).map((reward: any, idx: number) => (
-                          <tr key={reward.id} className="border-b border-slate-800/50">
-                            <td className="px-4 py-3">
-                              <input type="text" value={reward.amount} onChange={e => {
-                                const newRewards = [...bonusSettings.rewardList];
-                                newRewards[idx].amount = e.target.value;
-                                setBonusSettings({...bonusSettings, rewardList: newRewards});
-                              }} className="w-24 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white" />
-                            </td>
-                            <td className="px-4 py-3">
-                              <input type="text" value={reward.probability} onChange={e => {
-                                const newRewards = [...bonusSettings.rewardList];
-                                newRewards[idx].probability = e.target.value;
-                                setBonusSettings({...bonusSettings, rewardList: newRewards});
-                              }} className="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white" />
-                            </td>
-                            <td className="px-4 py-3">
-                              <select value={reward.status} onChange={e => {
-                                const newRewards = [...bonusSettings.rewardList];
-                                newRewards[idx].status = e.target.value;
-                                setBonusSettings({...bonusSettings, rewardList: newRewards});
-                              }} className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-xs">
-                                <option>Active</option>
-                                <option>Disabled</option>
-                              </select>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <button onClick={() => {
-                                const newRewards = bonusSettings.rewardList.filter((_: any, i: number) => i !== idx);
-                                setBonusSettings({...bonusSettings, rewardList: newRewards});
-                              }} className="text-red-400 hover:text-red-300 p-1">🗑</button>
-                            </td>
-                          </tr>
-                        ))}
+                        {(bonusSettings[bonusView.split('-')[0]]?.rewards || []).map((reward: any, idx: number) => {
+                          const type = bonusView.split('-')[0];
+                          return (
+                            <tr key={idx} className="border-b border-slate-800/50">
+                              <td className="px-4 py-3">
+                                <input type="number" step="0.01" value={reward.amount ?? 0} onChange={e => {
+                                  const newRewards = [...bonusSettings[type].rewards];
+                                  newRewards[idx].amount = parseFloat(e.target.value) || 0;
+                                  setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
+                                }} className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white font-bold text-emerald-400" />
+                              </td>
+                              <td className="px-4 py-3">
+                                <input type="number" value={reward.weight ?? 0} onChange={e => {
+                                  const newRewards = [...bonusSettings[type].rewards];
+                                  newRewards[idx].weight = parseInt(e.target.value) || 0;
+                                  setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
+                                }} className="w-20 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white" />
+                              </td>
+                              <td className="px-4 py-3">
+                                <input type="text" value={reward.label || ''} onChange={e => {
+                                  const newRewards = [...bonusSettings[type].rewards];
+                                  newRewards[idx].label = e.target.value;
+                                  setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
+                                }} className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white" />
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <button onClick={() => {
+                                  const newRewards = bonusSettings[type].rewards.filter((_: any, i: number) => i !== idx);
+                                  setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
+                                }} className="text-rose-500 hover:text-rose-400 p-1.5 bg-rose-500/10 rounded-lg transition-all">🗑</button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-4 flex justify-end">
-                    <button onClick={() => saveBonusSettings(bonusSettings)} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all">
-                      💾 Save Rewards
+                  <div className="mt-6 flex justify-end">
+                    <button onClick={() => saveBonusSettings(bonusSettings)} className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-emerald-900/20">
+                      💾 Save {bonusView.split('-')[0].toUpperCase()} Rewards
                     </button>
                   </div>
                 </div>
-              ) : bonusView === 'stats' && bonusSettings ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">🎡 Total Spins</h3>
-                    <p className="text-2xl font-bold text-white">{bonusSettings.totalSpins || 0}</p>
+              ) : bonusView === 'stats' ? (
+                <div className="space-y-6">
+                  {/* Global Stats */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">🎡 Global Total Spins</h3>
+                      <p className="text-2xl font-bold text-white">{dailyBonusStats?.global?.totalSpins || 0}</p>
+                    </div>
+                    <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">💰 Global Rewards</h3>
+                      <p className="text-2xl font-bold text-yellow-400">₹{Number(dailyBonusStats?.global?.totalRewardsDistributed || 0).toFixed(2)}</p>
+                    </div>
+                    <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-4">
+                      <h3 className="text-xs font-semibold text-indigo-500/80 uppercase tracking-wider mb-1">✅ Global Claims</h3>
+                      <p className="text-2xl font-bold text-indigo-400">{dailyBonusStats?.global?.totalClaims || 0}</p>
+                    </div>
                   </div>
-                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-yellow-500/80 uppercase tracking-wider mb-1">💰 Total Rewards Given</h3>
-                    <p className="text-2xl font-bold text-yellow-400">₹{bonusSettings.totalRewardsDistributed?.toFixed(2) || "0.00"}</p>
+
+                  {/* Today Stats */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                         <h3 className="text-lg font-black text-white">Today's Activity 📅</h3>
+                         <p className="text-xs text-slate-500">Real-time stats for {new Date().toLocaleDateString()}</p>
+                      </div>
+                      <div className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest animate-pulse">
+                         Live Sync
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">Unique Users</span>
+                        <span className="text-2xl font-black text-white">{dailyBonusStats?.today?.uniqueUsers || 0}</span>
+                      </div>
+                      <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">Total Claims</span>
+                        <span className="text-2xl font-black text-white">{dailyBonusStats?.today?.totalClaims || 0}</span>
+                      </div>
+                      <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">Rewards Won</span>
+                        <span className="text-2xl font-black text-emerald-400">₹{Number(dailyBonusStats?.today?.totalRewards || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                         <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">Spins/Opens</span>
+                         <div className="flex gap-2 items-center mt-1">
+                            <span title="Wheel Spins" className="text-sm font-bold text-white">🎡 {dailyBonusStats?.today?.wheelSpins || 0}</span>
+                            <span title="Box Opens" className="text-sm font-bold text-white">📦 {dailyBonusStats?.today?.boxOpens || 0}</span>
+                            <span title="Scratch Cards" className="text-sm font-bold text-white">🎫 {dailyBonusStats?.today?.scratchClaims || 0}</span>
+                         </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-blue-500/80 uppercase tracking-wider mb-1">👥 Unique Users</h3>
-                    <p className="text-2xl font-bold text-blue-400">{new Set(bonusHistory.map(h => h.userId)).size}</p>
-                  </div>
-                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
-                    <h3 className="text-xs font-semibold text-emerald-500/80 uppercase tracking-wider mb-1">📅 Today's Claims</h3>
-                    <p className="text-2xl font-bold text-emerald-400">{bonusHistory.filter(h => new Date(h.date).toDateString() === new Date().toDateString()).length}</p>
-                  </div>
+
+                  {dailyBonusStatsLoading && (
+                    <div className="text-center py-4">
+                      <div className="inline-block w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                      <p className="text-[10px] text-slate-500 mt-2 font-bold uppercase">Refreshing Live Data...</p>
+                    </div>
+                  )}
                 </div>
               ) : bonusView === 'history' ? (
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
@@ -2734,6 +2854,7 @@ export default function AdminDashboard() {
                       <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
                         <tr>
                           <th className="px-4 py-3">📅 Date & Time</th>
+                          <th className="px-4 py-3">🎮 Type</th>
                           <th className="px-4 py-3">👤 User</th>
                           <th className="px-4 py-3">🆔 User ID</th>
                           <th className="px-4 py-3">💰 Reward Won</th>
@@ -2741,13 +2862,22 @@ export default function AdminDashboard() {
                       </thead>
                       <tbody>
                         {bonusHistoryLoading ? (
-                          <tr><td colSpan={4} className="text-center py-8"><div className="inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></td></tr>
+                          <tr><td colSpan={5} className="text-center py-8"><div className="inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div></td></tr>
                         ) : bonusHistory.filter(h => !bonusSearch || h.userId?.includes(bonusSearch) || h.userName?.toLowerCase().includes(bonusSearch.toLowerCase())).length === 0 ? (
-                          <tr><td colSpan={4} className="text-center py-8 text-slate-500">No history found</td></tr>
+                          <tr><td colSpan={5} className="text-center py-8 text-slate-500">No history found</td></tr>
                         ) : (
                           bonusHistory.filter(h => !bonusSearch || h.userId?.includes(bonusSearch) || h.userName?.toLowerCase().includes(bonusSearch.toLowerCase())).map((h: any) => (
                             <tr key={h.id} className="border-b border-slate-800/50">
                               <td className="px-4 py-3 text-xs text-slate-400">{new Date(h.date).toLocaleString()}</td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${
+                                  h.type === 'wheel' ? 'bg-indigo-500/20 text-indigo-400' :
+                                  h.type === 'box' ? 'bg-purple-500/20 text-purple-400' :
+                                  'bg-amber-500/20 text-amber-400'
+                                }`}>
+                                  {h.type || 'wheel'}
+                                </span>
+                              </td>
                               <td className="px-4 py-3 font-medium text-white">{h.userName || 'Unknown'}</td>
                               <td className="px-4 py-3 font-mono text-xs text-slate-500">{h.userId}</td>
                               <td className="px-4 py-3 font-bold text-yellow-400">₹{h.amount}</td>
@@ -5829,6 +5959,28 @@ export default function AdminDashboard() {
                             <input type="text" value={systemSettings?.withdrawalSettings?.[field] || ''} onChange={(e) => setSystemSettings({...systemSettings, withdrawalSettings: {...systemSettings.withdrawalSettings, [field]: e.target.value}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
                           </div>
                         ))}
+                        
+                        <div className="pt-6 mt-6 border-t border-slate-800">
+                          <h4 className="font-bold text-white mb-4 flex items-center gap-2">
+                             <span>📉 Withdrawal Tax Settings</span>
+                             <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20 uppercase">Automatic Refund</span>
+                          </h4>
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-sm font-medium text-slate-400 mb-1">Wrong UPI ID Tax (%)</label>
+                              <input type="number" value={systemSettings?.withdrawalTaxSettings?.upiTax ?? 5} onChange={(e) => setSystemSettings({...systemSettings, withdrawalTaxSettings: {...systemSettings.withdrawalTaxSettings, upiTax: parseFloat(e.target.value)}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-slate-400 mb-1">Wrong Bank Account Tax (%)</label>
+                              <input type="number" value={systemSettings?.withdrawalTaxSettings?.bankTax ?? 10} onChange={(e) => setSystemSettings({...systemSettings, withdrawalTaxSettings: {...systemSettings.withdrawalTaxSettings, bankTax: parseFloat(e.target.value)}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-slate-400 mb-1">Wrong USDT TRC20 Address Tax (%)</label>
+                              <input type="number" value={systemSettings?.withdrawalTaxSettings?.usdtTax ?? 15} onChange={(e) => setSystemSettings({...systemSettings, withdrawalTaxSettings: {...systemSettings.withdrawalTaxSettings, usdtTax: parseFloat(e.target.value)}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                            </div>
+                          </div>
+                        </div>
+
                         <div className="pt-4 border-t border-slate-800">
                           <h4 className="font-bold text-white mb-4">USDT (TRC20) Settings</h4>
                           <div className="space-y-4">
@@ -5876,22 +6028,135 @@ export default function AdminDashboard() {
                       </div>
                     )}
 
-                    {settingsTab === '🎁 Bonus Settings' && (
-                      <div className="space-y-4 max-w-lg">
-                        <div>
-                          <label className="block text-sm font-medium text-slate-400 mb-1">Bonus Reset Time (Hours)</label>
-                          <input type="number" value={systemSettings?.bonusSettings?.['Bonus Reset Time'] || ''} onChange={(e) => setSystemSettings({...systemSettings, bonusSettings: {...systemSettings.bonusSettings, ['Bonus Reset Time']: e.target.value}})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500" />
+                    {settingsTab === '🎁 Bonus Settings' && bonusSettings && (
+                      <div className="space-y-6">
+                        <div className="bg-indigo-500/10 border border-indigo-500/20 p-4 rounded-xl flex items-center justify-between">
+                          <div>
+                            <h4 className="text-white font-bold text-sm">🎁 Daily Bonus Configuration</h4>
+                            <p className="text-slate-400 text-xs mt-0.5">Manage Wheel, Mystery Box, and Scratch Card settings.</p>
+                          </div>
+                          <button
+                            onClick={() => saveBonusSettings(bonusSettings)}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition"
+                          >
+                            💾 Save All Settings
+                          </button>
                         </div>
-                        <div className="flex items-center gap-4 mt-6">
-                          <label className="flex items-center gap-2 text-slate-300">
-                            <input type="radio" name="bonusEnabled" checked={systemSettings?.bonusSettings?.enabled === true} onChange={() => setSystemSettings({...systemSettings, bonusSettings: {...systemSettings.bonusSettings, enabled: true}})} className="w-4 h-4 text-indigo-600" />
-                            Daily Bonus Enabled
-                          </label>
-                          <label className="flex items-center gap-2 text-slate-300">
-                            <input type="radio" name="bonusEnabled" checked={systemSettings?.bonusSettings?.enabled === false} onChange={() => setSystemSettings({...systemSettings, bonusSettings: {...systemSettings.bonusSettings, enabled: false}})} className="w-4 h-4 text-indigo-600" />
-                            Daily Bonus Disabled
-                          </label>
+
+                        <div className="grid grid-cols-2 gap-4">
+                           <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                             <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Global Status</label>
+                             <div className="flex gap-4">
+                               <label className="flex items-center gap-2 text-white text-sm cursor-pointer">
+                                 <input 
+                                  type="radio" 
+                                  checked={bonusSettings?.dailyBonusEnabled === true} 
+                                  onChange={() => setBonusSettings({...bonusSettings, dailyBonusEnabled: true})} 
+                                  className="w-4 h-4 text-indigo-600"
+                                 /> 🟢 Enabled
+                               </label>
+                               <label className="flex items-center gap-2 text-white text-sm cursor-pointer">
+                                 <input 
+                                  type="radio" 
+                                  checked={bonusSettings?.dailyBonusEnabled === false} 
+                                  onChange={() => setBonusSettings({...bonusSettings, dailyBonusEnabled: false})} 
+                                  className="w-4 h-4 text-indigo-600"
+                                 /> 🔴 Disabled
+                               </label>
+                             </div>
+                           </div>
+                           <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                             <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Daily Reset Time (HH:MM)</label>
+                             <input type="time" value={bonusSettings?.resetTime || "00:00"} onChange={(e) => setBonusSettings({...bonusSettings, resetTime: e.target.value})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500" />
+                           </div>
                         </div>
+
+                        {/* Modular Settings */}
+                        {['wheel', 'box', 'scratch'].map((type) => (
+                          <div key={type} className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden">
+                            <div className="p-4 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between">
+                              <h4 className="text-sm font-bold text-white capitalize flex items-center gap-2">
+                                {type === 'wheel' ? '🎡 Wheel Spin' : type === 'box' ? '📦 Mystery Box' : '🎫 Scratch Card'}
+                              </h4>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase">Status:</span>
+                                <button 
+                                  onClick={() => setBonusSettings({...bonusSettings, [type]: { ...(bonusSettings[type] || {}), enabled: !(bonusSettings[type]?.enabled) }})}
+                                  className={`px-3 py-1 rounded-lg text-[10px] font-black transition ${bonusSettings[type]?.enabled ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-500'}`}
+                                >
+                                  {bonusSettings[type]?.enabled ? 'ACTIVE' : 'INACTIVE'}
+                                </button>
+                              </div>
+                            </div>
+                            <div className="p-4 space-y-4">
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Daily Limit</label>
+                                  <input type="number" value={bonusSettings[type]?.dailyLimit || 0} onChange={(e) => setBonusSettings({...bonusSettings, [type]: { ...(bonusSettings[type] || {}), dailyLimit: parseInt(e.target.value) }})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none" />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Cooldown (Minutes)</label>
+                                  <input type="number" value={bonusSettings[type]?.cooldown || 0} onChange={(e) => setBonusSettings({...bonusSettings, [type]: { ...(bonusSettings[type] || {}), cooldown: parseInt(e.target.value) }})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none" />
+                                </div>
+                              </div>
+
+                              <div>
+                                <div className="flex justify-between items-center mb-2">
+                                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Rewards Pool</label>
+                                  <button 
+                                    onClick={() => {
+                                      const newRewards = [...(bonusSettings[type]?.rewards || []), { amount: 1, weight: 10, label: "₹1.00" }];
+                                      setBonusSettings({...bonusSettings, [type]: { ...(bonusSettings[type] || {}), rewards: newRewards }});
+                                    }}
+                                    className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                                  >
+                                    + Add New Reward
+                                  </button>
+                                </div>
+                                <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                                  {(bonusSettings[type]?.rewards || []).length === 0 && (
+                                    <p className="text-[10px] text-slate-600 italic text-center py-4 bg-slate-900/30 rounded-xl border border-dashed border-slate-800">No rewards added yet</p>
+                                  )}
+                                  {(bonusSettings[type]?.rewards || []).map((reward: any, idx: number) => (
+                                    <div key={idx} className="flex gap-2 items-center bg-slate-900/50 p-2 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
+                                      <div className="w-16">
+                                        <input type="number" placeholder="Amt" value={reward.amount} onChange={(e) => {
+                                          const newRewards = [...bonusSettings[type].rewards];
+                                          newRewards[idx].amount = parseFloat(e.target.value) || 0;
+                                          setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
+                                        }} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[10px] text-emerald-400 font-bold focus:outline-none" />
+                                      </div>
+                                      <div className="w-16">
+                                        <input type="number" placeholder="Weight" value={reward.weight} onChange={(e) => {
+                                          const newRewards = [...bonusSettings[type].rewards];
+                                          newRewards[idx].weight = parseFloat(e.target.value) || 0;
+                                          setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
+                                        }} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[10px] text-white focus:outline-none" />
+                                      </div>
+                                      <div className="flex-1">
+                                        <input type="text" placeholder="Label" value={reward.label} onChange={(e) => {
+                                          const newRewards = [...bonusSettings[type].rewards];
+                                          newRewards[idx].label = e.target.value;
+                                          setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
+                                        }} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-[10px] text-white focus:outline-none" />
+                                      </div>
+                                      <button 
+                                        onClick={() => {
+                                          const newRewards = bonusSettings[type].rewards.filter((_: any, i: number) => i !== idx);
+                                          setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
+                                        }}
+                                        className="text-red-500 hover:text-red-400 p-1.5 transition-colors"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <p className="text-[9px] text-slate-500 mt-2 px-1">Probability is calculated as (Weight / Total Weights). Higher weight means higher chance.</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
 
@@ -6499,7 +6764,7 @@ export default function AdminDashboard() {
                     )}
                     {(selectedWithdrawal.status === 'Pending' || selectedWithdrawal.status === 'Approved') && (
                       <button 
-                        onClick={() => { setModalAction('reject'); setModalInput(""); }}
+                        onClick={() => { setModalAction('reject'); setModalInput(""); setRejectionType('other'); }}
                         className="col-span-1 bg-red-600 hover:bg-red-500 text-white font-medium py-2 rounded-lg text-sm"
                       >
                         🔴 Reject
@@ -6530,16 +6795,54 @@ export default function AdminDashboard() {
               ) : modalAction === 'reject' ? (
                 <div className="space-y-4">
                   <p className="text-slate-300">Reject this withdrawal request.</p>
+                  
                   <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-1">Enter Rejection Reason</label>
+                    <label className="block text-sm font-medium text-slate-400 mb-1.5">Select Rejection Reason</label>
+                    <select 
+                      value={rejectionType}
+                      onChange={(e) => {
+                        const type = e.target.value;
+                        setRejectionType(type);
+                        if (type === 'upi') setModalInput('Wrong UPI ID Details');
+                        else if (type === 'bank') setModalInput('Wrong Bank Account Details');
+                        else if (type === 'usdt') setModalInput('Wrong USDT TRC20 Address');
+                        else setModalInput('');
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-red-500"
+                    >
+                      <option value="upi">Wrong UPI ID ({systemSettings?.withdrawalTaxSettings?.upiTax ?? 5}% Tax)</option>
+                      <option value="bank">Wrong Bank Account ({systemSettings?.withdrawalTaxSettings?.bankTax ?? 10}% Tax)</option>
+                      <option value="usdt">Wrong USDT TRC20 Address ({systemSettings?.withdrawalTaxSettings?.usdtTax ?? 15}% Tax)</option>
+                      <option value="other">Other (Manual Reason / No Tax)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">
+                      {rejectionType === 'other' ? 'Enter Custom Reason' : 'Confirm/Edit Reason Message'}
+                    </label>
                     <textarea 
                       value={modalInput}
                       onChange={(e) => setModalInput(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 h-24 resize-none"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 h-24 resize-none text-sm"
                       placeholder="e.g. Invalid payment details provided..."
                       autoFocus
                     />
                   </div>
+
+                  {rejectionType !== 'other' && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                      <div className="flex justify-between items-center text-xs mb-1">
+                        <span className="text-slate-400">Tax Applied:</span>
+                        <span className="text-red-400 font-bold">
+                          {rejectionType === 'upi' ? (systemSettings?.withdrawalTaxSettings?.upiTax ?? 5) : 
+                           rejectionType === 'bank' ? (systemSettings?.withdrawalTaxSettings?.bankTax ?? 10) : 
+                           (systemSettings?.withdrawalTaxSettings?.usdtTax ?? 15)}%
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 italic leading-tight">Note: Tax will be deducted permanently. The remaining amount will be refunded to user's balance automatically.</p>
+                    </div>
+                  )}
                 </div>
               ) : modalAction === 'view_ticket' && selectedTicket ? (
                 <div className="space-y-4">
