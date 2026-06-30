@@ -3432,6 +3432,34 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const userId = req.query.userId as string;
       if (!userId) return res.status(400).json({ error: "Missing userId" });
 
+      const settingsDocRef = doc(db, "settings", "daily_bonus");
+      const settingsSnap = await getDoc(settingsDocRef);
+      if (!settingsSnap.exists()) {
+        console.error("[DAILY BONUS ERROR] settings/daily_bonus does not exist in Firestore!");
+        return res.status(500).json({ error: "Daily Bonus settings not found" });
+      }
+
+      const settings = settingsSnap.data();
+      const enabled = settings.dailyBonusEnabled ?? true;
+      const freeSpinsPerDay = Number(settings.freeSpinsPerDay ?? 1);
+      const resetTime = settings.resetTime ?? "00:00";
+      const claimTimer = Number(settings.claimTimer ?? 0);
+      const rewardList = settings.rewardList ?? [];
+
+      console.log("================= DAILY BONUS STATUS TRACE =================");
+      console.log(`[DB TRACE] Loaded settings dynamically from Firestore for user ${userId}:`);
+      console.log(` - enabled: ${enabled}`);
+      console.log(` - freeSpinsPerDay: ${freeSpinsPerDay}`);
+      console.log(` - resetTime: ${resetTime}`);
+      console.log(` - claimTimer: ${claimTimer}s`);
+      console.log(` - rewardList: ${JSON.stringify(rewardList)}`);
+
+      if (!enabled) {
+        console.log(`[DB TRACE] Daily Bonus is disabled globally.`);
+        console.log("============================================================");
+        return res.json({ enabled: false, message: "Daily Bonus is currently disabled by administrator." });
+      }
+
       const todayDateStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
       const stateDocRef = doc(db, "daily_bonus_state", userId);
       const stateSnap = await getDoc(stateDocRef);
@@ -3440,36 +3468,107 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const userSnap = await getDoc(userDocRef);
       const currency = userSnap.exists() ? (userSnap.data()?.currency || "INR") : "INR";
 
+      // Reset Time in IST helper
+      const getMostRecentResetTimeInIST = (resetTimeStr: string): Date => {
+        const [hours, minutes] = resetTimeStr.split(":").map(Number);
+        const now = new Date();
+        const formatter = new Intl.DateTimeFormat("en-US", {
+          timeZone: "Asia/Kolkata",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+        const parts = formatter.format(now).split("/"); // MM/DD/YYYY
+        const istMonth = parts[0];
+        const istDay = parts[1];
+        const istYear = parts[2];
+
+        const isoStr = `${istYear}-${istMonth}-${istDay}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00+05:30`;
+        const todayReset = new Date(isoStr);
+
+        if (now.getTime() >= todayReset.getTime()) {
+          return todayReset;
+        } else {
+          return new Date(todayReset.getTime() - 24 * 60 * 60 * 1000);
+        }
+      };
+
+      const resetTimeIST = getMostRecentResetTimeInIST(resetTime);
+      console.log(`[DB TRACE] Calculated Most Recent Reset Time (IST): ${resetTimeIST.toISOString()}`);
+
+      let stateData: any = null;
+      let needsReset = false;
+
       if (!stateSnap.exists()) {
+        console.log(`[DB TRACE] No state document found for user: ${userId}. Creating initial state with ${freeSpinsPerDay} spins.`);
         const initialState = {
           userId,
-          remainingSpins: 3,
+          remainingSpins: freeSpinsPerDay,
           dailySpinCount: 0,
-          lastSpinDate: todayDateStr
+          lastSpinDate: todayDateStr,
+          lastSpinTime: null
         };
         await setDoc(stateDocRef, initialState);
-        return res.json({ ...initialState, currency });
+        stateData = initialState;
+      } else {
+        stateData = stateSnap.data();
+        console.log(`[DB TRACE] Existing state loaded for user: ${userId}:`);
+        console.log(` - Remaining Spins: ${stateData.remainingSpins}`);
+        console.log(` - Daily Spin Count: ${stateData.dailySpinCount}`);
+        console.log(` - Last Spin Date: ${stateData.lastSpinDate}`);
+        console.log(` - Last Spin Time: ${stateData.lastSpinTime}`);
+
+        // Evaluate reset condition
+        if (!stateData.lastSpinTime) {
+          if (stateData.lastSpinDate !== todayDateStr) {
+            needsReset = true;
+          }
+        } else {
+          const lastSpinTime = new Date(stateData.lastSpinTime);
+          if (lastSpinTime.getTime() < resetTimeIST.getTime()) {
+            needsReset = true;
+          }
+        }
+
+        console.log(`[DB TRACE] Daily Reset Evaluation: Needs Reset = ${needsReset}`);
+
+        if (needsReset) {
+          console.log(`[DB TRACE] Triggering daily reset. Resetting spins to config value: ${freeSpinsPerDay}.`);
+          const resetState = {
+            userId,
+            remainingSpins: freeSpinsPerDay,
+            dailySpinCount: 0,
+            lastSpinDate: todayDateStr,
+            lastSpinTime: stateData.lastSpinTime || null
+          };
+          await setDoc(stateDocRef, resetState, { merge: true });
+          stateData = resetState;
+        }
       }
 
-      const stateData = stateSnap.data();
-      if (stateData.lastSpinDate !== todayDateStr) {
-        // Reset daily limits
-        const resetState = {
-          userId,
-          remainingSpins: 3,
-          dailySpinCount: 0,
-          lastSpinDate: todayDateStr
-        };
-        await setDoc(stateDocRef, resetState, { merge: true });
-        return res.json({ ...resetState, currency });
-      }
+      const finalRemainingSpins = stateData.remainingSpins ?? freeSpinsPerDay;
+      const finalDailySpinCount = stateData.dailySpinCount ?? 0;
+
+      console.log(`[DB TRACE] Final values actually used for user status response:`);
+      console.log(` - Remaining Spins: ${finalRemainingSpins}`);
+      console.log(` - Daily Spin Count: ${finalDailySpinCount}`);
+      console.log("============================================================");
 
       return res.json({
+        enabled: true,
         userId,
-        remainingSpins: stateData.remainingSpins ?? 3,
-        dailySpinCount: stateData.dailySpinCount ?? 0,
+        remainingSpins: finalRemainingSpins,
+        dailySpinCount: finalDailySpinCount,
         lastSpinDate: stateData.lastSpinDate,
-        currency
+        lastSpinTime: stateData.lastSpinTime || null,
+        currency,
+        settings: {
+          dailyBonusEnabled: enabled,
+          freeSpinsPerDay,
+          resetTime,
+          claimTimer,
+          rewardList
+        }
       });
     } catch (e: any) {
       console.error("Error in /api/daily-bonus/status:", e);
@@ -3482,36 +3581,144 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const { userId, rewardAmount } = req.body;
       if (!userId) return res.status(400).json({ error: "Missing userId" });
 
+      const settingsDocRef = doc(db, "settings", "daily_bonus");
+      const settingsSnap = await getDoc(settingsDocRef);
+      if (!settingsSnap.exists()) {
+        return res.status(500).json({ error: "Daily Bonus settings not found" });
+      }
+
+      const settings = settingsSnap.data();
+      const enabled = settings.dailyBonusEnabled ?? true;
+      const freeSpinsPerDay = Number(settings.freeSpinsPerDay ?? 1);
+      const resetTime = settings.resetTime ?? "00:00";
+      const claimTimer = Number(settings.claimTimer ?? 0);
+      const rewardList = settings.rewardList ?? [];
+
+      console.log("================= DAILY BONUS SPIN TRACE =================");
+      console.log(`[DB TRACE] Spin request received for user: ${userId}, rewardAmount: ${rewardAmount}`);
+      console.log(`[DB TRACE] Loaded Settings: enabled=${enabled}, freeSpinsPerDay=${freeSpinsPerDay}, claimTimer=${claimTimer}s`);
+
+      if (!enabled) {
+        console.log(`[DB TRACE] Spin rejected: Daily Bonus is disabled globally.`);
+        console.log("==========================================================");
+        return res.status(400).json({ error: "Daily Bonus is currently disabled" });
+      }
+
       const todayDateStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
       const stateDocRef = doc(db, "daily_bonus_state", userId);
       const stateSnap = await getDoc(stateDocRef);
 
-      let currentRemainingSpins = 3;
-      let currentDailySpinCount = 0;
+      const getMostRecentResetTimeInIST = (resetTimeStr: string): Date => {
+        const [hours, minutes] = resetTimeStr.split(":").map(Number);
+        const now = new Date();
+        const formatter = new Intl.DateTimeFormat("en-US", {
+          timeZone: "Asia/Kolkata",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+        const parts = formatter.format(now).split("/"); // MM/DD/YYYY
+        const istMonth = parts[0];
+        const istDay = parts[1];
+        const istYear = parts[2];
 
-      if (stateSnap.exists()) {
-        const stateData = stateSnap.data();
-        if (stateData.lastSpinDate === todayDateStr) {
-          currentRemainingSpins = stateData.remainingSpins ?? 3;
-          currentDailySpinCount = stateData.dailySpinCount ?? 0;
+        const isoStr = `${istYear}-${istMonth}-${istDay}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00+05:30`;
+        const todayReset = new Date(isoStr);
+
+        if (now.getTime() >= todayReset.getTime()) {
+          return todayReset;
+        } else {
+          return new Date(todayReset.getTime() - 24 * 60 * 60 * 1000);
+        }
+      };
+
+      const resetTimeIST = getMostRecentResetTimeInIST(resetTime);
+      let stateData: any = null;
+      let needsReset = false;
+
+      if (!stateSnap.exists()) {
+        console.log(`[DB TRACE] No state doc exists during spin. Creating initial state with ${freeSpinsPerDay} spins.`);
+        const initialState = {
+          userId,
+          remainingSpins: freeSpinsPerDay,
+          dailySpinCount: 0,
+          lastSpinDate: todayDateStr,
+          lastSpinTime: null
+        };
+        await setDoc(stateDocRef, initialState);
+        stateData = initialState;
+      } else {
+        stateData = stateSnap.data();
+        
+        // Evaluate reset condition
+        if (!stateData.lastSpinTime) {
+          if (stateData.lastSpinDate !== todayDateStr) {
+            needsReset = true;
+          }
+        } else {
+          const lastSpinTime = new Date(stateData.lastSpinTime);
+          if (lastSpinTime.getTime() < resetTimeIST.getTime()) {
+            needsReset = true;
+          }
+        }
+
+        console.log(`[DB TRACE] Spin Reset Check: needsReset=${needsReset}`);
+
+        if (needsReset) {
+          console.log(`[DB TRACE] Spin Reset triggered. Resetting spins to config value: ${freeSpinsPerDay}.`);
+          const resetState = {
+            userId,
+            remainingSpins: freeSpinsPerDay,
+            dailySpinCount: 0,
+            lastSpinDate: todayDateStr,
+            lastSpinTime: stateData.lastSpinTime || null
+          };
+          await setDoc(stateDocRef, resetState, { merge: true });
+          stateData = resetState;
         }
       }
 
+      let currentRemainingSpins = stateData.remainingSpins ?? freeSpinsPerDay;
+      let currentDailySpinCount = stateData.dailySpinCount ?? 0;
+
+      // Timer validation check (Claim Timer / Cool-down between spins)
+      if (stateData.lastSpinTime) {
+        const lastSpinTime = new Date(stateData.lastSpinTime);
+        const elapsedSeconds = (Date.now() - lastSpinTime.getTime()) / 1000;
+        console.log(`[DB TRACE] Timer check: ${elapsedSeconds.toFixed(1)}s elapsed since last spin (required cooldown: ${claimTimer}s)`);
+        
+        if (elapsedSeconds < claimTimer) {
+          const secondsRemaining = Math.ceil(claimTimer - elapsedSeconds);
+          console.log(`[DB TRACE] Spin rejected: Cooldown active. Wait ${secondsRemaining}s.`);
+          console.log("==========================================================");
+          return res.status(400).json({ error: `Please wait ${secondsRemaining} seconds before spinning again.` });
+        }
+      }
+
+      // Remaining Spins check
       if (currentRemainingSpins <= 0) {
+        console.log(`[DB TRACE] Spin rejected: No spins remaining. (${currentRemainingSpins}/${freeSpinsPerDay})`);
+        console.log("==========================================================");
         return res.status(400).json({ error: "No spins remaining today" });
       }
 
+      // Deduct spin
       const nextRemainingSpins = currentRemainingSpins - 1;
       const nextDailySpinCount = currentDailySpinCount + 1;
+      const nowISO = new Date().toISOString();
 
       const newState = {
         userId,
         remainingSpins: nextRemainingSpins,
         dailySpinCount: nextDailySpinCount,
-        lastSpinDate: todayDateStr
+        lastSpinDate: todayDateStr,
+        lastSpinTime: nowISO
       };
 
       await setDoc(stateDocRef, newState, { merge: true });
+      console.log(`[DB TRACE] Spin successful. Saved state: ${JSON.stringify(newState)}`);
+      console.log("==========================================================");
+
       return res.json({
         ok: true,
         remainingSpins: nextRemainingSpins,
@@ -3530,9 +3737,29 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       if (!userId) return res.status(400).json({ error: "Missing userId" });
       if (rewardAmount === undefined) return res.status(400).json({ error: "Missing rewardAmount" });
 
+      console.log("================= DAILY BONUS CLAIM TRACE =================");
+      console.log(`[DB TRACE] Claim request received. User: ${userId}, Reward: ₹${rewardAmount}`);
+      console.log(`[DB TRACE] Remaining spins passed: ${remainingSpins}, Daily count: ${dailySpinCount}`);
+
+      // Validate if reward configuration permits this amount
+      const settingsDocRef = doc(db, "settings", "daily_bonus");
+      const settingsSnap = await getDoc(settingsDocRef);
+      if (settingsSnap.exists()) {
+        const settings = settingsSnap.data();
+        const rewardList = settings.rewardList ?? [];
+        const isValidReward = rewardList.some((r: any) => Number(r.amount) === Number(rewardAmount) && r.status === "Active");
+        if (!isValidReward) {
+          console.warn(`[DB TRACE] WARNING: Claimed amount ₹${rewardAmount} is not in the active reward settings list!`);
+        } else {
+          console.log(`[DB TRACE] Verified reward amount is valid and active in Firestore.`);
+        }
+      }
+
       const userDocRef = doc(db, "users", userId);
       const userDoc = await getDoc(userDocRef);
       if (!userDoc.exists()) {
+        console.log(`[DB TRACE] Claim failed: User ${userId} not found in DB.`);
+        console.log("==========================================================");
         return res.status(404).json({ error: "User not found" });
       }
 
@@ -3540,12 +3767,17 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const fileEarnings = uData?.fileEarnings || 0;
       const linkEarnings = uData?.linkEarnings || 0;
       const referralEarnings = uData?.referralEarnings || 0;
-      const bonusBalance = (uData?.bonusBalance || 0) + Number(rewardAmount);
+      const oldBonusBalance = uData?.bonusBalance || 0;
+      const bonusBalance = oldBonusBalance + Number(rewardAmount);
       const withdrawnAmount = uData?.withdrawnAmount || 0;
       const pendingWithdrawals = uData?.pendingWithdrawals || 0;
       const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance - withdrawnAmount - pendingWithdrawals;
       const bonus = (uData?.bonus || 0) + Number(rewardAmount);
       const earnings = (uData?.earnings || 0) + Number(rewardAmount);
+
+      console.log(`[DB TRACE] Updating User Document:`);
+      console.log(` - Old Bonus Balance: ₹${oldBonusBalance.toFixed(2)} -> New: ₹${bonusBalance.toFixed(2)}`);
+      console.log(` - Available Balance: ₹${availableBalance.toFixed(2)}`);
 
       // Save user doc updates
       await setDoc(userDocRef, {
@@ -3585,31 +3817,41 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         addDoc(collection(db, "transactionHistory"), txData)
       ]);
 
+      console.log(`[DB TRACE] Transaction logs saved successfully.`);
+
       // Fetch Bot Token & Notify user on Telegram
       const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
       const botToken = settingsDoc.data()?.botToken;
 
       if (botToken) {
         const messageText = `🎉 *Daily Bonus Claimed*
-
+ 
 💰 *Reward:*
 ₹${Number(rewardAmount).toFixed(2)}
-
+ 
 🎡 *Remaining Spins:*
 ${remainingSpins}
-
+ 
 Bonus added successfully.`;
 
-        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: Number(userId),
-            text: messageText,
-            parse_mode: "Markdown"
-          })
-        });
+        try {
+          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: Number(userId),
+              text: messageText,
+              parse_mode: "Markdown"
+            })
+          });
+          console.log(`[DB TRACE] Sent success notification on Telegram.`);
+        } catch (tgErr) {
+          console.error(`[DB TRACE] Telegram notification failed:`, tgErr);
+        }
       }
+
+      console.log(`[DB TRACE] Claim complete.`);
+      console.log("==========================================================");
 
       return res.json({ ok: true });
     } catch (e: any) {

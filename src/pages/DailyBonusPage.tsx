@@ -16,10 +16,16 @@ const REWARDS = [
 
 export default function DailyBonusPage() {
   const [userId, setUserId] = useState<string | null>(null);
-  const [remainingSpins, setRemainingSpins] = useState<number>(3);
+  const [remainingSpins, setRemainingSpins] = useState<number>(0);
   const [dailySpinCount, setDailySpinCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [currency, setCurrency] = useState<string>("INR");
+
+  // Dynamic Settings states loaded from Firestore settings
+  const [rewards, setRewards] = useState<{ amount: number; label: string }[]>([]);
+  const [claimTimerConfig, setClaimTimerConfig] = useState<number>(25);
+  const [freeSpinsPerDayConfig, setFreeSpinsPerDayConfig] = useState<number>(3);
+  const [dailyBonusEnabled, setDailyBonusEnabled] = useState<boolean>(true);
 
   const formatCurrency = (amount: number) => {
     if (currency === "USD") {
@@ -71,6 +77,9 @@ export default function DailyBonusPage() {
     fetch(`${API_BASE}/api/daily-bonus/status?userId=${userId}`)
       .then(res => res.json())
       .then(data => {
+        console.log("================= DAILY BONUS STATUS TRACE (FRONTEND) =================");
+        console.log("[DB STATUS] Response from server:", data);
+        
         if (data && data.remainingSpins !== undefined) {
           setRemainingSpins(data.remainingSpins);
           setDailySpinCount(data.dailySpinCount);
@@ -78,6 +87,38 @@ export default function DailyBonusPage() {
         if (data && data.currency) {
           setCurrency(data.currency);
         }
+        if (data && data.settings) {
+          const activeRewards = (data.settings.rewardList || [])
+            .filter((r: any) => r.status === "Active")
+            .map((r: any) => ({
+              amount: Number(r.amount),
+              label: `₹${Number(r.amount).toFixed(2)}`
+            }));
+          
+          console.log("[DB STATUS] Active dynamic rewards loaded:", activeRewards);
+          
+          if (activeRewards.length > 0) {
+            setRewards(activeRewards);
+          } else {
+            console.warn("[DB STATUS] No active rewards found in Firestore, using dynamic wheel fallback.");
+            setRewards([
+              { amount: 0.10, label: "₹0.10" },
+              { amount: 0.20, label: "₹0.20" },
+              { amount: 0.50, label: "₹0.50" },
+              { amount: 1.00, label: "₹1.00" },
+              { amount: 2.00, label: "₹2.00" },
+              { amount: 5.00, label: "₹5.00" }
+            ]);
+          }
+
+          setClaimTimerConfig(Number(data.settings.claimTimer ?? 25));
+          setTimer(Number(data.settings.claimTimer ?? 25));
+          setFreeSpinsPerDayConfig(Number(data.settings.freeSpinsPerDay ?? 3));
+          setDailyBonusEnabled(data.settings.dailyBonusEnabled ?? true);
+
+          console.log(`[DB STATUS] Loaded config values: enabled=${data.settings.dailyBonusEnabled}, spinsPerDay=${data.settings.freeSpinsPerDay}, claimTimer=${data.settings.claimTimer}s`);
+        }
+        console.log("=======================================================================");
       })
       .catch(err => {
         console.error("Error loading daily bonus state:", err);
