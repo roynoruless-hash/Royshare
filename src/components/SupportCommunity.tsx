@@ -26,6 +26,7 @@ const supportCards = [
     title: "Telegram Support",
     description: "Get instant help from our official Telegram support.",
     buttonText: "Open Telegram",
+    url: "https://t.me/Roysharearn_bot",
     icon: Send,
     color: "blue"
   },
@@ -34,6 +35,7 @@ const supportCards = [
     title: "Email Support",
     description: "Contact our support team for technical issues.",
     buttonText: "Send Email",
+    url: "mailto:support@royshare.in?subject=RoyShare%20Support%20Request",
     icon: Mail,
     color: "purple"
   },
@@ -42,6 +44,7 @@ const supportCards = [
     title: "Community",
     description: "Join the RoyShare Community to learn, discuss and stay updated.",
     buttonText: "Join Community",
+    url: "https://t.me/royshare_official",
     icon: Users,
     color: "emerald"
   },
@@ -50,6 +53,7 @@ const supportCards = [
     title: "Bug Report",
     description: "Found a bug or issue? Report it directly to our team.",
     buttonText: "Report Bug",
+    url: "https://t.me/Roysharearn_bot",
     icon: Bug,
     color: "rose"
   },
@@ -58,6 +62,7 @@ const supportCards = [
     title: "Feature Request",
     description: "Suggest new features to improve RoyShare.",
     buttonText: "Send Suggestion",
+    url: "https://t.me/royshare_official",
     icon: Lightbulb,
     color: "amber"
   },
@@ -67,6 +72,7 @@ const supportCards = [
     description: "Check if all RoyShare services are online.",
     status: "🟢 All Systems Operational",
     buttonText: "View Status",
+    url: "/status",
     icon: Activity,
     color: "cyan"
   }
@@ -111,10 +117,15 @@ const SupportCard = memo(({ card, index }: { card: typeof supportCards[0], index
         </div>
       )}
 
-      <button className="w-full py-4 px-6 rounded-2xl bg-white/5 border border-white/10 text-white font-bold text-sm hover:bg-white hover:text-slate-950 transition-all flex items-center justify-center gap-2 mt-auto">
+      <a 
+        href={card.url}
+        target={card.url.startsWith('http') || card.url.startsWith('mailto') ? "_blank" : undefined}
+        rel={card.url.startsWith('http') ? "noopener noreferrer" : undefined}
+        className="w-full py-4 px-6 rounded-2xl bg-white/5 border border-white/10 text-white font-bold text-sm hover:bg-white hover:text-slate-950 transition-all flex items-center justify-center gap-2 mt-auto cursor-pointer relative z-20"
+      >
         {card.buttonText}
         <ArrowRight className="w-4 h-4" />
-      </button>
+      </a>
     </div>
   </motion.div>
 ));
@@ -245,6 +256,7 @@ const SupportCommunity = ({ featuredOnly = false }: { featuredOnly?: boolean }) 
                     whileHover={{ scale: 1.1, y: -5 }}
                     className="relative group p-4 bg-white/5 border border-white/10 rounded-2xl transition-all"
                     title={social.name}
+                    aria-label={social.name}
                   >
                     <social.icon className="w-6 h-6 text-slate-400 group-hover:text-white transition-colors" />
                   </motion.a>
@@ -270,6 +282,7 @@ const SupportCommunity = ({ featuredOnly = false }: { featuredOnly?: boolean }) 
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
+                    onClick={() => window.open('https://t.me/Roysharearn_bot', '_blank', 'noopener,noreferrer')}
                     className="w-full sm:w-auto px-10 py-5 bg-white text-slate-950 font-bold rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3"
                   >
                     <MessageCircle className="w-6 h-6" />
@@ -278,7 +291,7 @@ const SupportCommunity = ({ featuredOnly = false }: { featuredOnly?: boolean }) 
                 <motion.a
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  href="https://t.me/Roysharearn_bot"
+                  href="https://t.me/royshare_official"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full sm:w-auto px-10 py-5 bg-blue-600 text-white font-bold rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3"

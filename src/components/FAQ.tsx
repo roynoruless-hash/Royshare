@@ -173,7 +173,10 @@ const HelpCard = memo(({ card, index }: { card: typeof helpCenterCards[0], index
     </div>
     <h3 className="text-lg font-bold text-white mb-2">{card.title}</h3>
     <p className="text-slate-500 text-sm mb-6 flex-grow leading-relaxed">{card.description}</p>
-    <button className="flex items-center gap-2 text-blue-400 text-sm font-bold group/btn hover:text-blue-300 transition-colors">
+    <button 
+      onClick={() => window.location.href = '/help'}
+      className="flex items-center gap-2 text-blue-400 text-sm font-bold group/btn hover:text-blue-300 transition-colors"
+    >
       Read Guide <ChevronRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform" />
     </button>
   </motion.div>
@@ -284,6 +287,7 @@ const FAQSection = memo(({ featuredOnly = false }: { featuredOnly?: boolean }) =
             <input
               type="text"
               placeholder="Search help articles..."
+              aria-label="Search help articles"
               className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-14 pr-6 text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50 focus:bg-white/8 transition-all"
             />
           </motion.div>
@@ -341,6 +345,7 @@ const FAQSection = memo(({ featuredOnly = false }: { featuredOnly?: boolean }) =
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-8 py-4 bg-white/10 text-white font-bold rounded-2xl border border-white/10 hover:bg-white/20 transition-all"
+                  onClick={() => window.location.href = '/help'}
                 >
                   <BookOpen className="w-5 h-5" />
                   📚 View Help Center

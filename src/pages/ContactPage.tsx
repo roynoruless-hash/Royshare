@@ -13,7 +13,8 @@ import {
   ShieldCheck,
   CheckCircle2,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  Activity
 } from "lucide-react";
 import AnimatedBackground from "../components/AnimatedBackground";
 import Footer from "../components/Footer";
@@ -22,9 +23,9 @@ const contactMethods = [
   {
     icon: Send,
     title: "Telegram Support",
-    description: "Get quick support through our official Telegram.",
+    description: "Get quick support through our official Telegram support bot.",
     buttonText: "Open Telegram",
-    url: "https://t.me/RoyShareBot",
+    url: "https://t.me/Roysharearn_bot",
     color: "blue"
   },
   {
@@ -32,7 +33,7 @@ const contactMethods = [
     title: "Email Support",
     description: "Send us your questions or technical issues.",
     buttonText: "Send Email",
-    url: "mailto:support@royshare.com",
+    url: "mailto:support@royshare.in?subject=RoyShare%20Support%20Request",
     color: "purple"
   },
   {
@@ -40,7 +41,7 @@ const contactMethods = [
     title: "Community",
     description: "Join our official community and stay updated.",
     buttonText: "Join Community",
-    url: "https://t.me/RoyShareCommunity",
+    url: "https://t.me/royshare_official",
     color: "emerald"
   },
   {
@@ -48,7 +49,7 @@ const contactMethods = [
     title: "Report a Bug",
     description: "Found an issue? Let us know so we can fix it.",
     buttonText: "Report Bug",
-    url: "#",
+    url: "https://t.me/Roysharearn_bot",
     color: "rose"
   }
 ];
@@ -116,7 +117,7 @@ const ContactPage = () => {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: i * 0.1 }}
-              className="p-8 rounded-[2rem] bg-white/5 border border-white/10 backdrop-blur-xl hover:bg-white/10 transition-all duration-300 group flex flex-col h-full"
+              className="p-8 rounded-[2rem] bg-white/5 border border-white/10 backdrop-blur-xl hover:bg-white/10 transition-all duration-300 group flex flex-col h-full relative"
             >
               <div className={`w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center mb-6 border border-white/10 group-hover:scale-110 transition-transform`}>
                 <method.icon className="w-7 h-7 text-white" />
@@ -125,9 +126,9 @@ const ContactPage = () => {
               <p className="text-slate-500 text-sm mb-8 flex-grow leading-relaxed">{method.description}</p>
               <a 
                 href={method.url}
-                target={method.url.startsWith('http') ? "_blank" : undefined}
-                rel="noopener noreferrer"
-                className="w-full py-4 rounded-xl bg-white/5 border border-white/10 text-white font-bold text-sm hover:bg-white hover:text-slate-950 transition-all flex items-center justify-center gap-2 mt-auto"
+                target={method.url.startsWith('http') || method.url.startsWith('mailto') ? "_blank" : undefined}
+                rel={method.url.startsWith('http') ? "noopener noreferrer" : undefined}
+                className="w-full py-4 rounded-xl bg-white/5 border border-white/10 text-white font-bold text-sm hover:bg-white hover:text-slate-950 transition-all flex items-center justify-center gap-2 mt-auto relative z-20 cursor-pointer"
               >
                 {method.buttonText}
                 <ExternalLink className="w-4 h-4" />
@@ -320,10 +321,10 @@ const ContactPage = () => {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="w-full sm:w-auto px-10 py-5 bg-blue-600 text-white font-bold rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3"
-                onClick={() => window.location.href = '/faq'}
+                onClick={() => window.location.href = '/status'}
               >
-                <HelpCircle className="w-6 h-6" />
-                Help Center
+                <Activity className="w-6 h-6" />
+                View Status
               </motion.button>
             </div>
           </div>

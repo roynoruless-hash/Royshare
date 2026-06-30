@@ -270,26 +270,22 @@ const HelpCenterPage = () => {
               Our support team is always ready to assist you. Whether it's a technical issue or a general question, we're just a message away.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="w-full sm:w-auto px-10 py-5 bg-blue-600 text-white font-bold rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3"
-                onClick={() => window.location.href = '/contact'}
+              <a
+                href="/contact"
+                className="w-full sm:w-auto px-10 py-5 bg-blue-600 text-white font-bold rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3 hover:bg-blue-500 hover:scale-105"
               >
                 <MessageSquare className="w-6 h-6" />
                 Contact Support
-              </motion.button>
-              <motion.a
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+              </a>
+              <a
                 href="https://t.me/Roysharearn_bot"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full sm:w-auto px-10 py-5 bg-white/5 border border-white/10 text-white font-bold rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3"
+                className="w-full sm:w-auto px-10 py-5 bg-white/5 border border-white/10 text-white font-bold rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3 hover:bg-white/10 hover:scale-105"
               >
                 <Send className="w-6 h-6" />
                 Telegram Support
-              </motion.a>
+              </a>
             </div>
           </div>
         </motion.div>

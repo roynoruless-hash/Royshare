@@ -99,7 +99,7 @@ FeatureCard.displayName = "FeatureCard";
 
 const Features = memo(() => {
   return (
-    <section className="relative py-20 sm:py-24 px-6 bg-slate-950 overflow-hidden">
+    <section id="features" className="relative py-20 sm:py-24 px-6 bg-slate-950 overflow-hidden">
       {/* Decorative background glow */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl h-96 bg-blue-600/5 blur-[120px] rounded-full pointer-events-none" />
 

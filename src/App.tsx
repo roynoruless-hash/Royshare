@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { API_BASE } from "./config/api";
 import AnimatedBackground from "./components/AnimatedBackground";
 import Hero from "./components/Hero";
@@ -16,37 +16,38 @@ import SupportCommunity from "./components/SupportCommunity";
 import CTA from "./components/CTA";
 import Footer from "./components/Footer";
 import AdminLogin from "./components/AdminLogin";
-import AdminDashboard from "./pages/AdminDashboard";
 import MultiPageEngine from "./components/MultiPageEngine";
-import DailyBonusPage from "./pages/DailyBonusPage";
-import EarnRewardsPage from "./pages/EarnRewardsPage";
-import RewardTasksPage from "./pages/RewardTasksPage";
-import VerifyWithdrawalPage from "./pages/VerifyWithdrawalPage";
-import AdTestPage from "./pages/AdTestPage";
-import CustomerSupportPage from "./pages/CustomerSupportPage";
-import DriveUploadPage from "./pages/DriveUploadPage";
-import AboutPage from "./pages/AboutPage";
-import ContactPage from "./pages/ContactPage";
-import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
-import TermsPage from "./pages/TermsPage";
-import DashboardPage from "./pages/DashboardPage";
-import CookiePolicyPage from "./pages/CookiePolicyPage";
-import DisclaimerPage from "./pages/DisclaimerPage";
-import DMCAPage from "./pages/DMCAPage";
-import CopyrightPolicyPage from "./pages/CopyrightPolicyPage";
-import AcceptableUsePolicyPage from "./pages/AcceptableUsePolicyPage";
-import HelpCenterPage from "./pages/HelpCenterPage";
-import SystemStatusPage from "./pages/SystemStatusPage";
-import RoadmapPage from "./pages/RoadmapPage";
-import ChangelogPage from "./pages/ChangelogPage";
-import GoogleDriveFeaturePage from "./pages/GoogleDriveFeaturePage";
-import TelegramIntegrationPage from "./pages/TelegramIntegrationPage";
-import SmartLinkFeaturePage from "./pages/SmartLinkFeaturePage";
-import RewardEarningsPage from "./pages/RewardEarningsPage";
-import RealTimeAnalyticsPage from "./pages/RealTimeAnalyticsPage";
-import ReferralProgramPage from "./pages/ReferralProgramPage";
-import EnterpriseSecurityPage from "./pages/EnterpriseSecurityPage";
-import FastGlobalDeliveryPage from "./pages/FastGlobalDeliveryPage";
+
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const DailyBonusPage = lazy(() => import("./pages/DailyBonusPage"));
+const EarnRewardsPage = lazy(() => import("./pages/EarnRewardsPage"));
+const RewardTasksPage = lazy(() => import("./pages/RewardTasksPage"));
+const VerifyWithdrawalPage = lazy(() => import("./pages/VerifyWithdrawalPage"));
+const AdTestPage = lazy(() => import("./pages/AdTestPage"));
+const CustomerSupportPage = lazy(() => import("./pages/CustomerSupportPage"));
+const DriveUploadPage = lazy(() => import("./pages/DriveUploadPage"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
+const ContactPage = lazy(() => import("./pages/ContactPage"));
+const PrivacyPolicyPage = lazy(() => import("./pages/PrivacyPolicyPage"));
+const TermsPage = lazy(() => import("./pages/TermsPage"));
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const CookiePolicyPage = lazy(() => import("./pages/CookiePolicyPage"));
+const DisclaimerPage = lazy(() => import("./pages/DisclaimerPage"));
+const DMCAPage = lazy(() => import("./pages/DMCAPage"));
+const CopyrightPolicyPage = lazy(() => import("./pages/CopyrightPolicyPage"));
+const AcceptableUsePolicyPage = lazy(() => import("./pages/AcceptableUsePolicyPage"));
+const HelpCenterPage = lazy(() => import("./pages/HelpCenterPage"));
+const SystemStatusPage = lazy(() => import("./pages/SystemStatusPage"));
+const RoadmapPage = lazy(() => import("./pages/RoadmapPage"));
+const ChangelogPage = lazy(() => import("./pages/ChangelogPage"));
+const GoogleDriveFeaturePage = lazy(() => import("./pages/GoogleDriveFeaturePage"));
+const TelegramIntegrationPage = lazy(() => import("./pages/TelegramIntegrationPage"));
+const SmartLinkFeaturePage = lazy(() => import("./pages/SmartLinkFeaturePage"));
+const RewardEarningsPage = lazy(() => import("./pages/RewardEarningsPage"));
+const RealTimeAnalyticsPage = lazy(() => import("./pages/RealTimeAnalyticsPage"));
+const ReferralProgramPage = lazy(() => import("./pages/ReferralProgramPage"));
+const EnterpriseSecurityPage = lazy(() => import("./pages/EnterpriseSecurityPage"));
+const FastGlobalDeliveryPage = lazy(() => import("./pages/FastGlobalDeliveryPage"));
 
 import MoreMenu from "./components/MoreMenu";
 
@@ -341,7 +342,13 @@ export default function App() {
   return (
     <>
       <MoreMenu />
-      {renderContent()}
+      <Suspense fallback={
+        <div className="min-h-screen bg-[#020617] flex items-center justify-center">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      }>
+        {renderContent()}
+      </Suspense>
     </>
   );
 }

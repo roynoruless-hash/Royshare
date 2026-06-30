@@ -47,8 +47,8 @@ export default function CustomerSupportPage() {
   const [settings, setSettings] = useState<SupportSettings>({
     aiEnabled: true,
     liveChatEnabled: true,
-    supportTelegram: "",
-    supportEmail: "support@royshare.com"
+    supportTelegram: "Roysharearn_bot",
+    supportEmail: "support@royshare.in"
   });
 
   // User tickets list
@@ -429,7 +429,13 @@ export default function CustomerSupportPage() {
 
             {/* 📞 Contact Admin */}
             <a
-              href={settings.supportTelegram ? (settings.supportTelegram.startsWith("@") ? `https://t.me/${settings.supportTelegram.replace("@", "")}` : settings.supportTelegram) : `mailto:${settings.supportEmail}`}
+              href={settings.supportTelegram 
+                ? (settings.supportTelegram.startsWith("http") 
+                    ? settings.supportTelegram 
+                    : (settings.supportTelegram.startsWith("@") 
+                        ? `https://t.me/${settings.supportTelegram.replace("@", "")}` 
+                        : `https://t.me/${settings.supportTelegram}`))
+                : `mailto:${settings.supportEmail}?subject=RoyShare%20Support%20Request`}
               target="_blank"
               rel="noopener noreferrer"
               className="group p-5 bg-slate-900/60 border border-slate-800 rounded-2xl text-left hover:border-amber-500/50 hover:bg-slate-900 transition-all flex flex-col justify-between h-40 shadow-lg relative overflow-hidden"

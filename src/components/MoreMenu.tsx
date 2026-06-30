@@ -166,6 +166,7 @@ const MoreMenu = () => {
                     href={social.href}
                     target="_blank"
                     rel="noopener noreferrer"
+                    aria-label={social.name}
                     whileHover={{ scale: 1.2, y: -2 }}
                     className="text-slate-500 hover:text-white transition-colors"
                   >

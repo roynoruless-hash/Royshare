@@ -229,6 +229,7 @@ const Footer = ({ hideCTA = false }: FooterProps) => {
                   whileHover={{ scale: 1.1, y: -5 }}
                   className="w-12 h-12 flex items-center justify-center rounded-full bg-white/5 border border-white/10 text-slate-500 hover:text-white hover:bg-white/10 transition-all relative group"
                   title={social.name}
+                  aria-label={social.name}
                 >
                   <social.icon className="w-5 h-5" />
                 </motion.a>

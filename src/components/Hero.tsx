@@ -162,13 +162,14 @@ export default function Hero({ onTriggerAdmin }: { onTriggerAdmin: () => void })
             >
               🚀 Start Sharing
             </motion.a>
-            <motion.button
+            <motion.a
+              href="#features"
               whileHover={{ scale: 1.05, backgroundColor: "rgba(255, 255, 255, 0.1)" }}
               whileTap={{ scale: 0.95 }}
-              className="w-full sm:w-auto px-8 sm:px-10 py-4 sm:py-5 bg-white/5 border border-white/10 rounded-2xl text-white font-bold text-lg transition-all"
+              className="w-full sm:w-auto px-8 sm:px-10 py-4 sm:py-5 bg-white/5 border border-white/10 rounded-2xl text-white font-bold text-lg transition-all flex items-center justify-center"
             >
               ✨ View Features
-            </motion.button>
+            </motion.a>
           </motion.div>
 
           <motion.div 
