@@ -113,12 +113,14 @@ export default function VerifyWithdrawalPage({ userId }: { userId: string }) {
               <p className="text-xs text-slate-500 mb-1">Withdrawal Status:</p>
               <p className="text-sm font-semibold text-yellow-400">🟡 Pending Review</p>
             </div>
-            <button 
-              onClick={() => window.location.href = 'https://t.me/royshare_bot'}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-colors"
+            <a 
+              href="https://t.me/Roysharearn_bot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-colors flex items-center justify-center"
             >
               ↩️ Return To Telegram Bot
-            </button>
+            </a>
           </div>
         ) : (
           <div className="text-center">

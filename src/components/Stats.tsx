@@ -1,9 +1,9 @@
+import React, { useEffect, useState, memo } from "react";
 import { motion, useSpring, useTransform, animate } from "motion/react";
-import { useEffect, useState } from "react";
 import { Users, Folder, Link2, Rocket } from "lucide-react";
 import { API_BASE } from "../config/api";
 
-function CounterCard({ value, label, icon: Icon, delay = 0 }: { value: number; label: string; icon: any, delay?: number }) {
+const CounterCard = memo(({ value, label, icon: Icon, delay = 0 }: { value: number; label: string; icon: any, delay?: number }) => {
   const count = useSpring(0, { duration: 3 });
   
   useEffect(() => {
@@ -26,7 +26,7 @@ function CounterCard({ value, label, icon: Icon, delay = 0 }: { value: number; l
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ duration: 0.5, delay }}
-      className="flex items-center gap-4 px-6 py-4 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl group"
+      className="flex items-center gap-4 px-6 py-4 bg-white/5 border border-white/10 rounded-2xl group will-change-transform"
     >
       <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 group-hover:bg-blue-500/20 transition-colors">
         <Icon className="w-6 h-6 text-blue-400" />
@@ -39,7 +39,9 @@ function CounterCard({ value, label, icon: Icon, delay = 0 }: { value: number; l
       </div>
     </motion.div>
   );
-}
+});
+
+CounterCard.displayName = "CounterCard";
 
 export default function Stats() {
   const [stats, setStats] = useState<any>(null);
@@ -69,7 +71,7 @@ export default function Stats() {
           <motion.div 
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="flex items-center justify-center gap-3 py-8 px-12 bg-white/5 backdrop-blur-md border border-white/10 rounded-3xl w-fit mx-auto shadow-2xl"
+            className="flex items-center justify-center gap-3 py-8 px-12 bg-white/5 border border-white/10 rounded-3xl w-fit mx-auto shadow-xl"
           >
             <Rocket className="w-8 h-8 text-blue-400 animate-bounce" />
             <span className="text-2xl md:text-3xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">

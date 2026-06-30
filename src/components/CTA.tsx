@@ -9,7 +9,7 @@ export default function CTA() {
   ];
 
   return (
-    <section className="py-20 px-6">
+    <section className="py-16 sm:py-20 px-6">
       <div className="max-w-4xl mx-auto p-12 bg-slate-900/50 rounded-[3rem] border border-white/10 text-center relative overflow-hidden backdrop-blur-xl">
         <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-blue-500/50 to-transparent" />
         
@@ -32,17 +32,20 @@ export default function CTA() {
             ))}
         </div>
 
-        <motion.button
+        <motion.a
+          href="https://t.me/Roysharearn_bot"
+          target="_blank"
+          rel="noopener noreferrer"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="relative px-8 py-4 bg-white text-slate-950 rounded-full font-semibold text-lg overflow-hidden group shadow-lg"
+          className="relative px-8 py-4 bg-white text-slate-950 rounded-full font-semibold text-lg overflow-hidden group shadow-lg inline-block"
         >
           <motion.div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-purple-400 opacity-0 group-hover:opacity-100 transition-opacity" />
           <span className="relative flex items-center gap-3 z-10 group-hover:text-white">
             <Send className="w-5 h-5" />
             Launch Telegram Bot
           </span>
-        </motion.button>
+        </motion.a>
       </div>
     </section>
   );
