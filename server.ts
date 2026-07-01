@@ -4102,6 +4102,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       
       const defaultSettings = {
         enabled: true,
+        requireAccessCode: true,
         adsterraBannerCode: "",
         monetagAdCode: "",
         expiryMinutes: 120,
@@ -4147,18 +4148,24 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const userData = userSnap.exists() ? userSnap.data() : null;
 
       // Check for active session
-      const sessionRef = doc(db, "promo_sessions", userId);
-      const sessionSnap = await getDoc(sessionRef);
-      let unlocked = false;
+      const requireAccessCode = settingsData.requireAccessCode ?? true;
+      let unlocked = !requireAccessCode;
       let session = null;
 
-      if (sessionSnap.exists()) {
-        const sData = sessionSnap.data();
-        const expiresAt = new Date(sData.expiresAt);
-        if (expiresAt > new Date()) {
-          unlocked = true;
-          session = sData;
+      if (requireAccessCode) {
+        console.log("Promo Locked");
+        const sessionRef = doc(db, "promo_sessions", userId);
+        const sessionSnap = await getDoc(sessionRef);
+        if (sessionSnap.exists()) {
+          const sData = sessionSnap.data();
+          const expiresAt = new Date(sData.expiresAt);
+          if (expiresAt > new Date()) {
+            unlocked = true;
+            session = sData;
+          }
         }
+      } else {
+        console.log("Promo Unlocked (No Access Code Required)");
       }
 
       res.json({
@@ -4186,11 +4193,12 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const expiryMinutes = settingsSnap.exists() ? (settingsSnap.data()?.expiryMinutes ?? 120) : 120;
 
       // Fetch the access code
-      const codeRef = doc(db, "promo_access_codes", accessCode.toUpperCase());
+      const codeRef = doc(db, "access_codes", accessCode.toUpperCase());
       const codeSnap = await getDoc(codeRef);
 
       if (!codeSnap.exists() || !codeSnap.data().enabled) {
         await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
+        console.log("Promo Locked: Invalid or Disabled Access Code");
         return res.status(400).json({ success: false, error: "Invalid Access Code. Please try again." });
       }
 
@@ -4199,12 +4207,14 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Verify start / end dates
       if (!isPromoActive(codeData.startDate, codeData.startTime, codeData.expiryDate, codeData.expiryTime)) {
         await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
+        console.log("Promo Locked: Code Expired or Inactive");
         return res.status(400).json({ success: false, error: "This Access Code has expired or is not yet active." });
       }
 
       // Verify max users limits
       if (codeData.maxUsers && codeData.usedCount >= codeData.maxUsers) {
         await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
+        console.log("Promo Locked: Max Users Limit Reached");
         return res.status(400).json({ success: false, error: "This Access Code has reached its maximum user limit." });
       }
 
@@ -4221,6 +4231,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Update analytics
       await updateDoc(settingsDocRef, { pageUnlockedCount: increment(1) });
 
+      console.log("Promo Unlocked");
       res.json({
         success: true,
         expiresAt
@@ -4239,23 +4250,31 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       if (!userId || !randomPageId) return res.status(400).json({ error: "Missing parameters" });
 
       const settingsDocRef = doc(db, "settings", "promo_rewards");
+      const settingsSnap = await getDoc(settingsDocRef);
+      const settingsData = settingsSnap.exists() ? settingsSnap.data() : {};
+      const requireAccessCode = settingsData.requireAccessCode ?? true;
 
-      // Verify Session exists and is active
-      const sessionRef = doc(db, "promo_sessions", userId);
-      const sessionSnap = await getDoc(sessionRef);
-      if (!sessionSnap.exists()) {
-        return res.status(400).json({ error: "Your access session has expired or is not active." });
-      }
-      const sData = sessionSnap.data();
-      if (new Date(sData.expiresAt) < new Date()) {
-        return res.status(400).json({ error: "Your access session has expired. Please unlock again." });
-      }
+      let sData: any = null;
+      let accessCodeRef: any = null;
 
-      // Check original Access Code
-      const accessCodeRef = doc(db, "promo_access_codes", sData.accessCode);
-      const accessSnap = await getDoc(accessCodeRef);
-      if (!accessSnap.exists() || !accessSnap.data().enabled) {
-        return res.status(400).json({ error: "The associated Access Code is no longer active." });
+      if (requireAccessCode) {
+        // Verify Session exists and is active
+        const sessionRef = doc(db, "promo_sessions", userId);
+        const sessionSnap = await getDoc(sessionRef);
+        if (!sessionSnap.exists()) {
+          return res.status(400).json({ error: "Your access session has expired or is not active." });
+        }
+        sData = sessionSnap.data();
+        if (new Date(sData.expiresAt) < new Date()) {
+          return res.status(400).json({ error: "Your access session has expired. Please unlock again." });
+        }
+
+        // Check original Access Code
+        accessCodeRef = doc(db, "access_codes", sData.accessCode);
+        const accessSnap = await getDoc(accessCodeRef);
+        if (!accessSnap.exists() || !(accessSnap.data() as any).enabled) {
+          return res.status(400).json({ error: "The associated Access Code is no longer active." });
+        }
       }
 
       // Fetch Telegram configs for task validation
@@ -4345,7 +4364,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
 
         // 6. Access Code limit increment
-        transaction.update(accessCodeRef, { usedCount: increment(1) });
+        if (requireAccessCode && accessCodeRef) {
+          transaction.update(accessCodeRef, { usedCount: increment(1) });
+        }
 
         // 7. Promo Code counts
         transaction.update(promoRef, {
@@ -4510,7 +4531,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // Get Access Codes
   app.get("/api/admin/promo/access-codes", async (req, res) => {
     try {
-      const ref = collection(db, "promo_access_codes");
+      const ref = collection(db, "access_codes");
       const snap = await getDocs(ref);
       const codes: any[] = [];
       snap.forEach((doc) => {
@@ -4524,13 +4545,18 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
   // Create Access Code
   app.post("/api/admin/promo/access-codes", async (req, res) => {
+    console.log("Creating Access Code...");
     try {
       const { code, startDate, startTime, expiryDate, expiryTime, maxUsers, enabled } = req.body;
-      if (!code) return res.status(400).json({ error: "Code is required" });
+      if (!code) {
+        console.error("Firestore Write Failed: Code is required");
+        return res.status(400).json({ error: "Code is required" });
+      }
 
       const codeUpper = code.toUpperCase();
-      const docRef = doc(db, "promo_access_codes", codeUpper);
+      const docRef = doc(db, "access_codes", codeUpper);
       
+      console.log("Firestore Write Started");
       await setDoc(docRef, {
         code: codeUpper,
         startDate: startDate || "",
@@ -4542,31 +4568,49 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         enabled: enabled ?? true,
         createdAt: new Date().toISOString()
       });
+      console.log("Firestore Write Success");
 
       res.json({ success: true });
     } catch (e: any) {
-      res.status(500).json({ error: "Server error" });
+      console.error("Firestore Write Failed:", e);
+      res.status(500).json({ error: e.message || "Server error" });
     }
   });
 
   // Delete Access Code
   app.delete("/api/admin/promo/access-codes/:id", async (req, res) => {
     try {
-      await deleteDoc(doc(db, "promo_access_codes", req.params.id));
+      console.log("Firestore Write Started");
+      await deleteDoc(doc(db, "access_codes", req.params.id));
+      console.log("Firestore Write Success");
       res.json({ success: true });
     } catch (e: any) {
+      console.error("Firestore Write Failed:", e);
       res.status(500).json({ error: "Server error" });
     }
   });
 
-  // Toggle Access Code
+  // Update/Edit or Toggle Access Code
   app.put("/api/admin/promo/access-codes/:id", async (req, res) => {
     try {
-      const ref = doc(db, "promo_access_codes", req.params.id);
-      await updateDoc(ref, { enabled: req.body.enabled });
+      const ref = doc(db, "access_codes", req.params.id);
+      
+      const updateData: any = {};
+      if (req.body.enabled !== undefined) updateData.enabled = req.body.enabled;
+      if (req.body.code !== undefined) updateData.code = req.body.code.toUpperCase();
+      if (req.body.startDate !== undefined) updateData.startDate = req.body.startDate;
+      if (req.body.startTime !== undefined) updateData.startTime = req.body.startTime;
+      if (req.body.expiryDate !== undefined) updateData.expiryDate = req.body.expiryDate;
+      if (req.body.expiryTime !== undefined) updateData.expiryTime = req.body.expiryTime;
+      if (req.body.maxUsers !== undefined) updateData.maxUsers = Number(req.body.maxUsers);
+
+      console.log("Firestore Write Started");
+      await updateDoc(ref, updateData);
+      console.log("Firestore Write Success");
       res.json({ success: true });
     } catch (e: any) {
-      res.status(500).json({ error: "Server error" });
+      console.error("Firestore Write Failed:", e);
+      res.status(500).json({ error: e.message || "Server error" });
     }
   });
 

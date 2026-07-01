@@ -41,6 +41,7 @@ interface SocialButtonConfig {
 
 interface PromoRewardsSettings {
   enabled: boolean;
+  requireAccessCode?: boolean;
   adsterraBannerCode?: string;
   monetagAdCode?: string;
   expiryMinutes: number;
@@ -179,9 +180,15 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
         setUsername(data.user?.name || data.user?.username || "User");
         setTelegramId(data.user?.telegramId || "");
         
-        if (data.unlocked && data.session) {
+        if (data.unlocked) {
+          console.log("Promo Unlocked");
           setIsUnlocked(true);
-          setSessionExpiry(data.session.expiresAt);
+          if (data.session) {
+            setSessionExpiry(data.session.expiresAt);
+          }
+        } else {
+          console.log("Promo Locked");
+          setIsUnlocked(false);
         }
       } else {
         throw new Error(data.error || "Failed to load status");
@@ -271,6 +278,7 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
       const data = await res.json();
 
       if (data.success) {
+        console.log("Promo Unlocked");
         setShowUnlockSuccess(true);
         setSessionExpiry(data.expiresAt);
         setTimeout(() => {

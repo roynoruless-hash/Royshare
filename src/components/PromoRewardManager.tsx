@@ -220,7 +220,10 @@ export default function PromoRewardManager() {
       const analyticsData = await analyticsRes.json();
 
       if (settingsData.success) setSettings(settingsData.settings);
-      if (codesData.success) setAccessCodes(codesData.codes || []);
+      if (codesData.success) {
+        setAccessCodes(codesData.codes || []);
+        console.log("Access Codes Reloaded");
+      }
       if (promosData.success) setPromos(promosData.promos || []);
       if (analyticsData.success) setAnalytics(analyticsData.analytics);
     } catch (err) {
@@ -261,17 +264,25 @@ export default function PromoRewardManager() {
 
   // Toggle handlers
   const handleToggleAccessCode = async (id: string, currentStatus: boolean) => {
+    console.log("Firestore Write Started");
     try {
       const res = await fetch(`${API_BASE}/api/admin/promo/access-codes/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !currentStatus })
       });
-      if (res.ok) {
+      const data = await res.json();
+      if (res.ok && data.success) {
+        console.log("Firestore Write Success");
         setAccessCodes(accessCodes.map(c => c.id === id ? { ...c, enabled: !currentStatus } : c));
+        alert("Access Code status updated successfully!");
+      } else {
+        console.error("Firestore Write Failed:", data.error || "Update failed");
+        alert("Failed to update status.");
       }
     } catch (err) {
-      console.error("Toggle access code error:", err);
+      console.error("Firestore Write Failed:", err);
+      alert("Failed to update status.");
     }
   };
 
@@ -293,15 +304,23 @@ export default function PromoRewardManager() {
   // Delete handlers
   const handleDeleteAccessCode = async (id: string) => {
     if (!confirm("Are you sure you want to delete this access code?")) return;
+    console.log("Firestore Write Started");
     try {
       const res = await fetch(`${API_BASE}/api/admin/promo/access-codes/${id}`, {
         method: "DELETE"
       });
-      if (res.ok) {
+      const data = await res.json();
+      if (res.ok && data.success) {
+        console.log("Firestore Write Success");
         setAccessCodes(accessCodes.filter(c => c.id !== id));
+        alert("Access Code deleted successfully!");
+      } else {
+        console.error("Firestore Write Failed:", data.error || "Delete failed");
+        alert("Failed to delete access code.");
       }
     } catch (err) {
-      console.error("Delete access code error:", err);
+      console.error("Firestore Write Failed:", err);
+      alert("Failed to delete access code.");
     }
   };
 
@@ -342,16 +361,28 @@ export default function PromoRewardManager() {
   // Create Access Code submit
   const handleCreateAccessCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAccessCode.code.trim()) return;
+    if (!newAccessCode.code.trim()) {
+      alert("Access Code is required");
+      return;
+    }
+    console.log("Creating Access Code...");
     setCreatingAccessCode(true);
 
     try {
+      console.log("Create Code: Calling API POST /api/admin/promo/access-codes");
       const res = await fetch(`${API_BASE}/api/admin/promo/access-codes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newAccessCode)
+        body: JSON.stringify({
+          ...newAccessCode,
+          enabled: true
+        })
       });
-      if (res.ok) {
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        console.log("Firestore Write Success");
         setNewAccessCode({
           code: "",
           startDate: "",
@@ -360,11 +391,20 @@ export default function PromoRewardManager() {
           expiryTime: "",
           maxUsers: ""
         });
-        fetchData();
+        
+        console.log("Reloading Access Codes...");
+        await fetchData();
+        console.log("Access Codes Reloaded");
+        
         alert("Access Code created successfully!");
+      } else {
+        const errorMsg = data.error || "Failed to save the access code.";
+        console.error("Firestore Write Failed:", errorMsg);
+        alert(`Error: ${errorMsg}`);
       }
-    } catch (err) {
-      console.error("Create access code error:", err);
+    } catch (err: any) {
+      console.error("Firestore Write Failed:", err);
+      alert(`Network error: ${err.message || "Failed to connect to the server."}`);
     } finally {
       setCreatingAccessCode(false);
     }
@@ -515,6 +555,20 @@ export default function PromoRewardManager() {
                     className="text-slate-400 hover:text-white transition-all"
                   >
                     {settings.enabled ? <ToggleRight className="w-11 h-11 text-indigo-500" /> : <ToggleLeft className="w-11 h-11 text-slate-600" />}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-slate-950 border border-slate-850 rounded-2xl">
+                  <div>
+                    <h4 className="text-xs font-black text-white uppercase tracking-wider">🔒 Require Access Code</h4>
+                    <p className="text-[10px] text-slate-500 mt-1">If enabled, users must enter a valid access code to open the promo page.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSettings({ ...settings, requireAccessCode: settings.requireAccessCode !== false ? false : true })}
+                    className="text-slate-400 hover:text-white transition-all"
+                  >
+                    {settings.requireAccessCode !== false ? <ToggleRight className="w-11 h-11 text-indigo-500" /> : <ToggleLeft className="w-11 h-11 text-slate-600" />}
                   </button>
                 </div>
 
