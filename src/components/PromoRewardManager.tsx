@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { motion } from "motion/react";
 import { API_BASE } from "../config/api";
 import { 
   Gift, 
@@ -19,7 +20,13 @@ import {
   Clock,
   ExternalLink,
   Eye,
-  QrCode
+  QrCode,
+  Sparkles,
+  Wand2,
+  Edit3,
+  Save,
+  CheckCircle,
+  HelpCircle
 } from "lucide-react";
 
 interface AccessCode {
@@ -109,6 +116,92 @@ export default function PromoRewardManager() {
     expiryDate: "",
     expiryTime: ""
   });
+
+  // AI Promo Generator States
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [aiGeneratedPromo, setAiGeneratedPromo] = useState<any | null>(null);
+  const [isEditingGenerated, setIsEditingGenerated] = useState(false);
+  const [creationSuccess, setCreationSuccess] = useState(false);
+
+  const handleAIGeneratePromo = async () => {
+    if (!aiPrompt.trim()) return;
+    setIsGenerating(true);
+    setGenerationError(null);
+    setCreationSuccess(false);
+    setAiGeneratedPromo(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/promo/ai-generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: aiPrompt })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        // Automatically calculate random pageId and promoPageUrl
+        const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let rPageId = "";
+        for (let i = 0; i < 12; i++) {
+          rPageId += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        const domain = window.location.origin;
+        const rPromoPageUrl = `${domain}/promo/${rPageId}`;
+
+        setAiGeneratedPromo({
+          ...data.data,
+          randomPageId: rPageId,
+          promoPageUrl: rPromoPageUrl
+        });
+      } else {
+        setGenerationError(data.error || "Failed to generate promo details. Please refine your prompt.");
+      }
+    } catch (err: any) {
+      console.error("AI Promo Generation error:", err);
+      setGenerationError(err.message || "An unexpected error occurred during AI generation.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleAICreatePromo = async () => {
+    if (!aiGeneratedPromo) return;
+    setCreatingPromo(true);
+    setCreationSuccess(false);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/promo/promos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: aiGeneratedPromo.name,
+          code: aiGeneratedPromo.code,
+          rewardAmount: Number(aiGeneratedPromo.rewardAmount),
+          totalBudget: Number(aiGeneratedPromo.totalBudget),
+          maxUsers: Number(aiGeneratedPromo.maxUsers),
+          startDate: aiGeneratedPromo.startDate || "",
+          startTime: aiGeneratedPromo.startTime || "",
+          expiryDate: aiGeneratedPromo.expiryDate || "",
+          expiryTime: aiGeneratedPromo.expiryTime || "",
+          enabled: true
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCreationSuccess(true);
+        setAiGeneratedPromo(null);
+        setAiPrompt("");
+        fetchData();
+        setTimeout(() => setCreationSuccess(false), 5000);
+      } else {
+        alert(data.error || "Failed to create promo. Please check input values.");
+      }
+    } catch (err: any) {
+      console.error("AI Create promo error:", err);
+      alert(err.message || "Server error while creating promo.");
+    } finally {
+      setCreatingPromo(false);
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -685,12 +778,341 @@ export default function PromoRewardManager() {
       {/* 4. PROMOS MANAGER VIEW */}
       {activeSubTab === "promos" && (
         <div className="grid lg:grid-cols-3 gap-6 items-start">
-          {/* Create Form */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 lg:col-span-1">
-            <h3 className="text-md font-bold text-white border-b border-slate-850 pb-3 flex items-center gap-2">
-              <Plus className="w-5 h-5 text-indigo-400" />
-              New Promo reward Code
-            </h3>
+          {/* Create Form and AI Promo Generator */}
+          <div className="lg:col-span-1 space-y-6">
+            
+            {/* AI Promo Generator Card */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+              <h3 className="text-md font-bold text-white border-b border-slate-850 pb-3 flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <span className="text-xl">🤖</span>
+                  AI Promo Generator
+                </span>
+                <span className="text-[10px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                  Gemini Flash 3.5
+                </span>
+              </h3>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black text-indigo-300 uppercase tracking-widest block flex items-center justify-between">
+                    <span>Describe Your Promo Reward Prompt</span>
+                    <span title="Explain budget, reward, claims, dates or names, and AI will extract it all!">
+                      <HelpCircle className="w-3.5 h-3.5 text-slate-500 hover:text-slate-300 cursor-pointer" />
+                    </span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="Example:&#10;Total Budget ₹1000&#10;Reward ₹10&#10;100 Users&#10;Promo Name: Independence Bonus&#10;Promo Code: INDIA100&#10;Start: 15 Aug 2026 10:00 AM&#10;End: 20 Aug 2026 10:00 PM"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-sans leading-relaxed"
+                  />
+                </div>
+
+                <button
+                  onClick={handleAIGeneratePromo}
+                  disabled={isGenerating || !aiPrompt.trim()}
+                  className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-500/10 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isGenerating ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>AI Extracting & Calculating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                      <span>✨ AI Generate Promo</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Skeleton Loader during generation */}
+                {isGenerating && (
+                  <div className="border border-slate-800/80 bg-slate-950/40 rounded-2xl p-5 space-y-4 animate-pulse">
+                    <div className="h-4 bg-slate-800 rounded w-1/3" />
+                    <div className="space-y-2">
+                      <div className="h-3 bg-slate-800 rounded w-3/4" />
+                      <div className="h-3 bg-slate-800 rounded w-5/6" />
+                      <div className="h-3 bg-slate-800 rounded w-1/2" />
+                    </div>
+                    <div className="pt-2 flex justify-between">
+                      <div className="h-8 bg-slate-800 rounded-xl w-1/4" />
+                      <div className="h-8 bg-slate-800 rounded-xl w-1/4" />
+                    </div>
+                  </div>
+                )}
+
+                {generationError && (
+                  <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl text-xs flex gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Generation Failed</p>
+                      <p className="mt-1 text-slate-400">{generationError}</p>
+                    </div>
+                  </div>
+                )}
+
+                {creationSuccess && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-xl text-xs flex gap-2 items-center">
+                    <CheckCircle className="w-4 h-4 shrink-0 text-emerald-400" />
+                    <div>
+                      <p className="font-bold">✅ Promo Created Successfully</p>
+                      <p className="mt-0.5 text-slate-400">The promotional page is now live and saved to Firestore!</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* AI generated preview card */}
+                {aiGeneratedPromo && !isGenerating && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="border border-indigo-500/30 bg-slate-950/80 rounded-2xl p-5 space-y-5 shadow-xl relative overflow-hidden"
+                  >
+                    {/* Glow effect */}
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
+
+                    <div className="border-b border-slate-850 pb-3 flex items-center justify-between">
+                      <div>
+                        <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest block">AI Promo Preview</span>
+                        <h4 className="text-sm font-bold text-white truncate max-w-[150px]">{aiGeneratedPromo.name || "Untitled Promo"}</h4>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest block">Status</span>
+                        <span className="text-[10px] bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                          Active
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Mathematical calculation validation warning */}
+                    {Number(aiGeneratedPromo.rewardAmount) * Number(aiGeneratedPromo.maxUsers) !== Number(aiGeneratedPromo.totalBudget) && (
+                      <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 p-3 rounded-xl text-[11px] space-y-2">
+                        <div className="flex items-start gap-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-bold">⚠ Budget calculation mismatch</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              Reward (₹{aiGeneratedPromo.rewardAmount}) × Claims ({aiGeneratedPromo.maxUsers}) = ₹{Number(aiGeneratedPromo.rewardAmount) * Number(aiGeneratedPromo.maxUsers)} which does not equal Budget (₹{aiGeneratedPromo.totalBudget}).
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            // Automatically fix values by adjusting total budget to match reward * claims
+                            setAiGeneratedPromo({
+                              ...aiGeneratedPromo,
+                              totalBudget: Number(aiGeneratedPromo.rewardAmount) * Number(aiGeneratedPromo.maxUsers)
+                            });
+                          }}
+                          className="w-full py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all"
+                        >
+                          ✔ Fix Automatically
+                        </button>
+                      </div>
+                    )}
+
+                    {isEditingGenerated ? (
+                      /* Editable fields form */
+                      <div className="space-y-3 text-xs">
+                        <div className="space-y-1">
+                          <label className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Promo Name</label>
+                          <input
+                            type="text"
+                            value={aiGeneratedPromo.name}
+                            onChange={(e) => setAiGeneratedPromo({ ...aiGeneratedPromo, name: e.target.value })}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Promo Code</label>
+                          <input
+                            type="text"
+                            value={aiGeneratedPromo.code}
+                            onChange={(e) => setAiGeneratedPromo({ ...aiGeneratedPromo, code: e.target.value.toUpperCase() })}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white uppercase font-bold focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Reward (₹)</label>
+                            <input
+                              type="number"
+                              value={aiGeneratedPromo.rewardAmount}
+                              onChange={(e) => setAiGeneratedPromo({ ...aiGeneratedPromo, rewardAmount: e.target.value })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Budget (₹)</label>
+                            <input
+                              type="number"
+                              value={aiGeneratedPromo.totalBudget}
+                              onChange={(e) => setAiGeneratedPromo({ ...aiGeneratedPromo, totalBudget: e.target.value })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Max Claims</label>
+                            <input
+                              type="number"
+                              value={aiGeneratedPromo.maxUsers}
+                              onChange={(e) => setAiGeneratedPromo({ ...aiGeneratedPromo, maxUsers: e.target.value })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Start Date</label>
+                            <input
+                              type="date"
+                              value={aiGeneratedPromo.startDate}
+                              onChange={(e) => setAiGeneratedPromo({ ...aiGeneratedPromo, startDate: e.target.value })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Start Time</label>
+                            <input
+                              type="time"
+                              value={aiGeneratedPromo.startTime}
+                              onChange={(e) => setAiGeneratedPromo({ ...aiGeneratedPromo, startTime: e.target.value })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-black text-slate-500 uppercase tracking-wider font-bold">Expiry Date</label>
+                            <input
+                              type="date"
+                              value={aiGeneratedPromo.expiryDate}
+                              onChange={(e) => setAiGeneratedPromo({ ...aiGeneratedPromo, expiryDate: e.target.value })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[8px] font-black text-slate-500 uppercase tracking-wider font-bold">Expiry Time</label>
+                            <input
+                              type="time"
+                              value={aiGeneratedPromo.expiryTime}
+                              onChange={(e) => setAiGeneratedPromo({ ...aiGeneratedPromo, expiryTime: e.target.value })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setIsEditingGenerated(false)}
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          Save Local Changes
+                        </button>
+                      </div>
+                    ) : (
+                      /* Preview Details rendering */
+                      <div className="space-y-3.5">
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-xs">
+                          <div>
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block">Promo Code</span>
+                            <span className="font-mono font-bold text-white tracking-wide">{aiGeneratedPromo.code || "N/A"}</span>
+                          </div>
+                          <div>
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block">Reward Amount</span>
+                            <span className="font-bold text-indigo-400">₹{aiGeneratedPromo.rewardAmount || "0"}</span>
+                          </div>
+                          <div>
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block">Total Budget</span>
+                            <span className="font-bold text-white">₹{aiGeneratedPromo.totalBudget || "0"}</span>
+                          </div>
+                          <div>
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block">Maximum Claims</span>
+                            <span className="font-bold text-slate-300">{aiGeneratedPromo.maxUsers || "N/A"}</span>
+                          </div>
+                          <div>
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block">Start</span>
+                            <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              {aiGeneratedPromo.startDate || "N/A"} {aiGeneratedPromo.startTime || "00:00"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block">Expiry</span>
+                            <span className="text-[10px] text-rose-400 flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {aiGeneratedPromo.expiryDate || "N/A"} {aiGeneratedPromo.expiryTime || "23:59"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Random URL section */}
+                        <div className="bg-slate-900 border border-slate-850 p-3 rounded-xl space-y-1">
+                          <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block">Random Public URL</span>
+                          <a
+                            href={aiGeneratedPromo.promoPageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] text-indigo-400 hover:underline font-mono truncate block flex items-center gap-1"
+                          >
+                            <ExternalLink className="w-3 h-3 shrink-0" />
+                            <span className="truncate">{aiGeneratedPromo.promoPageUrl}</span>
+                          </a>
+                        </div>
+
+                        {/* QR Code generator */}
+                        <div className="flex flex-col items-center justify-center bg-white p-3 rounded-2xl w-32 h-32 mx-auto border border-slate-800">
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&color=020617&data=${encodeURIComponent(aiGeneratedPromo.promoPageUrl)}`}
+                            alt="QR Code"
+                            className="w-24 h-24"
+                          />
+                          <span className="text-[7px] text-slate-500 font-bold uppercase tracking-widest mt-1">Scan Preview</span>
+                        </div>
+
+                        {/* Action buttons on card */}
+                        <div className="pt-2 flex gap-2">
+                          <button
+                            onClick={() => setIsEditingGenerated(true)}
+                            className="flex-1 py-2 border border-slate-800 hover:bg-slate-900 text-slate-300 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 transition-all"
+                          >
+                            <Edit3 className="w-3 h-3 text-slate-400" />
+                            Edit
+                          </button>
+                          <button
+                            onClick={handleAIGeneratePromo}
+                            className="flex-1 py-2 border border-slate-800 hover:bg-slate-900 text-slate-300 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 transition-all"
+                          >
+                            <RefreshCw className="w-3 h-3 text-slate-400" />
+                            Regenerate
+                          </button>
+                        </div>
+
+                        <button
+                          onClick={handleAICreatePromo}
+                          disabled={creatingPromo}
+                          className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-500/10 transition-all flex items-center justify-center gap-2"
+                        >
+                          <Save className="w-4 h-4" />
+                          <span>{creatingPromo ? "Creating..." : "Save & Create Promo"}</span>
+                        </button>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </div>
+            </div>
+
+            {/* Original Form Card */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+              <h3 className="text-md font-bold text-white border-b border-slate-850 pb-3 flex items-center gap-2">
+                <Plus className="w-5 h-5 text-indigo-400" />
+                New Promo reward Code
+              </h3>
 
             <form onSubmit={handleCreatePromo} className="space-y-4">
               <div className="space-y-1">
@@ -809,6 +1231,7 @@ export default function PromoRewardManager() {
               </button>
             </form>
           </div>
+        </div>
 
           {/* List Promos */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden lg:col-span-2">

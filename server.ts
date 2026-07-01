@@ -11,7 +11,7 @@ import { createServer as createViteServer } from "vite";
 import { getDb } from "./src/lib/firebase";
 import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction } from "firebase/firestore";
 import { REWARD_TASKS } from "./src/lib/tasks";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./src/lib/gemini";
 import { google } from "googleapis";
 
@@ -4612,6 +4612,81 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     } catch (e: any) {
       console.error("Error in GET /api/admin/promo/promos:", e);
       res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // AI Promo Generator API
+  app.post("/api/admin/promo/ai-generate", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      if (!prompt) {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const systemInstruction = `You are an AI assistant specialized in parsing promotional reward creation inputs from administrators.
+Extract the fields: name, code, rewardAmount, totalBudget, maxUsers, startDate, startTime, expiryDate, expiryTime.
+
+CRITICAL MATHEMATICAL CONSTRAINTS AND CALCULATIONS:
+- 'name' is the Promo Name.
+- 'code' is the uppercase alphanumeric Promo Code (no spaces).
+- 'rewardAmount' is the reward per user/claim.
+- 'totalBudget' is the total budget allocated for this promo.
+- 'maxUsers' is the maximum number of claims/users.
+- If total budget and max claims are given, but reward is not: calculate rewardAmount = totalBudget / maxUsers.
+- If total budget and reward are given, but max claims is not: calculate maxUsers = totalBudget / rewardAmount.
+- If max claims and reward are given, but budget is not: calculate totalBudget = maxUsers * rewardAmount.
+- Ensure that the mathematical relation (rewardAmount * maxUsers == totalBudget) is preserved.
+
+DATE CONSTRAINTS:
+- Use current year 2026 as the default year.
+- 'startDate' must be in YYYY-MM-DD format (e.g. 2026-08-15).
+- 'startTime' must be in HH:MM format (24-hour).
+- 'expiryDate' must be in YYYY-MM-DD format (e.g. 2026-08-20).
+- 'expiryTime' must be in HH:MM format (24-hour).
+- If any dates/times are missing, try to infer them reasonably, or leave them empty.
+
+Provide the response strictly in JSON format matching the schema requested.`;
+
+      const response = await safeGenerateContent(ai, {
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING, description: "Promo Name" },
+              code: { type: Type.STRING, description: "Promo Code (uppercase, alphanumeric)" },
+              rewardAmount: { type: Type.NUMBER, description: "Reward Amount per claim" },
+              totalBudget: { type: Type.NUMBER, description: "Total budget allocated" },
+              maxUsers: { type: Type.INTEGER, description: "Maximum Claims / Number of Users" },
+              startDate: { type: Type.STRING, description: "Start Date in YYYY-MM-DD format" },
+              startTime: { type: Type.STRING, description: "Start Time in HH:MM format" },
+              expiryDate: { type: Type.STRING, description: "Expiry Date in YYYY-MM-DD format" },
+              expiryTime: { type: Type.STRING, description: "Expiry Time in HH:MM format" }
+            },
+            required: ["name", "code", "rewardAmount", "totalBudget", "maxUsers"]
+          }
+        }
+      });
+
+      const resultText = response.text?.trim() || "{}";
+      const parsedData = JSON.parse(resultText);
+
+      res.json({ success: true, data: parsedData });
+    } catch (e: any) {
+      console.error("Error in POST /api/admin/promo/ai-generate:", e);
+      res.status(500).json({ error: e.message || "Failed to generate promo with AI" });
     }
   });
 
