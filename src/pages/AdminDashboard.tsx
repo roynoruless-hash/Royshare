@@ -69,6 +69,15 @@ export default function AdminDashboard() {
   const [bonusSearch, setBonusSearch] = useState("");
   const [dailyBonusStats, setDailyBonusStats] = useState<any>(null);
   const [dailyBonusStatsLoading, setDailyBonusStatsLoading] = useState(false);
+  const [aiGenSettings, setAiGenSettings] = useState({
+    minReward: 1,
+    maxReward: 100,
+    slots: 8,
+    betterLuckSlots: 2,
+    dailyBudget: 500
+  });
+  const [aiPreviewRewards, setAiPreviewRewards] = useState<any[] | null>(null);
+  const [generatingAI, setGeneratingAI] = useState(false);
 
   const [users, setUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -794,23 +803,53 @@ export default function AdminDashboard() {
 
   const saveBonusSettings = async (newSettings: any) => {
     try {
-      // Create a copy and remove statistics to avoid overwriting live data
       const { totalSpins, totalRewardsDistributed, ...settingsToSave } = newSettings;
-      
       const res = await fetch(`${API_BASE}/api/admin/daily-bonus/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settingsToSave)
       });
       if (res.ok) {
-        setBonusSettings(newSettings);
         alert("Daily Bonus settings saved successfully!");
+        fetchBonusSettings();
       } else {
         alert("Failed to save settings");
       }
     } catch (err) {
       console.error(err);
       alert("Error saving settings");
+    }
+  };
+
+  const handleAIGenerateRewards = async (type: string) => {
+    if (aiGenSettings.slots < 5 || aiGenSettings.slots > 30) {
+      alert("Number of Reward Slots must be between 5 and 30.");
+      return;
+    }
+    if (aiGenSettings.minReward < 0 || aiGenSettings.maxReward < aiGenSettings.minReward) {
+      alert("Please enter valid minimum and maximum reward limits.");
+      return;
+    }
+    setGeneratingAI(true);
+    setAiPreviewRewards(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/daily-bonus/auto-generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(aiGenSettings)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAiPreviewRewards(data.rewards);
+        alert(`🤖 AI successfully generated ${data.rewards.length} reward slots! Please review the preview table and click "Save and Apply".`);
+      } else {
+        alert(data.error || "AI generation failed");
+      }
+    } catch (err) {
+      console.error("AI Gen Error:", err);
+      alert("Failed to connect to AI generator");
+    } finally {
+      setGeneratingAI(false);
     }
   };
 
@@ -2714,73 +2753,207 @@ export default function AdminDashboard() {
                   </button>
                 </div>
               ) : (bonusView === 'wheel-rewards' || bonusView === 'box-rewards' || bonusView === 'scratch-rewards') && bonusSettings ? (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                  <div className="flex justify-between items-center mb-6">
-                    <div>
-                      <h3 className="text-lg font-bold text-white capitalize">
-                        {bonusView.split('-')[0]} Rewards Pool
-                      </h3>
-                      <p className="text-xs text-slate-500 mt-1">Configure winning amounts and their relative probabilities.</p>
+                <div className="space-y-6">
+                  {/* AI Reward Generator Input Panel */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                    <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+                      <div>
+                        <h3 className="text-lg font-bold text-white capitalize">
+                          🤖 {bonusView.split('-')[0]} AI Reward Generator
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1">Use Gemini AI to instantly generate a balanced, profitable reward pool.</p>
+                      </div>
+                      <span className="bg-indigo-600/15 text-indigo-400 font-bold text-xs px-3 py-1.5 rounded-full border border-indigo-500/10">Gemini Powered</span>
                     </div>
-                    <button onClick={() => {
-                      const type = bonusView.split('-')[0];
-                      const newRewards = [...(bonusSettings[type]?.rewards || []), { amount: 1, weight: 10, label: "₹1.00" }];
-                      setBonusSettings({...bonusSettings, [type]: { ...(bonusSettings[type] || {}), rewards: newRewards }});
-                    }} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg shadow-indigo-900/20">➕ Add Reward</button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="text-xs text-slate-400 uppercase bg-slate-950/50 border-b border-slate-800">
-                        <tr>
-                          <th className="px-4 py-3">Amount (₹)</th>
-                          <th className="px-4 py-3">Weight (Probability)</th>
-                          <th className="px-4 py-3">Label</th>
-                          <th className="px-4 py-3 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(bonusSettings[bonusView.split('-')[0]]?.rewards || []).map((reward: any, idx: number) => {
-                          const type = bonusView.split('-')[0];
-                          return (
-                            <tr key={idx} className="border-b border-slate-800/50">
-                              <td className="px-4 py-3">
-                                <input type="number" step="0.01" value={reward.amount ?? 0} onChange={e => {
-                                  const newRewards = [...bonusSettings[type].rewards];
-                                  newRewards[idx].amount = parseFloat(e.target.value) || 0;
-                                  setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
-                                }} className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white font-bold text-emerald-400" />
-                              </td>
-                              <td className="px-4 py-3">
-                                <input type="number" value={reward.weight ?? 0} onChange={e => {
-                                  const newRewards = [...bonusSettings[type].rewards];
-                                  newRewards[idx].weight = parseInt(e.target.value) || 0;
-                                  setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
-                                }} className="w-20 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white" />
-                              </td>
-                              <td className="px-4 py-3">
-                                <input type="text" value={reward.label || ''} onChange={e => {
-                                  const newRewards = [...bonusSettings[type].rewards];
-                                  newRewards[idx].label = e.target.value;
-                                  setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
-                                }} className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white" />
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                <button onClick={() => {
-                                  const newRewards = bonusSettings[type].rewards.filter((_: any, i: number) => i !== idx);
-                                  setBonusSettings({...bonusSettings, [type]: { ...bonusSettings[type], rewards: newRewards }});
-                                }} className="text-rose-500 hover:text-rose-400 p-1.5 bg-rose-500/10 rounded-lg transition-all">🗑</button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="mt-6 flex justify-end">
-                    <button onClick={() => saveBonusSettings(bonusSettings)} className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-emerald-900/20">
-                      💾 Save {bonusView.split('-')[0].toUpperCase()} Rewards
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">Minimum Reward (₹)</label>
+                        <input 
+                          type="number" 
+                          min="0"
+                          step="0.1"
+                          value={aiGenSettings.minReward} 
+                          onChange={e => setAiGenSettings({...aiGenSettings, minReward: parseFloat(e.target.value) || 0})} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">Maximum Reward (₹)</label>
+                        <input 
+                          type="number" 
+                          min="0"
+                          step="1"
+                          value={aiGenSettings.maxReward} 
+                          onChange={e => setAiGenSettings({...aiGenSettings, maxReward: parseFloat(e.target.value) || 0})} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">Slots count (5-30)</label>
+                        <input 
+                          type="number" 
+                          min="5"
+                          max="30"
+                          value={aiGenSettings.slots} 
+                          onChange={e => setAiGenSettings({...aiGenSettings, slots: parseInt(e.target.value) || 0})} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">Better Luck Slots</label>
+                        <input 
+                          type="number" 
+                          min="0"
+                          value={aiGenSettings.betterLuckSlots} 
+                          onChange={e => setAiGenSettings({...aiGenSettings, betterLuckSlots: parseInt(e.target.value) || 0})} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">Daily Budget (₹)</label>
+                        <input 
+                          type="number" 
+                          min="1"
+                          value={aiGenSettings.dailyBudget} 
+                          onChange={e => setAiGenSettings({...aiGenSettings, dailyBudget: parseInt(e.target.value) || 0})} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={() => handleAIGenerateRewards(bonusView.split('-')[0])} 
+                      disabled={generatingAI}
+                      className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black rounded-xl transition-all shadow-lg shadow-indigo-950/40 flex items-center justify-center gap-2"
+                    >
+                      {generatingAI ? (
+                        <>
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Gemini is Crafting Rewards...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>🤖 Generate Rewards with Gemini AI</span>
+                        </>
+                      )}
                     </button>
                   </div>
+
+                  {/* Preview Generated Rewards */}
+                  {aiPreviewRewards ? (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 animate-fade-in">
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h4 className="text-md font-bold text-emerald-400">👀 Generated Rewards Preview</h4>
+                          <p className="text-xs text-slate-500 mt-0.5">Please review the probability and weight balance generated by AI.</p>
+                        </div>
+                        <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">Preview Mode</span>
+                      </div>
+
+                      <div className="overflow-x-auto rounded-xl border border-slate-800">
+                        <table className="w-full text-left text-sm text-slate-300">
+                          <thead className="text-xs text-slate-400 uppercase bg-slate-950/80 border-b border-slate-800">
+                            <tr>
+                              <th className="px-4 py-3">Slot No</th>
+                              <th className="px-4 py-3">Label</th>
+                              <th className="px-4 py-3">Amount (₹)</th>
+                              <th className="px-4 py-3">Weight</th>
+                              <th className="px-4 py-3 text-right">Probability</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(() => {
+                              const totalWeight = aiPreviewRewards.reduce((sum, r) => sum + (Number(r.weight) || 0), 0);
+                              return aiPreviewRewards.map((reward, idx) => {
+                                const prob = totalWeight > 0 ? ((Number(reward.weight) || 0) / totalWeight * 100).toFixed(1) : '0.0';
+                                return (
+                                  <tr key={idx} className="border-b border-slate-800/40 bg-slate-950/10 hover:bg-slate-950/30">
+                                    <td className="px-4 py-3 text-slate-500 font-mono text-xs">#{idx + 1}</td>
+                                    <td className="px-4 py-3 font-medium text-white">{reward.label}</td>
+                                    <td className="px-4 py-3 font-bold text-emerald-400">₹{Number(reward.amount).toFixed(2)}</td>
+                                    <td className="px-4 py-3 text-slate-300">{reward.weight}</td>
+                                    <td className="px-4 py-3 text-right text-indigo-400 font-bold">{prob}%</td>
+                                  </tr>
+                                );
+                              });
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="mt-6 flex flex-col sm:flex-row justify-end gap-3">
+                        <button 
+                          onClick={() => setAiPreviewRewards(null)} 
+                          className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-all uppercase"
+                        >
+                          ❌ Cancel Preview
+                        </button>
+                        <button 
+                          onClick={async () => {
+                            const type = bonusView.split('-')[0];
+                            const updatedSettings = {
+                              ...bonusSettings,
+                              dailyBudget: aiGenSettings.dailyBudget, // Save the daily budget parameter to main setting!
+                              [type]: {
+                                ...bonusSettings[type],
+                                rewards: aiPreviewRewards
+                              }
+                            };
+                            await saveBonusSettings(updatedSettings);
+                            setAiPreviewRewards(null);
+                          }} 
+                          className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs transition-all shadow-md shadow-emerald-950/30 uppercase flex items-center gap-2"
+                        >
+                          <span>💾 Save and Apply to {bonusView.split('-')[0].toUpperCase()}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Active Config Pool fallback */
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                      <h4 className="text-md font-bold text-white mb-4">📋 Currently Configured Reward Pool</h4>
+                      <div className="overflow-x-auto rounded-xl border border-slate-800">
+                        <table className="w-full text-left text-sm text-slate-300">
+                          <thead className="text-xs text-slate-400 uppercase bg-slate-950/80 border-b border-slate-800">
+                            <tr>
+                              <th className="px-4 py-3">Slot</th>
+                              <th className="px-4 py-3">Label</th>
+                              <th className="px-4 py-3">Amount (₹)</th>
+                              <th className="px-4 py-3">Weight</th>
+                              <th className="px-4 py-3 text-right">Probability</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(() => {
+                              const type = bonusView.split('-')[0];
+                              const activeRewards = bonusSettings[type]?.rewards || [];
+                              if (activeRewards.length === 0) {
+                                return (
+                                  <tr>
+                                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500">No rewards configured. Use the AI generator above to build the pool!</td>
+                                  </tr>
+                                );
+                              }
+                              const totalWeight = activeRewards.reduce((sum: number, r: any) => sum + (Number(r.weight) || 0), 0);
+                              return activeRewards.map((reward: any, idx: number) => {
+                                const prob = totalWeight > 0 ? ((Number(reward.weight) || 0) / totalWeight * 100).toFixed(1) : '0.0';
+                                return (
+                                  <tr key={idx} className="border-b border-slate-800/40 bg-slate-950/10">
+                                    <td className="px-4 py-3 text-slate-500 font-mono text-xs">#{idx + 1}</td>
+                                    <td className="px-4 py-3 text-slate-300">{reward.label}</td>
+                                    <td className="px-4 py-3 font-bold text-emerald-400">₹{Number(reward.amount).toFixed(2)}</td>
+                                    <td className="px-4 py-3 text-slate-400">{reward.weight}</td>
+                                    <td className="px-4 py-3 text-right text-indigo-400 font-semibold">{prob}%</td>
+                                  </tr>
+                                );
+                              });
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : bonusView === 'stats' ? (
                 <div className="space-y-6">
@@ -2826,13 +2999,51 @@ export default function AdminDashboard() {
                         <span className="text-2xl font-black text-emerald-400">₹{Number(dailyBonusStats?.today?.totalRewards || 0).toFixed(2)}</span>
                       </div>
                       <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                         <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">Spins/Opens</span>
-                         <div className="flex gap-2 items-center mt-1">
-                            <span title="Wheel Spins" className="text-sm font-bold text-white">🎡 {dailyBonusStats?.today?.wheelSpins || 0}</span>
-                            <span title="Box Opens" className="text-sm font-bold text-white">📦 {dailyBonusStats?.today?.boxOpens || 0}</span>
-                            <span title="Scratch Cards" className="text-sm font-bold text-white">🎫 {dailyBonusStats?.today?.scratchClaims || 0}</span>
-                         </div>
+                         <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-1">Avg Reward</span>
+                         <span className="text-2xl font-black text-indigo-400">₹{Number(dailyBonusStats?.today?.averageReward || 0).toFixed(2)}</span>
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                       {/* Top Winners */}
+                       <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800">
+                          <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">🏆 Top Winners (All Time)</h4>
+                          <div className="space-y-3">
+                             {(dailyBonusStats?.topWinners || []).map((winner: any, i: number) => (
+                               <div key={i} className="flex items-center justify-between p-3 bg-slate-900/50 rounded-xl border border-slate-800/50">
+                                  <div className="flex items-center gap-3">
+                                     <div className={`w-6 h-6 flex items-center justify-center rounded-full text-[10px] font-bold ${i === 0 ? 'bg-yellow-500/20 text-yellow-500' : 'bg-slate-800 text-slate-500'}`}>{i + 1}</div>
+                                     <span className="text-xs font-bold text-white truncate max-w-[120px]">{winner.userName || 'Anonymous'}</span>
+                                  </div>
+                                  <span className="text-xs font-black text-emerald-400">₹{Number(winner.amount).toFixed(2)}</span>
+                               </div>
+                             ))}
+                             {(dailyBonusStats?.topWinners || []).length === 0 && <p className="text-[10px] text-slate-600 italic">No big wins yet</p>}
+                          </div>
+                       </div>
+
+                       {/* Module Stats */}
+                       <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800">
+                          <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">📦 Module Performance (Today)</h4>
+                          <div className="space-y-4">
+                             <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium text-slate-400 flex items-center gap-2">🎡 Wheel Spins</span>
+                                <span className="text-xs font-black text-white">{dailyBonusStats?.today?.wheelSpins || 0}</span>
+                             </div>
+                             <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium text-slate-400 flex items-center gap-2">📦 Box Opens</span>
+                                <span className="text-xs font-black text-white">{dailyBonusStats?.today?.boxOpens || 0}</span>
+                             </div>
+                             <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium text-slate-400 flex items-center gap-2">🎫 Scratch Cards</span>
+                                <span className="text-xs font-black text-white">{dailyBonusStats?.today?.scratchClaims || 0}</span>
+                             </div>
+                             <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                                <span className="text-xs font-medium text-amber-500 flex items-center gap-2">💀 Better Luck Hits</span>
+                                <span className="text-xs font-black text-amber-500">{dailyBonusStats?.today?.betterLuckCount || 0}</span>
+                             </div>
+                          </div>
+                       </div>
                     </div>
                   </div>
 
@@ -6043,7 +6254,7 @@ export default function AdminDashboard() {
                           </button>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Global Status</label>
                              <div className="flex gap-4">
@@ -6069,6 +6280,52 @@ export default function AdminDashboard() {
                              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Daily Reset Time (HH:MM)</label>
                              <input type="time" value={bonusSettings?.resetTime || "00:00"} onChange={(e) => setBonusSettings({...bonusSettings, resetTime: e.target.value})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500" />
                            </div>
+                           <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                             <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Daily Budget (₹)</label>
+                             <input type="number" value={bonusSettings?.dailyBudget || 500} onChange={(e) => setBonusSettings({...bonusSettings, dailyBudget: parseFloat(e.target.value)})} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500" />
+                           </div>
+                        </div>
+
+                        {/* AI Generator Section */}
+                        <div className="bg-slate-900 p-6 rounded-2xl border border-indigo-500/20 shadow-xl">
+                          <div className="flex items-center gap-3 mb-6">
+                            <div className="p-2 bg-indigo-600/20 rounded-lg text-indigo-400">
+                              <Sparkles className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <h4 className="text-white font-bold text-sm">🤖 Smart AI Reward Generator</h4>
+                              <p className="text-slate-500 text-[10px] font-medium uppercase tracking-widest">Balanced Distribution System</p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Min Reward</label>
+                              <input type="number" value={aiGenSettings.minReward} onChange={e => setAiGenSettings({...aiGenSettings, minReward: parseFloat(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:border-indigo-500" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Max Reward</label>
+                              <input type="number" value={aiGenSettings.maxReward} onChange={e => setAiGenSettings({...aiGenSettings, maxReward: parseFloat(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:border-indigo-500" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Slots</label>
+                              <input type="number" value={aiGenSettings.slots} onChange={e => setAiGenSettings({...aiGenSettings, slots: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:border-indigo-500" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Better Luck</label>
+                              <input type="number" value={aiGenSettings.betterLuckSlots} onChange={e => setAiGenSettings({...aiGenSettings, betterLuckSlots: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:border-indigo-500" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Budget (₹)</label>
+                              <input type="number" value={aiGenSettings.dailyBudget} onChange={e => setAiGenSettings({...aiGenSettings, dailyBudget: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-xs focus:border-indigo-500" />
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2">
+                             <button onClick={() => handleAIGenerateRewards('wheel')} disabled={generatingAI} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] uppercase rounded-xl transition disabled:opacity-50">Generate Wheel</button>
+                             <button onClick={() => handleAIGenerateRewards('box')} disabled={generatingAI} className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-[10px] uppercase rounded-xl transition disabled:opacity-50">Generate Boxes</button>
+                             <button onClick={() => handleAIGenerateRewards('scratch')} disabled={generatingAI} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-black text-[10px] uppercase rounded-xl transition disabled:opacity-50">Generate Scratch</button>
+                          </div>
                         </div>
 
                         {/* Modular Settings */}

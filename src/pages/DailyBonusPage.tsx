@@ -5,6 +5,12 @@ import { Gift, Disc, RotateCw, AlertTriangle, ArrowLeft, Clock, CheckCircle, Shi
 import confetti from "canvas-confetti";
 
 // --- Types ---
+interface RewardItem {
+  amount: number;
+  weight: number;
+  label: string;
+}
+
 interface BonusModuleStatus {
   enabled: boolean;
   dailyLimit: number;
@@ -15,6 +21,7 @@ interface BonusModuleStatus {
   nextAvailableAt: string | null;
   isOnCooldown: boolean;
   cooldownRemaining: number;
+  rewards?: RewardItem[];
 }
 
 interface BonusStatusResponse {
@@ -25,6 +32,7 @@ interface BonusStatusResponse {
     box: BonusModuleStatus;
     scratch: BonusModuleStatus;
   };
+  pendingRewards?: any;
   currency: string;
 }
 
@@ -41,6 +49,7 @@ export default function DailyBonusPage() {
   const [revealedReward, setRevealedReward] = useState<any>(null);
   const [claiming, setClaiming] = useState(false);
   const [claimSuccess, setClaimSuccess] = useState(false);
+  const [selectedBox, setSelectedBox] = useState<number | null>(null);
 
   // Wheel States
   const [wheelRotation, setWheelRotation] = useState(0);
@@ -86,8 +95,16 @@ export default function DailyBonusPage() {
 
   // --- Actions ---
 
-  const handleReveal = async (type: string) => {
+  const handleReveal = async (type: string, index?: number) => {
     if (revealing || !userId) return;
+    
+    // Prevent re-playing if reward already revealed but not claimed
+    if (revealedReward && !claimSuccess) return;
+
+    if (type === 'box' && index !== undefined) {
+      setSelectedBox(index);
+    }
+
     setRevealing(true);
     setRevealedReward(null);
     setClaimSuccess(false);
@@ -107,11 +124,18 @@ export default function DailyBonusPage() {
       }
 
       if (type === 'wheel') {
-        // Find index of reward in the wheel (we need settings for this)
-        // For now, let's just do a generic rotation
+        const rewards = status?.modules.wheel.rewards || [];
+        const rewardIndex = rewards.findIndex(r => r.label === data.reward.label);
+        
         const spinTime = 4000;
         const extraSpins = 5;
-        const newRotation = wheelRotation + (360 * extraSpins) + Math.random() * 360;
+        const segmentSize = 360 / (rewards.length || 6);
+        
+        // Calculate exact angle to stop at the center of the won segment
+        // We add current rotation to keep it spinning forward
+        const targetAngle = (rewards.length - rewardIndex) * segmentSize - (segmentSize / 2);
+        const newRotation = wheelRotation + (360 * extraSpins) + (targetAngle - (wheelRotation % 360));
+        
         setWheelRotation(newRotation);
         
         setTimeout(() => {
@@ -122,7 +146,7 @@ export default function DailyBonusPage() {
         setTimeout(() => {
           setRevealedReward(data.reward);
           setRevealing(false);
-        }, 1500);
+        }, 1200);
       } else if (type === 'scratch') {
         setRevealedReward(data.reward);
         setRevealing(false);
@@ -226,6 +250,25 @@ export default function DailyBonusPage() {
     }, 100);
   };
 
+  useEffect(() => {
+    if (activeView !== 'selection' && status?.pendingRewards?.[activeView]) {
+      const pending = status.pendingRewards[activeView];
+      if (pending && !pending.claimed) {
+        setRevealedReward({
+          amount: pending.amount,
+          label: pending.label
+        });
+        if (activeView === 'scratch') {
+          setTimeout(() => {
+            initScratchCard();
+          }, 150);
+        } else if (activeView === 'box' && selectedBox === null) {
+          setSelectedBox(0);
+        }
+      }
+    }
+  }, [status, activeView]);
+
   const handleScratch = (e: any) => {
     const canvas = canvasRef.current;
     if (!canvas || revealedReward?.claimed || claimSuccess) return;
@@ -295,7 +338,8 @@ export default function DailyBonusPage() {
           { id: 'scratch', name: 'Scratch Card', icon: CreditCard, color: 'from-amber-600 to-orange-600', emoji: '🎫' }
         ].map((mod) => {
           const modStatus = status?.modules?.[mod.id as keyof typeof status.modules];
-          const isLocked = !modStatus?.enabled || modStatus?.remaining === 0 || modStatus?.isOnCooldown;
+          const hasPending = !!(status?.pendingRewards?.[mod.id] && !status.pendingRewards[mod.id].claimed);
+          const isLocked = !modStatus?.enabled || (modStatus?.remaining === 0 && !hasPending) || (modStatus?.isOnCooldown && !hasPending);
           
           return (
             <motion.button
@@ -316,9 +360,14 @@ export default function DailyBonusPage() {
                   <div>
                     <h3 className="font-bold text-white flex items-center gap-2">
                       {mod.name} {mod.emoji}
+                      {hasPending && (
+                        <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-black animate-pulse">
+                          🎁 CLAIM
+                        </span>
+                      )}
                     </h3>
                     <p className="text-xs text-slate-400 font-medium">
-                      {!status ? 'Loading...' : modStatus?.isOnCooldown ? `Cooldown: ${formatTime(modStatus.cooldownRemaining)}` : `${modStatus?.remaining || 0} of ${modStatus?.dailyLimit || 0} available today`}
+                      {!status ? 'Loading...' : hasPending ? 'You have an unclaimed reward!' : modStatus?.isOnCooldown ? `Cooldown: ${formatTime(modStatus.cooldownRemaining)}` : `${modStatus?.remaining || 0} of ${modStatus?.dailyLimit || 0} available today`}
                     </p>
                   </div>
                 </div>
@@ -351,45 +400,70 @@ export default function DailyBonusPage() {
     </div>
   );
 
-  const WheelView = () => (
-    <div className="flex flex-col items-center space-y-8 py-4">
-      <div className="relative">
-        {/* Pointer */}
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[20px] border-t-rose-500 z-10 drop-shadow-[0_4px_6px_rgba(0,0,0,0.4)]" />
-        
-        {/* Visual Wheel */}
-        <div
-          className="relative w-72 h-72 rounded-full border-[8px] border-indigo-600 shadow-[0_0_50px_rgba(79,70,229,0.2)] overflow-hidden transition-transform duration-[4000ms] cubic-bezier(0.25, 0.1, 0.25, 1)"
-          style={{ transform: `rotate(${wheelRotation}deg)` }}
-        >
-          {/* Conic background pattern */}
-          <div className="absolute inset-0" style={{ background: 'conic-gradient(#4f46e5 0deg 60deg, #6366f1 60deg 120deg, #7c3aed 120deg 180deg, #9333ea 180deg 240deg, #4f46e5 240deg 300deg, #6366f1 300deg 360deg)' }} />
-          
-          {/* Values on wheel */}
-          {[1,2,3,4,5,6].map((v, i) => (
-             <div key={i} className="absolute top-0 left-0 w-full h-full flex items-start justify-center" style={{ transform: `rotate(${i * 60 + 30}deg)` }}>
-                <span className="mt-8 font-black text-white text-xs drop-shadow-md">₹?</span>
-             </div>
-          ))}
+  const WheelView = () => {
+    const rewards = status?.modules.wheel.rewards || [];
+    const segmentSize = 360 / (rewards.length || 6);
 
-          {/* Center */}
-          <div className="absolute inset-0 m-auto w-12 h-12 bg-white rounded-full border-4 border-indigo-600 shadow-xl z-10 flex items-center justify-center">
-             <div className="w-4 h-4 bg-indigo-600 rounded-full animate-pulse" />
+    return (
+      <div className="flex flex-col items-center space-y-8 py-4">
+        <div className="relative">
+          {/* Pointer */}
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[20px] border-t-rose-500 z-10 drop-shadow-[0_4px_6px_rgba(0,0,0,0.4)]" />
+          
+          {/* Visual Wheel */}
+          <div
+            className="relative w-72 h-72 rounded-full border-[8px] border-indigo-600 shadow-[0_0_50px_rgba(79,70,229,0.2)] overflow-hidden transition-transform duration-[4000ms] cubic-bezier(0.25, 0.1, 0.25, 1)"
+            style={{ transform: `rotate(${wheelRotation}deg)` }}
+          >
+            {/* Segments */}
+            {rewards.map((r, i) => (
+              <div 
+                key={i} 
+                className="absolute top-0 left-0 w-full h-full"
+                style={{ 
+                  transform: `rotate(${i * segmentSize}deg)`,
+                  clipPath: `polygon(50% 50%, 50% 0, ${50 + 50 * Math.tan((segmentSize * Math.PI) / 180)}% 0)` 
+                }}
+              >
+                <div 
+                  className={`w-full h-full ${i % 2 === 0 ? 'bg-indigo-600' : 'bg-indigo-500'}`}
+                  style={{ transform: `rotate(${segmentSize / 2}deg)` }}
+                />
+              </div>
+            ))}
+            
+            {/* Labels */}
+            {rewards.map((r, i) => (
+              <div 
+                key={`label-${i}`} 
+                className="absolute top-0 left-0 w-full h-full flex items-start justify-center" 
+                style={{ transform: `rotate(${i * segmentSize + segmentSize / 2}deg)` }}
+              >
+                <span className="mt-10 font-black text-white text-[10px] drop-shadow-md origin-center" style={{ transform: 'rotate(0deg)' }}>
+                  {r.label}
+                </span>
+              </div>
+            ))}
+
+            {/* Center */}
+            <div className="absolute inset-0 m-auto w-12 h-12 bg-white rounded-full border-4 border-indigo-600 shadow-xl z-10 flex items-center justify-center">
+              <div className="w-4 h-4 bg-indigo-600 rounded-full animate-pulse" />
+            </div>
           </div>
         </div>
-      </div>
 
-      <button
-        onClick={() => handleReveal('wheel')}
-        disabled={revealing || !!revealedReward}
-        className={`w-56 py-4 rounded-2xl font-black text-lg uppercase tracking-wider transition shadow-xl ${
-          revealing || !!revealedReward ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/20 active:scale-95'
-        }`}
-      >
-        {revealing ? 'Spinning...' : 'Spin Wheel'}
-      </button>
-    </div>
-  );
+        <button
+          onClick={() => handleReveal('wheel')}
+          disabled={revealing || (!!revealedReward && !claimSuccess)}
+          className={`w-56 py-4 rounded-2xl font-black text-lg uppercase tracking-wider transition shadow-xl ${
+            revealing || (!!revealedReward && !claimSuccess) ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/20 active:scale-95'
+          }`}
+        >
+          {revealing ? 'Spinning...' : 'Spin Wheel'}
+        </button>
+      </div>
+    );
+  };
 
   const BoxView = () => (
     <div className="flex flex-col items-center space-y-12 py-10">
@@ -399,15 +473,15 @@ export default function DailyBonusPage() {
             key={i}
             whileHover={{ y: -5 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => !revealedReward && handleReveal('box')}
-            disabled={revealing || !!revealedReward}
+            onClick={() => !revealedReward && handleReveal('box', i)}
+            disabled={revealing || (!!revealedReward && !claimSuccess)}
             className={`aspect-square rounded-3xl border flex flex-col items-center justify-center gap-2 transition-all ${
-              revealing && i === 1 ? 'animate-bounce' : ''
+              revealing && selectedBox === i ? 'animate-bounce border-indigo-500' : ''
             } ${
-              revealedReward ? (i === 1 ? 'bg-indigo-600/20 border-indigo-500' : 'bg-slate-900 border-slate-800 opacity-40') : 'bg-slate-900 border-slate-800 hover:border-slate-600 shadow-xl'
+              revealedReward ? (selectedBox === i ? 'bg-indigo-600/20 border-indigo-500 scale-105' : 'bg-slate-900 border-slate-800 opacity-40') : 'bg-slate-900 border-slate-800 hover:border-slate-600 shadow-xl'
             }`}
           >
-            <Package className={`w-10 h-10 ${revealing && i === 1 ? 'text-indigo-400' : 'text-slate-500'}`} />
+            <Package className={`w-10 h-10 ${(revealing || revealedReward) && selectedBox === i ? 'text-indigo-400' : 'text-slate-500'}`} />
             <span className="text-[10px] font-black text-slate-500 uppercase">Box {i+1}</span>
           </motion.button>
         ))}
@@ -423,7 +497,7 @@ export default function DailyBonusPage() {
          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950">
             <Trophy className="w-12 h-12 text-amber-500 mb-2 opacity-20" />
             <span className="text-3xl font-black text-white">
-               {revealedReward ? `₹${revealedReward.amount}` : '₹??'}
+               {scratchedPercent > 50 && revealedReward ? `₹${revealedReward.amount}` : '₹??'}
             </span>
             <span className="text-[10px] font-bold text-slate-500 uppercase mt-2 tracking-widest">Mystery Reward</span>
          </div>
@@ -514,15 +588,27 @@ export default function DailyBonusPage() {
 
         {/* Claim Reward Popup */}
         <AnimatePresence>
-          {revealedReward && (
+          {revealedReward && (activeView !== 'scratch' || scratchedPercent > 50) && (
             <motion.div 
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              className="mt-10 bg-slate-900 border border-indigo-500/30 p-6 rounded-3xl text-center relative overflow-hidden shadow-2xl"
+              className="mt-10 bg-slate-900 border border-indigo-500/30 p-6 rounded-3xl text-center relative overflow-hidden shadow-2xl z-50"
             >
               <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
               
-              {!claimSuccess ? (
+              {Number(revealedReward?.amount) === 0 ? (
+                <div className="py-4">
+                  <span className="text-5xl block mb-4">🍀</span>
+                  <h2 className="text-2xl font-black text-white mb-2">Better Luck Next Time!</h2>
+                  <p className="text-slate-400 text-sm mb-6">Don't worry, you can try again on your next turn!</p>
+                  <button 
+                    onClick={() => { setActiveView('selection'); setRevealedReward(null); setClaimSuccess(false); fetchStatus(); }} 
+                    className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-xs uppercase"
+                  >
+                    Continue
+                  </button>
+                </div>
+              ) : !claimSuccess ? (
                 <>
                   <h2 className="text-xl font-black text-white mb-1">🎉 You Won!</h2>
                   <p className="text-slate-400 text-xs mb-4">Complete verification to claim reward</p>

@@ -9,7 +9,7 @@ import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 import { createServer as createViteServer } from "vite";
 import { getDb } from "./src/lib/firebase";
-import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction } from "firebase/firestore";
 import { REWARD_TASKS } from "./src/lib/tasks";
 import { GoogleGenAI } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./src/lib/gemini";
@@ -1539,20 +1539,37 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       const globalSnap = await getDoc(doc(db, "settings", "daily_bonus"));
       const globalStats = globalSnap.exists() ? globalSnap.data() : {};
       
+      // Fetch Top Winners (All Time)
+      const topWinnersQuery = query(
+        collection(db, "claimHistory"),
+        orderBy("amount", "desc"),
+        limit(5)
+      );
+      const topWinnersSnap = await getDocs(topWinnersQuery);
+      const topWinners = topWinnersSnap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
       res.json({
+        success: true,
         today: {
           wheelSpins: todayStats.totalSpins || 0,
           boxOpens: todayStats.totalOpens || 0,
           scratchClaims: todayStats.totalScratches || 0,
           uniqueUsers: todayStats.uniqueUsers || 0,
           totalClaims: todayStats.totalClaims || 0,
-          totalRewards: todayStats.totalRewards || 0
+          totalRewards: todayStats.totalRewards || 0,
+          averageReward: todayStats.totalClaims ? (todayStats.totalRewards / todayStats.totalClaims) : 0,
+          betterLuckCount: todayStats.betterLuckCount || 0
         },
         global: {
           totalSpins: globalStats.totalSpins || 0,
           totalRewardsDistributed: globalStats.totalRewardsDistributed || 0,
-          totalClaims: globalStats.totalClaims || 0
-        }
+          totalClaims: globalStats.totalClaims || 0,
+          averageReward: globalStats.totalClaims ? (globalStats.totalRewardsDistributed / globalStats.totalClaims) : 0
+        },
+        topWinners
       });
     } catch (e) {
       console.error("Error in /api/admin/daily-bonus/stats:", e);
@@ -1582,6 +1599,52 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     } catch (e: any) {
       console.error("Admin daily bonus history fetch error:", e);
       res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/admin/daily-bonus/auto-generate", async (req, res) => {
+    try {
+      const { minReward, maxReward, slots, betterLuckSlots, dailyBudget } = req.body;
+      
+      const prompt = `Generate a daily bonus reward pool in JSON format.
+      Parameters:
+      - Minimum Reward: ₹${minReward}
+      - Maximum Reward: ₹${maxReward}
+      - Total Reward Slots (excluding Better Luck): ${slots}
+      - Better Luck Slots: ${betterLuckSlots}
+      - Daily Budget: ₹${dailyBudget}
+      
+      Requirements:
+      - Distribution must be profitable and realistic. High-value rewards must have extremely low weight (e.g., 1 or 2). Low-value rewards must have high weight (e.g., 50-100).
+      - Include exactly ${betterLuckSlots} "Better Luck Next Time" slots with 0 amount. Each of these must have amount: 0 and label: "Better Luck Next Time" or similar.
+      - Each reward must have: label (string), amount (number), weight (number).
+      - Weight should be relative (e.g., 1 to 100).
+      
+      Return ONLY a JSON array of rewards. Do NOT include any markdown formatting like \`\`\`json or surrounding text, just the raw array.`;
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY environment variable is not set");
+      }
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await safeGenerateContent(ai, {
+        model: "gemini-1.5-flash",
+        contents: prompt
+      });
+      const responseText = response.text || "";
+      let rewards = [];
+      try {
+        const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+        rewards = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
+      } catch (parseErr) {
+        console.error("AI Parse Error:", parseErr, responseText);
+        throw new Error("Failed to parse AI generated rewards");
+      }
+
+      res.json({ success: true, rewards });
+    } catch (e: any) {
+      console.error("AI Reward generation error:", e);
+      res.status(500).json({ error: e.message || "Server error" });
     }
   });
 
@@ -3699,6 +3762,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           box: computeModuleStatus(boxConfig, stateData.box),
           scratch: computeModuleStatus(scratchConfig, stateData.scratch)
         },
+        pendingRewards: stateData.pendingRewards || {},
         currency
       });
     } catch (e: any) {
@@ -3724,6 +3788,19 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       if (!stateSnap.exists()) return res.status(404).json({ error: "State not found" });
       const stateData = stateSnap.data();
 
+      // Check if there's an unclaimed pending reward of the same type
+      if (stateData.pendingRewards?.[type] && !stateData.pendingRewards[type].claimed) {
+        // Return existing reward to prevent refresh exploit
+        return res.json({
+          ok: true,
+          reward: {
+            amount: stateData.pendingRewards[type].amount,
+            label: stateData.pendingRewards[type].label || `₹${stateData.pendingRewards[type].amount.toFixed(2)}`
+          },
+          usage: stateData[type]
+        });
+      }
+
       const usage = stateData[type] || { count: 0, lastTime: null };
       if (usage.count >= config.dailyLimit) return res.status(400).json({ error: "Daily limit reached" });
 
@@ -3737,9 +3814,27 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       }
 
-      // Pick reward based on probability
-      const rewards = config.rewards || [];
+      // Budget Protection
+      const today = new Date().toISOString().split("T")[0];
+      const statsSnap = await getDoc(doc(db, "daily_bonus_stats", today));
+      const statsData = statsSnap.exists() ? statsSnap.data() : { totalRewards: 0 };
+      const currentPayout = statsData.totalRewards || 0;
+      const budget = Number(settings.dailyBudget) || Infinity;
+
+      let rewards = [...(config.rewards || [])];
       if (rewards.length === 0) return res.status(500).json({ error: "No rewards configured" });
+
+      // If budget reached, only keep "Better Luck Next Time" or lowest rewards
+      if (currentPayout >= budget) {
+        const betterLuckRewards = rewards.filter(r => (r.label || "").toLowerCase().includes("better luck") || Number(r.amount) === 0);
+        if (betterLuckRewards.length > 0) {
+          rewards = betterLuckRewards;
+        } else {
+          // Fallback to the reward with minimum amount
+          const minAmount = Math.min(...rewards.map(r => Number(r.amount)));
+          rewards = rewards.filter(r => Number(r.amount) === minAmount);
+        }
+      }
 
       const totalWeight = rewards.reduce((sum: number, r: any) => sum + (Number(r.weight) || 0), 0);
       let random = Math.random() * totalWeight;
@@ -3753,9 +3848,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       const rewardAmount = Number(selectedReward.amount);
+      const rewardLabel = selectedReward.label || `₹${rewardAmount.toFixed(2)}`;
 
       // Save pending reward and update count (don't credit yet)
       const now = new Date().toISOString();
+      const isBetterLuck = rewardAmount === 0;
       const updatedState = {
         ...stateData,
         [type]: {
@@ -3766,26 +3863,31 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           ...(stateData.pendingRewards || {}),
           [type]: {
             amount: rewardAmount,
+            label: rewardLabel,
             timestamp: now,
-            claimed: false
+            claimed: isBetterLuck
           }
         }
       };
       await setDoc(stateDocRef, updatedState);
 
-      // Update statistics
+      // Update statistics (Spins count)
       try {
-        const today = new Date().toISOString().split("T")[0];
         const statsRef = doc(db, "daily_bonus_stats", today);
         const fieldName = type === "wheel" ? "totalSpins" : type === "box" ? "totalOpens" : "totalScratches";
-        await setDoc(statsRef, { [fieldName]: increment(1) }, { merge: true });
+        const updateData: any = { [fieldName]: increment(1) };
+        if (isBetterLuck) {
+          updateData.betterLuckCount = increment(1);
+          updateData.totalClaims = increment(1);
+        }
+        await setDoc(statsRef, updateData, { merge: true });
       } catch (e) {}
 
       return res.json({
         ok: true,
         reward: {
           amount: rewardAmount,
-          label: selectedReward.label || `₹${rewardAmount.toFixed(2)}`
+          label: rewardLabel
         },
         usage: updatedState[type]
       });
@@ -3798,56 +3900,60 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   app.post("/api/daily-bonus/claim", async (req, res) => {
     try {
       const { userId, type } = req.body;
-      const stateDocRef = doc(db, "daily_bonus_state", userId);
-      const stateSnap = await getDoc(stateDocRef);
-      if (!stateSnap.exists()) return res.status(404).json({ error: "State not found" });
-      const stateData = stateSnap.data();
+      if (!userId || !type) return res.status(400).json({ error: "Missing parameters" });
 
-      const pending = stateData.pendingRewards?.[type];
-      if (!pending || pending.claimed) return res.status(400).json({ error: "No pending reward to claim" });
-
-      const rewardAmount = Number(pending.amount);
       const userDocRef = doc(db, "users", userId);
-      const userSnap = await getDoc(userDocRef);
-      if (!userSnap.exists()) return res.status(404).json({ error: "User not found" });
-      const uData = userSnap.data();
+      const stateDocRef = doc(db, "daily_bonus_state", userId);
+      const today = new Date().toISOString().split("T")[0];
+      const statsRef = doc(db, "daily_bonus_stats", today);
+      const globalSettingsRef = doc(db, "settings", "daily_bonus");
 
-      const newBonusBalance = (uData.bonusBalance || 0) + rewardAmount;
-      const newAvailableBalance = (uData.availableBalance || 0) + rewardAmount;
-      const newEarnings = (uData.earnings || 0) + rewardAmount;
+      let rewardAmount = 0;
+      let userName = "User";
+      let tgUserId = "";
 
-      await setDoc(userDocRef, {
-        bonusBalance: newBonusBalance,
-        availableBalance: newAvailableBalance,
-        earnings: newEarnings,
-        rewardBalance: (uData.rewardBalance || 0) + rewardAmount
-      }, { merge: true });
+      // Start Firestore Transaction
+      await runTransaction(db, async (transaction) => {
+        const userSnap = await transaction.get(userDocRef);
+        if (!userSnap.exists()) throw new Error("User not found");
+        const uData = userSnap.data();
+        userName = uData.name || uData.firstName || uData.username || "User";
+        tgUserId = uData.telegramId || "";
 
-      // Mark as claimed
-      await setDoc(stateDocRef, {
-        pendingRewards: {
-          ...stateData.pendingRewards,
-          [type]: { ...pending, claimed: true }
-        }
-      }, { merge: true });
+        const stateSnap = await transaction.get(stateDocRef);
+        if (!stateSnap.exists()) throw new Error("State not found");
+        const stateData = stateSnap.data();
 
-      // Statistics
-      try {
-        const today = new Date().toISOString().split("T")[0];
-        const statsRef = doc(db, "daily_bonus_stats", today);
+        const pending = stateData.pendingRewards?.[type];
+        if (!pending || pending.claimed) throw new Error("No pending reward or already claimed");
+
+        rewardAmount = Number(pending.amount);
+
+        // Update User Balances
+        transaction.update(userDocRef, {
+          bonusBalance: increment(rewardAmount),
+          availableBalance: increment(rewardAmount),
+          earnings: increment(rewardAmount)
+        });
+
+        // Mark as Claimed
+        transaction.update(stateDocRef, {
+          [`pendingRewards.${type}.claimed`]: true
+        });
+
+        // Update Statistics
         const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : "scratchRewards";
-        await setDoc(statsRef, { 
+        transaction.set(statsRef, { 
           [rewardField]: increment(rewardAmount),
           totalClaims: increment(1),
           totalRewards: increment(rewardAmount)
         }, { merge: true });
 
-        const globalSettingsRef = doc(db, "settings", "daily_bonus");
-        await setDoc(globalSettingsRef, { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
-      } catch (e) {}
+        // Update Global Distributed Rewards
+        transaction.set(globalSettingsRef, { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
+      });
 
-      // History
-      const userName = uData.name || uData.firstName || uData.username || "User";
+      // After transaction success, Add to history (non-critical, separate write or can be in transaction too but it's okay)
       await addDoc(collection(db, "claimHistory"), {
         userId,
         userName,
@@ -3857,10 +3963,48 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         adStatus: "Verified"
       });
 
-      return res.json({ ok: true });
+      // Send Telegram Notification
+      try {
+        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        if (telegramSettingsSnap.exists()) {
+          const { botToken, rewardChannelId } = telegramSettingsSnap.data();
+          if (botToken && (rewardChannelId || tgUserId)) {
+            const emoji = type === "wheel" ? "🎡" : type === "box" ? "📦" : "🎫";
+            const typeLabel = type === "wheel" ? "Wheel Spin" : type === "box" ? "Mystery Box" : "Scratch Card";
+            const message = `🎊 *Daily Bonus Claimed!*\n\n👤 *User:* ${userName}\n💰 *Reward:* ₹${rewardAmount.toFixed(2)}\n🎯 *Source:* ${emoji} ${typeLabel}\n📅 *Date:* ${new Date().toLocaleString()}\n\nCongratulations! 🥳`;
+            
+            if (rewardChannelId) {
+              await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: rewardChannelId,
+                  text: message,
+                  parse_mode: "Markdown"
+                })
+              });
+            }
+            if (tgUserId) {
+              await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: tgUserId,
+                  text: message,
+                  parse_mode: "Markdown"
+                })
+              });
+            }
+          }
+        }
+      } catch (tgErr) {
+        console.error("Error sending TG notification for daily bonus:", tgErr);
+      }
+
+      return res.json({ ok: true, amount: rewardAmount });
     } catch (e: any) {
       console.error("Error in /api/daily-bonus/claim:", e);
-      res.status(500).json({ error: e.message || "Server error" });
+      res.status(400).json({ error: e.message || "Server error" });
     }
   });
 
