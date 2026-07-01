@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Gift, Disc, RotateCw, AlertTriangle, ArrowLeft, Clock, CheckCircle, ShieldCheck, Star, Package, CreditCard, ChevronRight, Trophy, Coins } from "lucide-react";
@@ -51,6 +51,14 @@ interface BonusStatusResponse {
   pendingRewards?: any;
   currency: string;
 }
+
+// --- Helpers ---
+const formatTime = (seconds: number) => {
+  if (!seconds || isNaN(seconds)) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
 
 // --- Components ---
 
@@ -204,9 +212,15 @@ export default function DailyBonusPage() {
 
   const showMonetagAd = () => {
     return new Promise<boolean>((resolve) => {
+      if (activeView === 'coinrain') {
+        addLog('📺 Monetag Mini Ad Started');
+      }
       const tg = (window as any).Telegram?.WebApp;
       if (!tg) {
         console.log("Monetag Ad Simulator: Success");
+        if (activeView === 'coinrain') {
+          addLog('📺 Monetag Mini Ad Completed');
+        }
         resolve(true);
         return;
       }
@@ -214,14 +228,23 @@ export default function DailyBonusPage() {
       const monetagFn = (window as any).show_11210088;
       if (monetagFn) {
          monetagFn().then(() => {
+            if (activeView === 'coinrain') {
+              addLog('📺 Monetag Mini Ad Completed');
+            }
             resolve(true);
          }).catch((e: any) => {
             console.error("Monetag Ad Error:", e);
             alert("Ad failed to load or was closed early. Please try again to claim your reward.");
+            if (activeView === 'coinrain') {
+              addLog('❌ Monetag Mini Ad Failed or closed early', true);
+            }
             resolve(false);
          });
       } else {
          console.warn("Monetag SDK function not found. Proceeding with claim.");
+         if (activeView === 'coinrain') {
+           addLog('📺 Monetag Mini Ad Completed');
+         }
          resolve(true); 
       }
     });
@@ -231,7 +254,7 @@ export default function DailyBonusPage() {
     if (claiming || !userId || !revealedReward) return;
     
     if (activeView === 'coinrain') {
-      addLog(`🎁 Claim Started: Claiming cash reward of ₹${Number(revealedReward.amount).toFixed(2)}`);
+      addLog('👆 Claim Button Clicked');
     }
 
     // 1. Show Monetag Rewarded Ad
@@ -264,13 +287,9 @@ export default function DailyBonusPage() {
       if (res.ok) {
         setClaimSuccess(true);
         if (activeView === 'coinrain') {
-          addLog(`✅ Wallet Updated: Credited ₹${Number(revealedReward.amount).toFixed(2)} to user's wallet!`);
-          addLog(`🗄️ Firestore Updated: Claim entry saved and usage updated.`);
-          if (data.telegramSent) {
-            addLog(`📢 Telegram Sent: Notification sent to channel/group.`);
-          } else {
-            addLog(`📢 Telegram Sent: Notification dispatch successful.`);
-          }
+          addLog('💰 Wallet Credited');
+          addLog('🗄️ Firestore Updated');
+          addLog('📢 Telegram Notification Sent');
         }
         confetti({
           particleCount: 150,
@@ -372,13 +391,6 @@ export default function DailyBonusPage() {
     }
     const percent = (transparent / (canvas.width * canvas.height)) * 100;
     setScratchedPercent(percent);
-  };
-
-  const formatTime = (seconds: number) => {
-    if (!seconds || isNaN(seconds)) return "0:00";
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (loading) {
@@ -720,8 +732,23 @@ export default function DailyBonusPage() {
     </div>
   );
 
-  const CoinRainView = () => {
-    const coinrainConfig = status?.modules.coinrain || {
+  const CoinRainView = useMemo(() => {
+    return ({ 
+      userId, 
+      status, 
+      fetchStatus, 
+      addLog, 
+      logs, 
+      setLogs, 
+      revealedReward, 
+      setRevealedReward, 
+      claiming, 
+      claimSuccess, 
+      setClaimSuccess, 
+      handleClaim, 
+      activeView 
+    }: any) => {
+      const coinrainConfig = status?.modules.coinrain || {
       enabled: true,
       dailyLimit: 2,
       duration: 30,
@@ -753,6 +780,7 @@ export default function DailyBonusPage() {
     const canvasRefLocal = useRef<HTMLCanvasElement>(null);
     const requestRef = useRef<number | null>(null);
     const gameActiveRef = useRef<boolean>(false);
+    const gameRunningRef = useRef<boolean>(false);
     
     // Live refs to avoid closures in animation frame
     const scoreRef = useRef<number>(0);
@@ -781,6 +809,25 @@ export default function DailyBonusPage() {
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [gameError, setGameError] = useState<string | null>(null);
 
+    const claimButtonLoggedRef = useRef<boolean>(false);
+    const resultPopupLoggedRef = useRef<boolean>(false);
+
+    useEffect(() => {
+      if (gameState === 'result') {
+        if (!resultPopupLoggedRef.current) {
+          addLog('✨ Result Popup Opened');
+          resultPopupLoggedRef.current = true;
+        }
+        if (!claimSuccess && !claimButtonLoggedRef.current) {
+          addLog('🎁 Claim Button Rendered');
+          claimButtonLoggedRef.current = true;
+        }
+      } else {
+        resultPopupLoggedRef.current = false;
+        claimButtonLoggedRef.current = false;
+      }
+    }, [gameState, claimSuccess]);
+
     const itemsRef = useRef<any[]>([]);
     const floatTextsRef = useRef<any[]>([]);
 
@@ -802,6 +849,33 @@ export default function DailyBonusPage() {
 
     // Initialize Game Session on Start
     const handleStartGame = async () => {
+      if (gameRunningRef.current) {
+        addLog('⚠️ Duplicate Start Prevented: A game session is already active or initializing');
+        console.warn('⚠️ [Coin Rain] Duplicate Start Prevented: gameRunningRef is true');
+        return;
+      }
+
+      // Synchronously lock immediately
+      gameRunningRef.current = true;
+
+      // Clean up every timer, animation frame, interval and event listener
+      gameActiveRef.current = false;
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
+      frozenTimerRef.current = 0;
+      shieldTimerRef.current = 0;
+      doubleTimerRef.current = 0;
+      magnetTimerRef.current = 0;
+
+      // Cancel old sessions if a new one somehow starts
+      if (sessionIdRef.current) {
+        addLog(`⚠️ Cancelling previous active session: ${sessionIdRef.current}`);
+        console.warn('⚠️ [Coin Rain] Cancelling previous active session:', sessionIdRef.current);
+        sessionIdRef.current = null;
+      }
+
       addLog('🎮 Game Started: Requesting initial game session from server');
       console.log('🎮 [Coin Rain] Requesting to start game session for user:', userId);
       setGameError(null);
@@ -835,11 +909,6 @@ export default function DailyBonusPage() {
         goldenCoinsCollectedRef.current = 0;
         coinsLostByBombsRef.current = 0;
 
-        frozenTimerRef.current = 0;
-        shieldTimerRef.current = 0;
-        doubleTimerRef.current = 0;
-        magnetTimerRef.current = 0;
-
         itemsRef.current = [];
         floatTextsRef.current = [];
         lastInteractionRef.current = null;
@@ -862,6 +931,8 @@ export default function DailyBonusPage() {
         addLog(`❌ Session Start Error: ${errMsg}`, true);
         setGameError(errMsg);
         setGameState('start');
+        // Release the lock on failure so the user can retry
+        gameRunningRef.current = false;
       }
     };
 
@@ -1534,7 +1605,7 @@ export default function DailyBonusPage() {
           finalScore: scoreRef.current
         };
 
-        addLog(`📡 Sending Finish API Request with payload: ${JSON.stringify(payload)}`);
+        addLog('📡 Finish API Request Sent');
 
         const res = await fetch(`${API_BASE}/api/daily-bonus/coinrain/finish`, {
           method: 'POST',
@@ -1543,7 +1614,7 @@ export default function DailyBonusPage() {
         });
 
         console.log('📡 [Coin Rain] Finish Response Status:', res.status, res.statusText);
-        addLog(`📡 Finish API Response Status: ${res.status} ${res.statusText}`);
+        addLog('📡 Finish API Response Received');
 
         const data = await res.json();
         console.log('📦 [Coin Rain] Finish Response Body:', data);
@@ -1574,12 +1645,14 @@ export default function DailyBonusPage() {
         }
 
         setGameState('result');
+        addLog('🎯 Game State Changed -> RESULT');
       } catch (err: any) {
         console.error('❌ [Coin Rain] Finish game error caught:', err);
         const errMsg = err.message || 'Verification Error. Re-syncing.';
         addLog(`❌ Finish Game Error: ${errMsg}`, true);
         setGameError(errMsg);
-        setGameState('start');
+      } finally {
+        gameRunningRef.current = false;
       }
     };
 
@@ -1657,10 +1730,14 @@ export default function DailyBonusPage() {
 
           <button 
             onClick={handleStartGame}
-            disabled={isLocked}
-            className={`w-64 py-4 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl ${isLocked ? 'opacity-40 cursor-not-allowed shadow-none' : 'shadow-emerald-950/20'}`}
+            disabled={isLocked || gameRunningRef.current || gameState !== 'start'}
+            className={`w-64 py-4 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all shadow-xl ${
+              (isLocked || gameRunningRef.current || gameState !== 'start') 
+                ? 'opacity-40 cursor-not-allowed shadow-none' 
+                : 'shadow-emerald-950/20'
+            }`}
           >
-            {modStatus?.isOnCooldown ? 'On Cooldown' : modStatus?.remaining === 0 ? 'No Plays Left' : 'Start Coin Rain'}
+            {gameRunningRef.current ? 'Initializing...' : modStatus?.isOnCooldown ? 'On Cooldown' : modStatus?.remaining === 0 ? 'No Plays Left' : 'Start Coin Rain'}
           </button>
 
           <div className="w-full mt-2">
@@ -1720,6 +1797,27 @@ export default function DailyBonusPage() {
     }
 
     if (gameState === 'finishing') {
+      if (gameError) {
+        return (
+          <div className="flex flex-col items-center justify-center py-12 space-y-6 text-center animate-fade-in">
+            <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-3xl w-20 h-20 flex items-center justify-center shadow-xl shadow-rose-950/20">
+              <AlertTriangle className="w-10 h-10 text-rose-400" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-lg font-black text-white uppercase tracking-wider">Verification Failed</h3>
+              <p className="text-xs text-rose-400 font-bold bg-rose-500/10 border border-rose-500/20 px-4 py-2 rounded-xl max-w-xs mx-auto">
+                {gameError}
+              </p>
+            </div>
+            <button 
+              onClick={() => { setGameError(null); setGameState('start'); }}
+              className="px-6 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-xl text-xs font-bold uppercase transition-all"
+            >
+              Back to Start Screen
+            </button>
+          </div>
+        );
+      }
       return (
         <div className="flex flex-col items-center justify-center py-20 space-y-4">
           <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
@@ -1915,6 +2013,7 @@ export default function DailyBonusPage() {
       </div>
     );
   };
+}, []);
 
   return (
     <div className="min-h-screen bg-[#020617] text-white font-sans flex flex-col">
@@ -1971,7 +2070,21 @@ export default function DailyBonusPage() {
           )}
           {activeView === 'coinrain' && (
             <motion.div key="coinrain" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}>
-              <CoinRainView />
+              <CoinRainView 
+                userId={userId}
+                status={status}
+                fetchStatus={fetchStatus}
+                addLog={addLog}
+                logs={logs}
+                setLogs={setLogs}
+                revealedReward={revealedReward}
+                setRevealedReward={setRevealedReward}
+                claiming={claiming}
+                claimSuccess={claimSuccess}
+                setClaimSuccess={setClaimSuccess}
+                handleClaim={handleClaim}
+                activeView={activeView}
+              />
             </motion.div>
           )}
         </AnimatePresence>
