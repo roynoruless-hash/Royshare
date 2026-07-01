@@ -78,6 +78,7 @@ export default function AdminDashboard() {
   });
   const [aiPreviewRewards, setAiPreviewRewards] = useState<any[] | null>(null);
   const [generatingAI, setGeneratingAI] = useState(false);
+  const [aiGenMessage, setAiGenMessage] = useState<{ text: string; type: "success" | "warning" | "error" } | null>(null);
 
   const [users, setUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -832,6 +833,7 @@ export default function AdminDashboard() {
     }
     setGeneratingAI(true);
     setAiPreviewRewards(null);
+    setAiGenMessage(null);
     try {
       const res = await fetch(`${API_BASE}/api/admin/daily-bonus/auto-generate`, {
         method: "POST",
@@ -841,16 +843,63 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         setAiPreviewRewards(data.rewards);
-        alert(`🤖 AI successfully generated ${data.rewards.length} reward slots! Please review the preview table and click "Save and Apply".`);
+        if (data.isLocalFallback) {
+          setAiGenMessage({
+            text: "AI Generator is temporarily unavailable. Using Smart Local Generator.",
+            type: "warning"
+          });
+        } else {
+          setAiGenMessage({
+            text: `🤖 AI successfully generated ${data.rewards.length} reward slots! Please review the preview table and click "Save and Apply".`,
+            type: "success"
+          });
+        }
       } else {
-        alert(data.error || "AI generation failed");
+        // Handle failed AI generation with local fallback
+        generateLocalRewardsAsFallback();
       }
     } catch (err) {
       console.error("AI Gen Error:", err);
-      alert("Failed to connect to AI generator");
+      // Handle network or connection errors with local fallback
+      generateLocalRewardsAsFallback();
     } finally {
       setGeneratingAI(false);
     }
+  };
+
+  const generateLocalRewardsAsFallback = () => {
+    const numSlots = aiGenSettings.slots || 8;
+    const minRew = aiGenSettings.minReward || 1;
+    const maxRew = aiGenSettings.maxReward || 100;
+    const blSlots = aiGenSettings.betterLuckSlots || 0;
+
+    const rewards = [];
+    // Generate normal rewards with inverse quadratic weights
+    for (let i = 0; i < numSlots; i++) {
+      const ratio = numSlots > 1 ? i / (numSlots - 1) : 0;
+      const amount = Math.round(minRew + ratio * (maxRew - minRew));
+      const weight = Math.max(1, Math.round(100 * Math.pow(1 - ratio, 2)));
+      rewards.push({
+        label: `₹${amount.toFixed(2)}`,
+        amount,
+        weight
+      });
+    }
+
+    // Generate Better Luck Next Time slots
+    for (let i = 0; i < blSlots; i++) {
+      rewards.push({
+        label: "Better Luck Next Time 🍀",
+        amount: 0,
+        weight: 35
+      });
+    }
+
+    setAiPreviewRewards(rewards);
+    setAiGenMessage({
+      text: "AI Generator is temporarily unavailable. Using Smart Local Generator.",
+      type: "warning"
+    });
   };
 
   const fetchUsers = async () => {
@@ -6325,6 +6374,27 @@ export default function AdminDashboard() {
                              <button onClick={() => handleAIGenerateRewards('wheel')} disabled={generatingAI} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] uppercase rounded-xl transition disabled:opacity-50">Generate Wheel</button>
                              <button onClick={() => handleAIGenerateRewards('box')} disabled={generatingAI} className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-[10px] uppercase rounded-xl transition disabled:opacity-50">Generate Boxes</button>
                              <button onClick={() => handleAIGenerateRewards('scratch')} disabled={generatingAI} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-black text-[10px] uppercase rounded-xl transition disabled:opacity-50">Generate Scratch</button>
+                           </div>
+
+                           {generatingAI && (
+                             <div className="mt-4 p-3 rounded-xl border bg-indigo-500/10 border-indigo-500/20 text-indigo-400 text-xs font-medium flex items-center gap-2 animate-pulse">
+                               <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
+                               <span>AI Generator is calculating optimal reward distributions... Please wait...</span>
+                             </div>
+                           )}
+
+                           {aiGenMessage && (
+                             <div className={`mt-4 p-3 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+                               aiGenMessage.type === "success" 
+                                 ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
+                                 : aiGenMessage.type === "warning"
+                                 ? "bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse"
+                                 : "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                             }`}>
+                               <span>{aiGenMessage.text}</span>
+                             </div>
+                           )}
+                           <div className="hidden">
                           </div>
                         </div>
 

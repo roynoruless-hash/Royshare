@@ -1622,29 +1622,80 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       
       Return ONLY a JSON array of rewards. Do NOT include any markdown formatting like \`\`\`json or surrounding text, just the raw array.`;
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new Error("GEMINI_API_KEY environment variable is not set");
-      }
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await safeGenerateContent(ai, {
-        model: "gemini-1.5-flash",
-        contents: prompt
-      });
-      const responseText = response.text || "";
       let rewards = [];
+      let isLocalFallback = false;
+
       try {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+          throw new Error("GEMINI_API_KEY environment variable is not set");
+        }
+        const ai = new GoogleGenAI({ apiKey });
+        const response = await safeGenerateContent(ai, {
+          model: "gemini-3.5-flash",
+          contents: prompt
+        });
+        const responseText = response.text || "";
         const jsonMatch = responseText.match(/\[[\s\S]*\]/);
         rewards = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
-      } catch (parseErr) {
-        console.error("AI Parse Error:", parseErr, responseText);
-        throw new Error("Failed to parse AI generated rewards");
+      } catch (err: any) {
+        console.warn("[AI generation failed, falling back to Smart Local Generator]", err);
+        isLocalFallback = true;
+        
+        // Generate rewards locally using quadratic weight decay
+        rewards = [];
+        const numSlots = parseInt(slots) || 5;
+        const minRew = parseFloat(minReward) || 1;
+        const maxRew = parseFloat(maxReward) || 100;
+        const blSlots = parseInt(betterLuckSlots) || 0;
+
+        for (let i = 0; i < numSlots; i++) {
+          const ratio = numSlots > 1 ? i / (numSlots - 1) : 0;
+          const amount = Math.round(minRew + ratio * (maxRew - minRew));
+          const weight = Math.max(1, Math.round(100 * Math.pow(1 - ratio, 2)));
+          rewards.push({
+            label: `₹${amount.toFixed(2)}`,
+            amount,
+            weight
+          });
+        }
+
+        for (let i = 0; i < blSlots; i++) {
+          rewards.push({
+            label: "Better Luck Next Time 🍀",
+            amount: 0,
+            weight: 35
+          });
+        }
       }
 
-      res.json({ success: true, rewards });
+      res.json({ success: true, rewards, isLocalFallback });
     } catch (e: any) {
-      console.error("AI Reward generation error:", e);
-      res.status(500).json({ error: e.message || "Server error" });
+      console.error("AI Reward generation fatal error:", e);
+      try {
+        // Absolute fallback if anything at all crashes
+        const { minReward, maxReward, slots, betterLuckSlots } = req.body;
+        const numSlots = parseInt(slots) || 5;
+        const minRew = parseFloat(minReward) || 1;
+        const maxRew = parseFloat(maxReward) || 100;
+        const blSlots = parseInt(betterLuckSlots) || 0;
+        const rewards = [];
+        
+        for (let i = 0; i < numSlots; i++) {
+          const ratio = numSlots > 1 ? i / (numSlots - 1) : 0;
+          const amount = Math.round(minRew + ratio * (maxRew - minRew));
+          const weight = Math.max(1, Math.round(100 * Math.pow(1 - ratio, 2)));
+          rewards.push({ label: `₹${amount.toFixed(2)}`, amount, weight });
+        }
+        
+        for (let i = 0; i < blSlots; i++) {
+          rewards.push({ label: "Better Luck Next Time 🍀", amount: 0, weight: 35 });
+        }
+        
+        res.json({ success: true, rewards, isLocalFallback: true });
+      } catch (fallbackErr) {
+        res.status(500).json({ error: e.message || "Server error" });
+      }
     }
   });
 
