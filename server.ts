@@ -4190,7 +4190,19 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
   app.post("/api/daily-bonus/coinrain/finish", async (req, res) => {
     try {
-      const { userId, sessionId, score, bombHits, powerupsUsed, duration, tapsCount } = req.body;
+      const { 
+        userId, 
+        sessionId, 
+        score, 
+        bombHits, 
+        powerupsUsed, 
+        duration, 
+        tapsCount,
+        totalCoinsCollected,
+        goldenCoinsCollected,
+        coinsLostByBombs,
+        finalScore
+      } = req.body;
       if (!userId || !sessionId) return res.status(400).json({ error: "Missing parameters" });
 
       const settingsSnap = await getDoc(doc(db, "settings", "daily_bonus"));
@@ -4281,7 +4293,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
             claimed: rewardAmount === 0,
             coinsCollected: score,
             bombHits: bombHits || 0,
-            powerupsUsed: powerupsUsed || 0
+            powerupsUsed: powerupsUsed || 0,
+            totalCoinsCollected: totalCoinsCollected || 0,
+            goldenCoinsCollected: goldenCoinsCollected || 0,
+            coinsLostByBombs: coinsLostByBombs || 0,
+            finalScore: finalScore || score
           }
         },
         activeCoinRainSession: null // reset session

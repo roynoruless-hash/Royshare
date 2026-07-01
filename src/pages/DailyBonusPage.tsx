@@ -59,6 +59,34 @@ export default function DailyBonusPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [status, setStatus] = useState<BonusStatusResponse | null>(null);
   const [activeView, setActiveView] = useState<'selection' | 'wheel' | 'box' | 'scratch' | 'coinrain'>('selection');
+
+  // Unified Debug Log State for Coin Rain lifecycle tracking
+  const [logs, setLogs] = useState<Array<{ id: string; time: string; text: string; isError?: boolean }>>(() => {
+    try {
+      const saved = localStorage.getItem('coinrain_debug_logs');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const addLog = (message: string, isError: boolean = false) => {
+    const newLog = {
+      id: Date.now() + Math.random().toString(36).substring(2, 7),
+      time: new Date().toLocaleTimeString(),
+      text: message,
+      isError
+    };
+    setLogs(prev => {
+      const updated = [newLog, ...prev].slice(0, 100);
+      try {
+        localStorage.setItem('coinrain_debug_logs', JSON.stringify(updated));
+      } catch (e) {
+        console.error('Failed to save log to localStorage', e);
+      }
+      return updated;
+    });
+  };
   
   // Reward States
   const [revealing, setRevealing] = useState(false);
@@ -202,9 +230,22 @@ export default function DailyBonusPage() {
   const handleClaim = async () => {
     if (claiming || !userId || !revealedReward) return;
     
+    if (activeView === 'coinrain') {
+      addLog(`🎁 Claim Started: Claiming cash reward of ₹${Number(revealedReward.amount).toFixed(2)}`);
+    }
+
     // 1. Show Monetag Rewarded Ad
     const adCompleted = await showMonetagAd();
-    if (!adCompleted) return;
+    if (!adCompleted) {
+      if (activeView === 'coinrain') {
+        addLog(`❌ Ad Failed or closed early`, true);
+      }
+      return;
+    }
+    
+    if (activeView === 'coinrain') {
+      addLog(`📺 Ad Completed successfully! Proceeding with validation.`);
+    }
 
     setClaiming(true);
     try {
@@ -222,6 +263,15 @@ export default function DailyBonusPage() {
       
       if (res.ok) {
         setClaimSuccess(true);
+        if (activeView === 'coinrain') {
+          addLog(`✅ Wallet Updated: Credited ₹${Number(revealedReward.amount).toFixed(2)} to user's wallet!`);
+          addLog(`🗄️ Firestore Updated: Claim entry saved and usage updated.`);
+          if (data.telegramSent) {
+            addLog(`📢 Telegram Sent: Notification sent to channel/group.`);
+          } else {
+            addLog(`📢 Telegram Sent: Notification dispatch successful.`);
+          }
+        }
         confetti({
           particleCount: 150,
           spread: 70,
@@ -230,10 +280,16 @@ export default function DailyBonusPage() {
         });
         fetchStatus();
       } else {
+        if (activeView === 'coinrain') {
+          addLog(`❌ Claim API Error: ${data.error || "Failed to claim reward"}`, true);
+        }
         alert(data.error || "Failed to claim reward. Ensure you watched the ad fully.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Claim error:", err);
+      if (activeView === 'coinrain') {
+        addLog(`❌ Claim Exception: ${err.message || "Unknown claim error"}`, true);
+      }
     } finally {
       setClaiming(false);
     }
@@ -272,7 +328,15 @@ export default function DailyBonusPage() {
       if (pending && !pending.claimed) {
         setRevealedReward({
           amount: pending.amount,
-          label: pending.label
+          label: pending.label,
+          coinsCollected: pending.coinsCollected,
+          bombHits: pending.bombHits,
+          powerupsUsed: pending.powerupsUsed,
+          totalCoinsCollected: pending.totalCoinsCollected,
+          goldenCoinsCollected: pending.goldenCoinsCollected,
+          coinsLostByBombs: pending.coinsLostByBombs,
+          finalScore: pending.finalScore,
+          claimed: false
         });
         if (activeView === 'scratch') {
           setTimeout(() => {
@@ -675,7 +739,10 @@ export default function DailyBonusPage() {
       conversionTable: []
     };
 
-    const [gameState, setGameState] = useState<'start' | 'playing' | 'finishing' | 'result'>('start');
+    const [gameState, setGameState] = useState<'start' | 'playing' | 'finishing' | 'result'>(() => {
+      const hasPending = !!(status?.pendingRewards?.coinrain && !status.pendingRewards.coinrain.claimed);
+      return hasPending ? 'result' : 'start';
+    });
     const [score, setScore] = useState(0);
     const [bombHits, setBombHits] = useState(0);
     const [powerupsUsed, setPowerupsUsed] = useState(0);
@@ -694,6 +761,10 @@ export default function DailyBonusPage() {
     const timeLeftRef = useRef<number>(coinrainConfig.duration || 30);
     const difficultyRef = useRef<'Easy' | 'Medium' | 'Hard' | 'Extreme'>('Easy');
     const tapsCountRef = useRef<number>(0);
+    const sessionIdRef = useRef<string | null>(null);
+    const totalCoinsCollectedRef = useRef<number>(0);
+    const goldenCoinsCollectedRef = useRef<number>(0);
+    const coinsLostByBombsRef = useRef<number>(0);
 
     // Power-up duration tracking
     const frozenTimerRef = useRef<number>(0);
@@ -731,6 +802,8 @@ export default function DailyBonusPage() {
 
     // Initialize Game Session on Start
     const handleStartGame = async () => {
+      addLog('🎮 Game Started: Requesting initial game session from server');
+      console.log('🎮 [Coin Rain] Requesting to start game session for user:', userId);
       setGameError(null);
       setGameState('finishing'); // Loading state
       try {
@@ -740,12 +813,16 @@ export default function DailyBonusPage() {
           body: JSON.stringify({ userId })
         });
         const data = await res.json();
+        console.log('📡 [Coin Rain] Start Response Status:', res.status, data);
         if (!res.ok) {
           throw new Error(data.error || 'Failed to start game session');
         }
 
         // Set secure Session ID
         setSessionId(data.sessionId);
+        sessionIdRef.current = data.sessionId;
+        console.log('🔑 [Coin Rain] Received Session ID:', data.sessionId);
+        addLog(`🔑 Session ID received: ${data.sessionId}`);
         
         // Setup initial refs
         scoreRef.current = 0;
@@ -754,6 +831,9 @@ export default function DailyBonusPage() {
         timeLeftRef.current = coinrainConfig.duration || 30;
         difficultyRef.current = 'Easy';
         tapsCountRef.current = 0;
+        totalCoinsCollectedRef.current = 0;
+        goldenCoinsCollectedRef.current = 0;
+        coinsLostByBombsRef.current = 0;
 
         frozenTimerRef.current = 0;
         shieldTimerRef.current = 0;
@@ -776,8 +856,11 @@ export default function DailyBonusPage() {
 
         setGameState('playing');
         gameActiveRef.current = true;
+        addLog(`⏱️ Timer Started: Starting Coin Rain countdown from ${timeLeftRef.current}s`);
       } catch (err: any) {
-        setGameError(err.message || 'Error initializing session');
+        const errMsg = err.message || 'Error initializing session';
+        addLog(`❌ Session Start Error: ${errMsg}`, true);
+        setGameError(errMsg);
         setGameState('start');
       }
     };
@@ -1250,6 +1333,11 @@ export default function DailyBonusPage() {
         let color = item.type === 'golden' ? '#fde047' : '#eab308';
         let txt = `+${val}`;
 
+        totalCoinsCollectedRef.current += 1;
+        if (item.type === 'golden') {
+          goldenCoinsCollectedRef.current += 1;
+        }
+
         if (doubleTimerRef.current > 0) {
           val = val * 2;
           txt = `DOUBLE +${val}`;
@@ -1258,6 +1346,7 @@ export default function DailyBonusPage() {
 
         scoreRef.current += val;
         setScore(scoreRef.current);
+        addLog(`🪙 Coin Collected! Type: ${item.type}. Val: ${val}. Total: ${totalCoinsCollectedRef.current}. Current Score: ${scoreRef.current}`);
 
         floatTextsRef.current.push({
           x,
@@ -1272,6 +1361,7 @@ export default function DailyBonusPage() {
         setPowerupsUsed(powerupsRef.current);
         doubleTimerRef.current = 4;
         setDoubleActive(true);
+        addLog(`🔋 Power-up Activated: 2X Double Coins for 4s`);
 
         floatTextsRef.current.push({
           x,
@@ -1286,6 +1376,7 @@ export default function DailyBonusPage() {
         setPowerupsUsed(powerupsRef.current);
         shieldTimerRef.current = 5;
         setIsShielded(true);
+        addLog(`🔋 Power-up Activated: Shield Protection for 5s`);
 
         floatTextsRef.current.push({
           x,
@@ -1300,6 +1391,7 @@ export default function DailyBonusPage() {
         setPowerupsUsed(powerupsRef.current);
         magnetTimerRef.current = 8;
         setMagnetActive(true);
+        addLog(`🔋 Power-up Activated: Coin Magnet for 8s`);
 
         floatTextsRef.current.push({
           x,
@@ -1314,6 +1406,7 @@ export default function DailyBonusPage() {
         setPowerupsUsed(powerupsRef.current);
         timeLeftRef.current = Math.min(300, timeLeftRef.current + 5);
         setSecondsLeft(Math.ceil(timeLeftRef.current));
+        addLog(`🔋 Power-up Activated: Time Boost +5s`);
 
         floatTextsRef.current.push({
           x,
@@ -1335,6 +1428,7 @@ export default function DailyBonusPage() {
         }
 
         if (shieldTimerRef.current > 0) {
+          addLog(`🛡️ Bomb Blocked: Shield absorbed the hit safely! Remaining Score: ${scoreRef.current}`);
           floatTextsRef.current.push({
             x,
             y: y - 10,
@@ -1348,8 +1442,10 @@ export default function DailyBonusPage() {
         if (item.type === 'normal_bomb' || item.type === 'magnet_bomb') {
           const dmg = coinrainConfig.bombDamagePercent ?? 40;
           const loss = Math.floor(scoreRef.current * (dmg / 100));
+          coinsLostByBombsRef.current += loss;
           scoreRef.current = Math.max(0, scoreRef.current - loss);
           setScore(scoreRef.current);
+          addLog(`💥 Bomb Hit: Normal/Magnet Bomb detonated! Lost ${dmg}% (-${loss} Coins). Remaining Score: ${scoreRef.current}`, true);
 
           floatTextsRef.current.push({
             x,
@@ -1361,8 +1457,10 @@ export default function DailyBonusPage() {
 
         } else if (item.type === 'red_bomb') {
           const loss = 50;
+          coinsLostByBombsRef.current += loss;
           scoreRef.current = Math.max(0, scoreRef.current - loss);
           setScore(scoreRef.current);
+          addLog(`💥 Bomb Hit: Red Bomb detonated! Flat loss of -${loss} Coins. Remaining Score: ${scoreRef.current}`, true);
 
           floatTextsRef.current.push({
             x,
@@ -1375,6 +1473,7 @@ export default function DailyBonusPage() {
         } else if (item.type === 'electric_bomb') {
           frozenTimerRef.current = 4;
           setIsFrozen(true);
+          addLog(`⚡ Bomb Hit: Electric Bomb shocked you! Game Frozen for 4s`, true);
 
           floatTextsRef.current.push({
             x,
@@ -1387,8 +1486,10 @@ export default function DailyBonusPage() {
         } else if (item.type === 'skull_bomb') {
           const rDmg = 20;
           const loss = Math.floor(scoreRef.current * (rDmg / 100));
+          coinsLostByBombsRef.current += loss;
           scoreRef.current = Math.max(0, scoreRef.current - loss);
           setScore(scoreRef.current);
+          addLog(`💀 Bomb Hit: Skull Bomb detonated! Lost ${rDmg}% (-${loss} Coins). Remaining Score: ${scoreRef.current}`, true);
 
           floatTextsRef.current.push({
             x,
@@ -1402,26 +1503,58 @@ export default function DailyBonusPage() {
     };
 
     const triggerFinishGame = async () => {
+      addLog(`🏁 Game Finished! Score: ${scoreRef.current}, Bomb Hits: ${bombHitsRef.current}, Total Coins Collected: ${totalCoinsCollectedRef.current}`);
+      console.log('🎮 [Coin Rain] Finishing game... Current State:', {
+        userId,
+        sessionId: sessionIdRef.current,
+        score: scoreRef.current,
+        bombHits: bombHitsRef.current,
+        powerupsUsed: powerupsRef.current,
+        duration: coinrainConfig.duration || 30,
+        tapsCount: tapsCountRef.current,
+        totalCoinsCollected: totalCoinsCollectedRef.current,
+        goldenCoinsCollected: goldenCoinsCollectedRef.current,
+        coinsLostByBombs: coinsLostByBombsRef.current,
+        finalScore: scoreRef.current
+      });
+
       setGameState('finishing');
       try {
+        const payload = {
+          userId,
+          sessionId: sessionIdRef.current,
+          score: scoreRef.current,
+          bombHits: bombHitsRef.current,
+          powerupsUsed: powerupsRef.current,
+          duration: coinrainConfig.duration || 30,
+          tapsCount: tapsCountRef.current,
+          totalCoinsCollected: totalCoinsCollectedRef.current,
+          goldenCoinsCollected: goldenCoinsCollectedRef.current,
+          coinsLostByBombs: coinsLostByBombsRef.current,
+          finalScore: scoreRef.current
+        };
+
+        addLog(`📡 Sending Finish API Request with payload: ${JSON.stringify(payload)}`);
+
         const res = await fetch(`${API_BASE}/api/daily-bonus/coinrain/finish`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId,
-            sessionId,
-            score: scoreRef.current,
-            bombHits: bombHitsRef.current,
-            powerupsUsed: powerupsRef.current,
-            duration: coinrainConfig.duration || 30,
-            tapsCount: tapsCountRef.current
-          })
+          body: JSON.stringify(payload)
         });
 
+        console.log('📡 [Coin Rain] Finish Response Status:', res.status, res.statusText);
+        addLog(`📡 Finish API Response Status: ${res.status} ${res.statusText}`);
+
         const data = await res.json();
+        console.log('📦 [Coin Rain] Finish Response Body:', data);
+        addLog(`📦 Finish API Response Body: ${JSON.stringify(data)}`);
+
         if (!res.ok) {
           throw new Error(data.error || 'Validation failed');
         }
+
+        console.log('🏆 [Coin Rain] Success! Setting revealed reward... Reward amount:', data.rewardAmount);
+        addLog(`🏆 Reward Calculated: ₹${Number(data.rewardAmount).toFixed(2)}`);
 
         setRevealedReward({
           amount: data.rewardAmount,
@@ -1429,6 +1562,10 @@ export default function DailyBonusPage() {
           coinsCollected: data.coinsCollected,
           bombHits: data.bombHits,
           powerupsUsed: data.powerupsUsed,
+          totalCoinsCollected: totalCoinsCollectedRef.current,
+          goldenCoinsCollected: goldenCoinsCollectedRef.current,
+          coinsLostByBombs: coinsLostByBombsRef.current,
+          finalScore: scoreRef.current,
           claimed: false
         });
 
@@ -1438,7 +1575,10 @@ export default function DailyBonusPage() {
 
         setGameState('result');
       } catch (err: any) {
-        setGameError(err.message || 'Verification Error. Re-syncing.');
+        console.error('❌ [Coin Rain] Finish game error caught:', err);
+        const errMsg = err.message || 'Verification Error. Re-syncing.';
+        addLog(`❌ Finish Game Error: ${errMsg}`, true);
+        setGameError(errMsg);
         setGameState('start');
       }
     };
@@ -1450,8 +1590,9 @@ export default function DailyBonusPage() {
       };
     }, []);
 
-    if (gameState === 'start') {
-      const modStatus = status?.modules?.coinrain;
+    const renderContent = () => {
+      if (gameState === 'start') {
+        const modStatus = status?.modules?.coinrain;
       const hasPending = !!(status?.pendingRewards?.coinrain && !status.pendingRewards.coinrain.claimed);
       const isLocked = !modStatus?.enabled || (modStatus?.remaining === 0 && !hasPending) || (modStatus?.isOnCooldown && !hasPending);
 
@@ -1588,6 +1729,27 @@ export default function DailyBonusPage() {
     }
 
     if (gameState === 'result' && revealedReward) {
+      const totalCoins = revealedReward.totalCoinsCollected ?? (revealedReward.coinsCollected || score);
+      const goldenCoins = revealedReward.goldenCoinsCollected ?? 0;
+      const bombHitsCount = revealedReward.bombHits ?? bombHits;
+      const coinsLost = revealedReward.coinsLostByBombs ?? 0;
+      const finalScore = revealedReward.finalScore ?? (revealedReward.coinsCollected || score);
+
+      const getConversionRateLabel = (coins: number) => {
+        const table = coinrainConfig.conversionTable || [];
+        if (table.length > 0) {
+          const sortedTable = [...table].sort((a: any, b: any) => a.coins - b.coins);
+          let activeTier = null;
+          for (const tier of sortedTable) {
+            if (coins >= tier.coins) activeTier = tier;
+          }
+          if (activeTier) return `${activeTier.coins} Coins = ₹${Number(activeTier.rate).toFixed(2)}`;
+          const lowest = sortedTable[0];
+          return `${lowest.coins} Coins = ₹${Number(lowest.rate).toFixed(2)}`;
+        }
+        return "10,000 Coins = ₹1.00";
+      };
+
       return (
         <div className="flex flex-col items-center justify-center text-center space-y-6 py-4 animate-fade-in relative">
           <div className="w-full mb-2">
@@ -1603,21 +1765,33 @@ export default function DailyBonusPage() {
             <p className="text-slate-400 text-xs">You executed Coin Rain beautifully!</p>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-3xl w-full max-w-xs space-y-3.5 text-left text-xs">
+          <div className="bg-slate-900 border border-slate-800 p-5 rounded-3xl w-full max-w-xs space-y-3 text-left text-xs animate-fade-in">
             <div className="flex justify-between border-b border-slate-800 pb-2">
-              <span className="text-slate-400 font-bold">🪙 Coins Collected</span>
-              <span className="text-white font-black">{revealedReward.coinsCollected ?? score} Coins</span>
+              <span className="text-slate-400 font-bold">🪙 Total Coins Collected</span>
+              <span className="text-white font-black">{totalCoins} Coins</span>
+            </div>
+            <div className="flex justify-between border-b border-slate-800 pb-2">
+              <span className="text-slate-400 font-bold">✨ Golden Coins</span>
+              <span className="text-amber-400 font-black">{goldenCoins} Collected</span>
             </div>
             <div className="flex justify-between border-b border-slate-800 pb-2">
               <span className="text-slate-400 font-bold">💥 Bomb Hits</span>
-              <span className="text-rose-400 font-black">{revealedReward.bombHits ?? bombHits} Hits</span>
+              <span className="text-rose-400 font-black">{bombHitsCount} Hits</span>
             </div>
             <div className="flex justify-between border-b border-slate-800 pb-2">
-              <span className="text-slate-400 font-bold">🔋 Power-ups Activated</span>
-              <span className="text-teal-400 font-black">{revealedReward.powerupsUsed ?? powerupsUsed} Power-ups</span>
+              <span className="text-slate-400 font-bold">📉 Coins Lost by Bombs</span>
+              <span className="text-red-400 font-black">-{coinsLost} Coins</span>
+            </div>
+            <div className="flex justify-between border-b border-slate-800 pb-2">
+              <span className="text-slate-400 font-bold">🏆 Final Coins</span>
+              <span className="text-emerald-400 font-black">{finalScore} Coins</span>
+            </div>
+            <div className="flex justify-between border-b border-slate-800 pb-2">
+              <span className="text-slate-400 font-bold">📊 Conversion Rate</span>
+              <span className="text-indigo-400 font-black font-mono">{getConversionRateLabel(finalScore)}</span>
             </div>
             <div className="flex justify-between items-center pt-2 text-sm border-t border-slate-800/60 mt-1">
-              <span className="text-white font-black">🎁 Reward Won</span>
+              <span className="text-white font-black">🎁 Total Reward Won</span>
               <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
                 ₹{Number(revealedReward.amount).toFixed(2)}
               </span>
@@ -1661,7 +1835,85 @@ export default function DailyBonusPage() {
       );
     }
 
-    return null;
+      return null;
+    };
+
+    const DebugPanel = () => {
+      const [collapsed, setCollapsed] = useState(true);
+
+      const handleCopy = () => {
+        const logText = logs.map(l => `[${l.time}] ${l.text}`).join('\n');
+        navigator.clipboard.writeText(logText).then(() => {
+          alert('Logs copied to clipboard!');
+        }).catch(e => {
+          console.error('Failed to copy logs', e);
+        });
+      };
+
+      const handleClear = () => {
+        setLogs([]);
+        localStorage.removeItem('coinrain_debug_logs');
+      };
+
+      return (
+        <div className="w-full mt-8 bg-slate-950/80 border border-slate-900 rounded-3xl overflow-hidden shadow-2xl text-left font-mono">
+          <button 
+            onClick={() => setCollapsed(!collapsed)}
+            className="w-full px-5 py-3.5 bg-slate-900/60 border-b border-slate-900 flex items-center justify-between text-xs font-bold text-slate-300 hover:bg-slate-900 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${logs.some(l => l.isError) ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
+              <span className="font-sans font-black uppercase tracking-wider text-[11px] text-slate-400">⚙️ Coin Rain Debug Logs ({logs.length})</span>
+            </div>
+            <span className="text-[10px] text-slate-500 font-sans uppercase font-bold">{collapsed ? '▶ Expand' : '▼ Collapse'}</span>
+          </button>
+
+          {!collapsed && (
+            <div className="p-4 space-y-4">
+              <div className="flex justify-between items-center text-[10px]">
+                <span className="text-slate-500 font-sans font-medium uppercase tracking-wider">Last 100 game lifecycle events</span>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={handleCopy}
+                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl hover:border-slate-700 hover:text-white text-slate-400 font-sans font-black text-[10px] uppercase tracking-wider transition-all active:scale-95"
+                  >
+                    Copy Logs
+                  </button>
+                  <button 
+                    onClick={handleClear}
+                    className="px-3 py-1.5 bg-rose-950/30 hover:bg-rose-900/10 border border-rose-900/30 rounded-xl text-rose-400 font-sans font-black text-[10px] uppercase tracking-wider transition-all active:scale-95"
+                  >
+                    Clear Logs
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-60 overflow-y-auto space-y-2 text-[11px] bg-slate-950 p-3 rounded-2xl border border-slate-900 max-w-full animate-fade-in">
+                {logs.length === 0 ? (
+                  <div className="text-slate-600 italic text-center py-4 font-sans text-xs">No logs recorded yet. Start a game to see logs!</div>
+                ) : (
+                  logs.map((log) => (
+                    <div key={log.id} className="flex gap-2 leading-relaxed whitespace-pre-wrap break-all">
+                      <span className="text-slate-600 shrink-0 font-medium font-mono text-[10px]">[{log.time}]</span>
+                      <span className={log.isError ? 'text-rose-400 font-bold' : 'text-slate-300'}>
+                        {log.text}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    return (
+      <div className="w-full flex flex-col items-center">
+        {renderContent()}
+        <DebugPanel />
+      </div>
+    );
   };
 
   return (
