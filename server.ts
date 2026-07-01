@@ -4235,10 +4235,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // Redeem Promo reward
   app.post("/api/promo/redeem", async (req, res) => {
     try {
-      const { userId, promoCode } = req.body;
-      if (!userId || !promoCode) return res.status(400).json({ error: "Missing parameters" });
+      const { userId, randomPageId } = req.body;
+      if (!userId || !randomPageId) return res.status(400).json({ error: "Missing parameters" });
 
-      const codeUpper = promoCode.toUpperCase();
       const settingsDocRef = doc(db, "settings", "promo_rewards");
 
       // Verify Session exists and is active
@@ -4294,43 +4293,55 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       }
 
+      // Retrieve Promo via randomPageId query
+      const promoCodesColl = collection(db, "promo_codes");
+      const q = query(promoCodesColl, where("randomPageId", "==", randomPageId));
+      const qSnap = await getDocs(q);
+      if (qSnap.empty) {
+        return res.status(400).json({ error: "This promo reward page does not exist or is invalid." });
+      }
+      
+      const promoDoc = qSnap.docs[0];
+      const codeUpper = promoDoc.id;
+      const promoData = promoDoc.data();
+
       let rewardAmount = 0;
       const today = new Date().toISOString().split("T")[0];
       const todayTime = new Date().toLocaleTimeString();
 
       // Start transaction to verify limits and credit reward
       await runTransaction(db, async (transaction) => {
-        // 1. Promo code
+        // Re-get inside transaction for locking
         const promoRef = doc(db, "promo_codes", codeUpper);
         const promoSnap = await transaction.get(promoRef);
         if (!promoSnap.exists() || !promoSnap.data().enabled) {
-          throw new Error("Invalid or inactive promo code.");
+          throw new Error("Invalid or inactive promo reward.");
         }
-        const promoData = promoSnap.data();
+        const pData = promoSnap.data();
 
         // 2. Date ranges
-        if (!isPromoActive(promoData.startDate, promoData.startTime, promoData.expiryDate, promoData.expiryTime)) {
-          throw new Error("This promo code has expired or is not active yet.");
+        if (!isPromoActive(pData.startDate, pData.startTime, pData.expiryDate, pData.expiryTime)) {
+          throw new Error("This promo has expired or is not active yet.");
         }
 
         // 3. Max Users
-        if (promoData.maxUsers && promoData.usedCount >= promoData.maxUsers) {
-          throw new Error("This promo code has reached its maximum claim limit.");
+        if (pData.maxUsers && pData.usedCount >= pData.maxUsers) {
+          throw new Error("This promo has reached its maximum claim limit.");
         }
 
         // 4. Budget
-        rewardAmount = Number(promoData.rewardAmount || 0);
-        const totalBudget = Number(promoData.totalBudget || 0);
-        const currentBudgetUsed = Number(promoData.budgetUsed || 0);
+        rewardAmount = Number(pData.rewardAmount || 0);
+        const totalBudget = Number(pData.totalBudget || 0);
+        const currentBudgetUsed = Number(pData.budgetUsed || 0);
         if (currentBudgetUsed + rewardAmount > totalBudget) {
-          throw new Error("This promo code has run out of its allocated budget.");
+          throw new Error("This promo has run out of its allocated budget.");
         }
 
         // 5. Already Claimed Check
         const claimRef = doc(db, "promo_claims", `${userId}_${codeUpper}`);
         const claimSnap = await transaction.get(claimRef);
         if (claimSnap.exists() && claimSnap.data().status === "Success") {
-          throw new Error("You have already claimed this promo code!");
+          throw new Error("You have already claimed this promo reward!");
         }
 
         // 6. Access Code limit increment
@@ -4379,6 +4390,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           username: userData.name || userData.username || "User",
           telegramId: tgUserId,
           promoCode: codeUpper,
+          promoName: pData.name || "Promo Reward",
           rewardAmount,
           status: "Success",
           date: today,
@@ -4393,20 +4405,21 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           const { botToken, rewardChannelId } = tgSettingsSnap.data();
           if (botToken) {
             const userName = userData.name || userData.username || "User";
-            const message = `🎁 *Premium Promo Code Redeemed!*\n\n👤 *User:* ${userName}\n🎟 *Promo Code:* \`${codeUpper}\`\n💰 *Reward:* ₹${rewardAmount.toFixed(2)}\n📅 *Date:* ${today} | ${todayTime}\n\nBalance updated instantly! 🥳`;
+            const adminMessage = `🎁 *Premium Promo Code Redeemed!*\n\n👤 *User:* ${userName}\n🎟 *Promo Code:* \`${codeUpper}\`\n💰 *Reward:* ₹${rewardAmount.toFixed(2)}\n📅 *Date:* ${today} | ${todayTime}\n\nBalance updated instantly! 🥳`;
+            const userMessage = `🎁 *Premium Promo Reward Redeemed!*\n\n👤 *User:* ${userName}\n🎟 *Reward:* ₹${rewardAmount.toFixed(2)}\n📅 *Date:* ${today} | ${todayTime}\n\nBalance updated instantly! 🥳`;
             
             if (rewardChannelId) {
               await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ chat_id: rewardChannelId, text: message, parse_mode: "Markdown" })
+                body: JSON.stringify({ chat_id: rewardChannelId, text: adminMessage, parse_mode: "Markdown" })
               });
             }
             if (tgUserId) {
               await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ chat_id: tgUserId, text: message, parse_mode: "Markdown" })
+                body: JSON.stringify({ chat_id: tgUserId, text: userMessage, parse_mode: "Markdown" })
               });
             }
           }
@@ -4417,7 +4430,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       res.json({
         success: true,
-        promoCode: codeUpper,
+        promoName: promoData.name || "Promo Reward",
         rewardAmount
       });
 
@@ -4441,7 +4454,16 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       
       const claims: any[] = [];
       snap.forEach((doc) => {
-        claims.push({ id: doc.id, ...doc.data() });
+        const d = doc.data();
+        claims.push({
+          id: doc.id,
+          promoName: d.promoName || "Promo Reward",
+          rewardAmount: d.rewardAmount,
+          date: d.date,
+          time: d.time,
+          status: d.status,
+          createdAt: d.createdAt
+        });
       });
 
       // Sort by date/time descending on backend if timestamp is there
@@ -4554,11 +4576,41 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const ref = collection(db, "promo_codes");
       const snap = await getDocs(ref);
       const promos: any[] = [];
-      snap.forEach((doc) => {
-        promos.push({ id: doc.id, ...doc.data() });
-      });
+      const domain = "https://royshare.onrender.com";
+      
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data();
+        let randomPageId = data.randomPageId;
+        let promoPageUrl = data.promoPageUrl;
+        let needsUpdate = false;
+
+        if (!randomPageId) {
+          const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+          randomPageId = "";
+          for (let i = 0; i < 12; i++) {
+            randomPageId += chars.charAt(Math.floor(Math.random() * chars.length));
+          }
+          if (randomPageId.toUpperCase() === docSnap.id.toUpperCase()) {
+            randomPageId += "X";
+          }
+          promoPageUrl = `${domain}/promo/${randomPageId}`;
+          needsUpdate = true;
+        }
+
+        if (needsUpdate) {
+          await updateDoc(docSnap.ref, { randomPageId, promoPageUrl });
+        }
+
+        promos.push({ 
+          id: docSnap.id, 
+          ...data,
+          randomPageId,
+          promoPageUrl
+        });
+      }
       res.json({ success: true, promos });
     } catch (e: any) {
+      console.error("Error in GET /api/admin/promo/promos:", e);
       res.status(500).json({ error: "Server error" });
     }
   });
@@ -4574,9 +4626,23 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const codeUpper = code.toUpperCase();
       const docRef = doc(db, "promo_codes", codeUpper);
 
+      // Generate a completely random alphanumeric 12-character Page ID
+      const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      let randomPageId = "";
+      for (let i = 0; i < 12; i++) {
+        randomPageId += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      if (randomPageId.toUpperCase() === codeUpper) {
+        randomPageId += "X";
+      }
+
+      const domain = req.body.domain || "https://royshare.onrender.com";
+      const promoPageUrl = `${domain}/promo/${randomPageId}`;
+
       await setDoc(docRef, {
         name,
         code: codeUpper,
+        randomPageId,
         rewardAmount: Number(rewardAmount),
         totalBudget: Number(totalBudget),
         budgetUsed: 0,
@@ -4587,11 +4653,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         expiryDate: expiryDate || "",
         expiryTime: expiryTime || "",
         enabled: enabled ?? true,
-        promoPageUrl: `https://royshare.onrender.com/promo/${codeUpper}`,
+        promoPageUrl,
         createdAt: new Date().toISOString()
       });
 
-      res.json({ success: true });
+      res.json({ success: true, randomPageId });
     } catch (e: any) {
       res.status(500).json({ error: "Server error" });
     }
@@ -4628,28 +4694,46 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(404).json({ error: "Promo not found" });
       }
       
+      const data = snap.data();
+      let randomPageId = data.randomPageId;
+      if (!randomPageId) {
+        const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        randomPageId = "";
+        for (let i = 0; i < 12; i++) {
+          randomPageId += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        if (randomPageId.toUpperCase() === idUpper) {
+          randomPageId += "X";
+        }
+      }
+
       const domain = req.body.domain || "https://royshare.onrender.com";
-      const promoPageUrl = `${domain}/promo/${idUpper}`;
+      const promoPageUrl = `${domain}/promo/${randomPageId}`;
       
-      await updateDoc(ref, { promoPageUrl });
-      res.json({ success: true, promoPageUrl });
+      await updateDoc(ref, { promoPageUrl, randomPageId });
+      res.json({ success: true, promoPageUrl, randomPageId });
     } catch (e: any) {
       res.status(500).json({ error: "Server error" });
     }
   });
 
-  // Get Promo details (unauthenticated / with status check)
+  // Get Promo details by randomPageId (unauthenticated / with status check)
   app.get("/api/promo/details/:id", async (req, res) => {
     try {
-      const idUpper = req.params.id.toUpperCase();
-      const promoRef = doc(db, "promo_codes", idUpper);
-      const promoSnap = await getDoc(promoRef);
+      const randomPageId = req.params.id;
+      if (!randomPageId) {
+        return res.status(400).json({ success: false, error: "Missing page ID" });
+      }
 
-      if (!promoSnap.exists()) {
+      const q = query(collection(db, "promo_codes"), where("randomPageId", "==", randomPageId));
+      const qSnap = await getDocs(q);
+
+      if (qSnap.empty) {
         return res.status(404).json({ success: false, error: "Promo not found" });
       }
 
-      const promoData = promoSnap.data();
+      const promoDoc = qSnap.docs[0];
+      const promoData = promoDoc.data();
       
       // Check status
       const now = new Date();
@@ -4672,12 +4756,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       }
 
+      // STRICT CONSTRAINTS: Never reveal code, Firestore document ID, or internal IDs
       res.json({
         success: true,
         promo: {
-          id: promoSnap.id,
           name: promoData.name,
-          code: promoData.code,
           rewardAmount: promoData.rewardAmount,
           enabled: promoData.enabled,
           startDate: promoData.startDate,
@@ -4685,7 +4768,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           expiryDate: promoData.expiryDate,
           expiryTime: promoData.expiryTime,
           status,
-          promoPageUrl: promoData.promoPageUrl || `https://royshare.onrender.com/promo/${idUpper}`
+          randomPageId: promoData.randomPageId,
+          promoPageUrl: promoData.promoPageUrl || `https://royshare.onrender.com/promo/${randomPageId}`
         }
       });
     } catch (e: any) {

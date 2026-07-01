@@ -27,7 +27,7 @@ import AdScriptRenderer from "../components/AdScriptRenderer";
 
 interface ClaimRecord {
   id: string;
-  promoCode: string;
+  promoName: string;
   rewardAmount: number;
   status: string;
   date: string;
@@ -85,8 +85,7 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
   const [timeLeftStr, setTimeLeftStr] = useState<string>("00:00:00");
   const [isExpired, setIsExpired] = useState<boolean>(false);
 
-  // Promo Code States
-  const [promoCodeInput, setPromoCodeInput] = useState<string>("");
+  // Promo Claim States
   const [redeeming, setRedeeming] = useState<boolean>(false);
   const [redeemError, setRedeemError] = useState<string | null>(null);
   const [claimHistory, setClaimHistory] = useState<ClaimRecord[]>([]);
@@ -94,7 +93,7 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
 
   // Success Celebration Popup
   const [showSuccessPopup, setShowSuccessPopup] = useState<boolean>(false);
-  const [successData, setSuccessData] = useState<{ amount: number; code: string } | null>(null);
+  const [successData, setSuccessData] = useState<{ amount: number; name: string } | null>(null);
 
   // Initialize URL user parameters and load settings
   useEffect(() => {
@@ -114,7 +113,11 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
 
   // Fetch Promo Details if promoId is provided from route
   useEffect(() => {
-    if (!promoId) return;
+    if (!promoId) {
+      setPromoErrorStatus("not_found");
+      setPromoDetailsLoading(false);
+      return;
+    }
 
     const fetchPromoDetails = async () => {
       setPromoDetailsLoading(true);
@@ -128,8 +131,6 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
             setPromoErrorStatus("disabled");
           } else if (data.promo.status === "expired") {
             setPromoErrorStatus("expired");
-          } else {
-            setPromoCodeInput(data.promo.code);
           }
         } else {
           setPromoErrorStatus("not_found");
@@ -289,9 +290,8 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
   };
 
   // Promo Redemption Submission
-  const handleRedeemSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!promoCodeInput.trim() || !userId || redeeming || isExpired) return;
+  const handleRedeemSubmit = async () => {
+    if (!userId || redeeming || isExpired) return;
 
     setRedeeming(true);
     setRedeemError(null);
@@ -309,7 +309,7 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           userId, 
-          promoCode: promoCodeInput.trim(),
+          randomPageId: promoId,
           accessCode: "session" // Server checks actual session
         })
       });
@@ -343,13 +343,12 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
           });
         }, 600);
 
-        setSuccessData({ amount: data.rewardAmount, code: data.promoCode });
+        setSuccessData({ amount: data.rewardAmount, name: data.promoName });
         setShowSuccessPopup(true);
-        setPromoCodeInput("");
         fetchClaimHistory();
         fetchStatusAndSettings();
       } else {
-        setRedeemError(data.error || "Failed to redeem promo code. Ensure all tasks are completed.");
+        setRedeemError(data.error || "Failed to redeem promo reward. Ensure all tasks are completed.");
       }
     } catch (err) {
       console.error("Redeem error:", err);
@@ -424,7 +423,7 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
         <AlertTriangle className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
-        <h1 className="text-2xl font-black mb-2">{!userId ? "Access Denied" : "Promo Page Closed"}</h1>
+        <h1 className="text-2xl font-black mb-2 text-white font-sans">Promo Page Currently Closed.</h1>
         <p className="text-slate-400 max-w-sm mb-6 text-sm">
           {!userId ? "Please launch this app directly from the RoyShare official Telegram bot." : "Promo Rewards are currently offline or closed by administrator. Check back soon!"}
         </p>
@@ -647,10 +646,10 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
           
           <div>
             <h3 className="font-black text-white text-sm uppercase tracking-wider flex items-center gap-2">
-              {loadedPromo ? "🎁 Loaded Promo Reward" : "🎁 Enter Promo Code"}
+              🎁 Loaded Promo Reward
             </h3>
             <p className="text-slate-400 text-xs mt-0.5">
-              {loadedPromo ? "This promo has been loaded directly from your link." : "Enter active promo coupon code to receive your reward."}
+              This promo has been loaded directly from your link.
             </p>
           </div>
 
@@ -667,43 +666,31 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
             </div>
           )}
 
-          <form onSubmit={handleRedeemSubmit} className="space-y-4">
-            <input
-              type="text"
-              required
-              value={promoCodeInput}
-              onChange={(e) => setPromoCodeInput(e.target.value)}
-              placeholder="e.g. WELCOME50"
-              disabled={redeeming || !!promoId}
-              className={`w-full bg-slate-950/80 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-2xl px-5 py-4 text-white font-black placeholder:text-slate-700 text-center uppercase tracking-wider focus:outline-none transition-all ${!!promoId ? "opacity-75 cursor-not-allowed" : ""}`}
-            />
-
-            {redeemError && (
-              <motion.div 
-                initial={{ opacity: 0, y: -5 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 flex gap-3 text-left"
-              >
-                <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-                <p className="text-xs text-slate-400">{redeemError}</p>
-              </motion.div>
-            )}
-
-            <button
-              type="submit"
-              disabled={redeeming || !promoCodeInput.trim()}
-              className="w-full py-4.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+          {redeemError && (
+            <motion.div 
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 flex gap-3 text-left"
             >
-              {redeeming ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Verifying Promo Code...</span>
-                </>
-              ) : (
-                <span>✨ Redeem Reward</span>
-              )}
-            </button>
-          </form>
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-slate-400">{redeemError}</p>
+            </motion.div>
+          )}
+
+          <button
+            onClick={() => handleRedeemSubmit()}
+            disabled={redeeming || !loadedPromo}
+            className="w-full py-4.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {redeeming ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Verifying Promo...</span>
+              </>
+            ) : (
+              <span>✨ Claim Reward</span>
+            )}
+          </button>
         </div>
 
         {/* Claim History Section */}
@@ -724,7 +711,7 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
               {claimHistory.map((claim) => (
                 <div key={claim.id} className="p-3.5 bg-slate-950 border border-slate-850 rounded-2xl flex items-center justify-between">
                   <div>
-                    <h4 className="font-bold text-white text-xs">{claim.promoCode}</h4>
+                    <h4 className="font-bold text-white text-xs">{claim.promoName || "Promo Reward"}</h4>
                     <p className="text-[10px] text-slate-500 mt-1 font-mono">{claim.date} | {claim.time}</p>
                   </div>
                   <div className="text-right">
@@ -788,14 +775,14 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
 
               <div className="h-0.5 bg-slate-800 w-full" />
 
-              <div className="grid grid-cols-2 gap-4 text-left">
-                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-850">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Promo Code</span>
-                  <span className="text-sm font-bold text-white uppercase mt-1 block">{successData.code}</span>
+              <div className="space-y-3 text-left">
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-850 flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Promo Reward</span>
+                  <span className="text-sm font-bold text-white uppercase truncate max-w-[180px]">{successData.name}</span>
                 </div>
-                <div className="bg-slate-950 p-4 rounded-2xl border border-emerald-500/10">
-                  <span className="text-[10px] font-black text-emerald-500 uppercase tracking-wider block">Reward Won</span>
-                  <span className="text-sm font-bold text-emerald-400 mt-1 block">₹{successData.amount.toFixed(2)}</span>
+                <div className="bg-slate-950 p-4 rounded-2xl border border-emerald-500/10 flex justify-between items-center">
+                  <span className="text-[10px] font-black text-emerald-500 uppercase tracking-wider">Reward Won</span>
+                  <span className="text-sm font-bold text-emerald-400">₹{successData.amount.toFixed(2)}</span>
                 </div>
               </div>
 
