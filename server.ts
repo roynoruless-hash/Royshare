@@ -4095,6 +4095,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   app.get("/api/promo/status", async (req, res) => {
     try {
       const userId = req.query.userId as string;
+      const promoId = req.query.promoId as string; // Accept promoId (pageId) from query params
       if (!userId) return res.status(400).json({ error: "Missing userId" });
 
       const settingsDocRef = doc(db, "settings", "promo_rewards");
@@ -4102,7 +4103,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       
       const defaultSettings = {
         enabled: true,
-        requireAccessCode: true,
         adsterraBannerCode: "",
         monetagAdCode: "",
         expiryMinutes: 120,
@@ -4147,14 +4147,30 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const userSnap = await getDoc(userRef);
       const userData = userSnap.exists() ? userSnap.data() : null;
 
-      // Check for active session
-      const requireAccessCode = settingsData.requireAccessCode ?? true;
-      let unlocked = !requireAccessCode;
+      let requireAccessCode = false;
+      let unlocked = true;
       let session = null;
+      let promoData: any = null;
+
+      if (promoId) {
+        // Query the specific promo to get its requireAccessCode setting
+        const promoCodesColl = collection(db, "promo_codes");
+        let q = query(promoCodesColl, where("pageId", "==", promoId));
+        let qSnap = await getDocs(q);
+        if (qSnap.empty) {
+          q = query(promoCodesColl, where("randomPageId", "==", promoId));
+          qSnap = await getDocs(q);
+        }
+        if (!qSnap.empty) {
+          promoData = qSnap.docs[0].data();
+          requireAccessCode = promoData.requireAccessCode === true;
+        }
+      }
 
       if (requireAccessCode) {
-        console.log("Promo Locked");
-        const sessionRef = doc(db, "promo_sessions", userId);
+        unlocked = false;
+        console.log("Promo Locked - Checking session");
+        const sessionRef = doc(db, "promo_sessions", `${userId}_${promoId}`);
         const sessionSnap = await getDoc(sessionRef);
         if (sessionSnap.exists()) {
           const sData = sessionSnap.data();
@@ -4173,7 +4189,22 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         settings: settingsData,
         user: userData,
         unlocked,
-        session
+        session,
+        promo: promoData ? {
+          name: promoData.name,
+          rewardAmount: promoData.rewardAmount,
+          enabled: promoData.enabled,
+          requireAccessCode: promoData.requireAccessCode,
+          accessCode: promoData.accessCode,
+          startDate: promoData.startDate,
+          startTime: promoData.startTime,
+          expiryDate: promoData.expiryDate,
+          expiryTime: promoData.expiryTime,
+          maxUsers: promoData.maxUsers,
+          usedCount: promoData.usedCount,
+          totalBudget: promoData.totalBudget,
+          budgetUsed: promoData.budgetUsed
+        } : null
       });
 
     } catch (e: any) {
@@ -4185,44 +4216,76 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // Unlock Promo page
   app.post("/api/promo/unlock", async (req, res) => {
     try {
-      const { userId, accessCode } = req.body;
-      if (!userId || !accessCode) return res.status(400).json({ error: "Missing parameters" });
+      const { userId, accessCode, promoId } = req.body;
+      if (!userId || !accessCode || !promoId) return res.status(400).json({ error: "Missing parameters" });
 
       const settingsDocRef = doc(db, "settings", "promo_rewards");
       const settingsSnap = await getDoc(settingsDocRef);
       const expiryMinutes = settingsSnap.exists() ? (settingsSnap.data()?.expiryMinutes ?? 120) : 120;
 
-      // Fetch the access code
-      const codeRef = doc(db, "access_codes", accessCode.toUpperCase());
-      const codeSnap = await getDoc(codeRef);
+      // Query the specific promo
+      const promoCodesColl = collection(db, "promo_codes");
+      let q = query(promoCodesColl, where("pageId", "==", promoId));
+      let qSnap = await getDocs(q);
+      if (qSnap.empty) {
+        q = query(promoCodesColl, where("randomPageId", "==", promoId));
+        qSnap = await getDocs(q);
+      }
 
-      if (!codeSnap.exists() || !codeSnap.data().enabled) {
+      if (qSnap.empty) {
+        return res.status(404).json({ success: false, error: "Promo not found" });
+      }
+
+      const promoDoc = qSnap.docs[0];
+      const promoData = promoDoc.data();
+
+      // Check if access code is required
+      if (!promoData.requireAccessCode) {
+        return res.json({ success: true, message: "No access code required." });
+      }
+
+      // Check if access code matches (case insensitive)
+      if (!promoData.accessCode || promoData.accessCode.trim().toUpperCase() !== accessCode.trim().toUpperCase()) {
         await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
-        console.log("Promo Locked: Invalid or Disabled Access Code");
+        console.log("Promo Locked: Invalid Access Code");
         return res.status(400).json({ success: false, error: "Invalid Access Code. Please try again." });
       }
 
-      const codeData = codeSnap.data();
-      
-      // Verify start / end dates
-      if (!isPromoActive(codeData.startDate, codeData.startTime, codeData.expiryDate, codeData.expiryTime)) {
-        await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
-        console.log("Promo Locked: Code Expired or Inactive");
-        return res.status(400).json({ success: false, error: "This Access Code has expired or is not yet active." });
-      }
+      // Verify parent promo's dates, enabled, and budget
+      const now = new Date();
+      const startStr = `${promoData.startDate}T${promoData.startTime || "00:00"}:00`;
+      const expiryStr = `${promoData.expiryDate}T${promoData.expiryTime || "23:59"}:00`;
+      const start = new Date(startStr);
+      const expiry = new Date(expiryStr);
 
-      // Verify max users limits
-      if (codeData.maxUsers && codeData.usedCount >= codeData.maxUsers) {
-        await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
-        console.log("Promo Locked: Max Users Limit Reached");
-        return res.status(400).json({ success: false, error: "This Access Code has reached its maximum user limit." });
+      const maxUsers = Number(promoData.maxUsers || 0);
+      const usedCount = Number(promoData.usedCount || 0);
+      const totalBudget = Number(promoData.totalBudget || 0);
+      const budgetUsed = Number(promoData.budgetUsed || 0);
+      const rewardAmount = Number(promoData.rewardAmount || 0);
+
+      if (!promoData.enabled) {
+        return res.status(400).json({ success: false, error: "This promo is currently disabled." });
+      }
+      if (maxUsers > 0 && usedCount >= maxUsers) {
+        return res.status(400).json({ success: false, error: "This promo has reached its claim limit." });
+      }
+      if (totalBudget > 0 && (budgetUsed >= totalBudget || (totalBudget - budgetUsed) < rewardAmount)) {
+        return res.status(400).json({ success: false, error: "This promo budget is finished." });
+      }
+      if (!isNaN(start.getTime()) && now < start) {
+        return res.status(400).json({ success: false, error: "This promo has not started yet." });
+      }
+      if (!isNaN(expiry.getTime()) && now > expiry) {
+        return res.status(400).json({ success: false, error: "This promo has expired." });
       }
 
       // Create Session
       const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
-      const sessionRef = doc(db, "promo_sessions", userId);
+      const sessionRef = doc(db, "promo_sessions", `${userId}_${promoId}`);
       await setDoc(sessionRef, {
         userId,
+        promoId,
         accessCode: accessCode.toUpperCase(),
         unlockedAt: new Date().toISOString(),
         expiresAt
@@ -4231,7 +4294,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Update analytics
       await updateDoc(settingsDocRef, { pageUnlockedCount: increment(1) });
 
-      console.log("Promo Unlocked");
+      console.log("Promo Unlocked successfully");
       res.json({
         success: true,
         expiresAt
@@ -4252,28 +4315,34 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const settingsDocRef = doc(db, "settings", "promo_rewards");
       const settingsSnap = await getDoc(settingsDocRef);
       const settingsData = settingsSnap.exists() ? settingsSnap.data() : {};
-      const requireAccessCode = settingsData.requireAccessCode ?? true;
 
-      let sData: any = null;
-      let accessCodeRef: any = null;
+      // Retrieve Promo via randomPageId query
+      const promoCodesColl = collection(db, "promo_codes");
+      let q = query(promoCodesColl, where("randomPageId", "==", randomPageId));
+      let qSnap = await getDocs(q);
+      if (qSnap.empty) {
+        q = query(promoCodesColl, where("pageId", "==", randomPageId));
+        qSnap = await getDocs(q);
+      }
+      if (qSnap.empty) {
+        return res.status(400).json({ error: "This promo reward page does not exist or is invalid." });
+      }
+      
+      const promoDoc = qSnap.docs[0];
+      const codeUpper = promoDoc.id;
+      const promoData = promoDoc.data();
+      const requireAccessCode = promoData.requireAccessCode === true;
 
       if (requireAccessCode) {
-        // Verify Session exists and is active
-        const sessionRef = doc(db, "promo_sessions", userId);
+        // Verify Session exists and is active for this user & this specific promo page!
+        const sessionRef = doc(db, "promo_sessions", `${userId}_${randomPageId}`);
         const sessionSnap = await getDoc(sessionRef);
         if (!sessionSnap.exists()) {
           return res.status(400).json({ error: "Your access session has expired or is not active." });
         }
-        sData = sessionSnap.data();
+        const sData = sessionSnap.data();
         if (new Date(sData.expiresAt) < new Date()) {
           return res.status(400).json({ error: "Your access session has expired. Please unlock again." });
-        }
-
-        // Check original Access Code
-        accessCodeRef = doc(db, "access_codes", sData.accessCode);
-        const accessSnap = await getDoc(accessCodeRef);
-        if (!accessSnap.exists() || !(accessSnap.data() as any).enabled) {
-          return res.status(400).json({ error: "The associated Access Code is no longer active." });
         }
       }
 
@@ -4312,18 +4381,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       }
 
-      // Retrieve Promo via randomPageId query
-      const promoCodesColl = collection(db, "promo_codes");
-      const q = query(promoCodesColl, where("randomPageId", "==", randomPageId));
-      const qSnap = await getDocs(q);
-      if (qSnap.empty) {
-        return res.status(400).json({ error: "This promo reward page does not exist or is invalid." });
-      }
-      
-      const promoDoc = qSnap.docs[0];
-      const codeUpper = promoDoc.id;
-      const promoData = promoDoc.data();
-
       let rewardAmount = 0;
       const today = new Date().toISOString().split("T")[0];
       const todayTime = new Date().toLocaleTimeString();
@@ -4361,11 +4418,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         const claimSnap = await transaction.get(claimRef);
         if (claimSnap.exists() && claimSnap.data().status === "Success") {
           throw new Error("You have already claimed this promo reward!");
-        }
-
-        // 6. Access Code limit increment
-        if (requireAccessCode && accessCodeRef) {
-          transaction.update(accessCodeRef, { usedCount: increment(1) });
         }
 
         // 7. Promo Code counts
@@ -4737,7 +4789,7 @@ Provide the response strictly in JSON format matching the schema requested.`;
   // Create Promo Code
   app.post("/api/admin/promo/promos", async (req, res) => {
     try {
-      const { name, code, rewardAmount, totalBudget, maxUsers, startDate, startTime, expiryDate, expiryTime, enabled } = req.body;
+      const { name, code, rewardAmount, totalBudget, maxUsers, startDate, startTime, expiryDate, expiryTime, enabled, requireAccessCode, accessCode } = req.body;
       if (!name || !code || !rewardAmount || !totalBudget) {
         return res.status(400).json({ error: "Missing required parameters" });
       }
@@ -4776,6 +4828,8 @@ Provide the response strictly in JSON format matching the schema requested.`;
         expiryDate: expiryDate || "",
         expiryTime: expiryTime || "",
         enabled: enabled ?? true,
+        requireAccessCode: requireAccessCode ?? false,
+        accessCode: accessCode || "",
         promoPageUrl,
         createdAt: new Date().toISOString()
       });
@@ -4800,13 +4854,19 @@ Provide the response strictly in JSON format matching the schema requested.`;
     }
   });
 
-  // Toggle Promo Code
+  // Toggle/Update Promo Code
   app.put("/api/admin/promo/promos/:id", async (req, res) => {
     try {
       const ref = doc(db, "promo_codes", req.params.id);
-      await updateDoc(ref, { enabled: req.body.enabled });
+      const updateData: any = {};
+      if (req.body.enabled !== undefined) updateData.enabled = req.body.enabled;
+      if (req.body.requireAccessCode !== undefined) updateData.requireAccessCode = req.body.requireAccessCode;
+      if (req.body.accessCode !== undefined) updateData.accessCode = req.body.accessCode;
+      
+      await updateDoc(ref, updateData);
       res.json({ success: true });
     } catch (e: any) {
+      console.error("Error in PUT /api/admin/promo/promos/:id:", e);
       res.status(500).json({ error: "Server error" });
     }
   });

@@ -58,6 +58,8 @@ interface Promo {
   promoPageUrl?: string;
   randomPageId?: string;
   pageId?: string;
+  requireAccessCode?: boolean;
+  accessCode?: string;
 }
 
 interface PromoAnalytics {
@@ -72,7 +74,7 @@ interface PromoAnalytics {
 }
 
 export default function PromoRewardManager() {
-  const [activeSubTab, setActiveSubTab] = useState<"settings" | "access-codes" | "promos" | "analytics">("analytics");
+  const [activeSubTab, setActiveSubTab] = useState<"settings" | "promos" | "analytics">("promos");
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -286,6 +288,31 @@ export default function PromoRewardManager() {
     }
   };
 
+  const generateRandomCode = () => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const part1 = Array.from({ length: 4 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join("");
+    const part2 = Array.from({ length: 4 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join("");
+    return `${part1}-${part2}`;
+  };
+
+  const handleUpdatePromoField = async (id: string, field: string, value: any) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/promo/promos/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value })
+      });
+      if (res.ok) {
+        setPromos(promos.map(p => p.id === id ? { ...p, [field]: value } : p));
+      } else {
+        alert("Failed to update promo field.");
+      }
+    } catch (err) {
+      console.error("Update promo field error:", err);
+      alert("Failed to update promo field.");
+    }
+  };
+
   const handleTogglePromo = async (id: string, currentStatus: boolean) => {
     try {
       const res = await fetch(`${API_BASE}/api/admin/promo/promos/${id}`, {
@@ -482,7 +509,6 @@ export default function PromoRewardManager() {
           {[
             { id: "analytics", name: "📈 Analytics", icon: BarChart3 },
             { id: "settings", name: "⚙️ Settings", icon: Settings },
-            { id: "access-codes", name: "🔑 Access Codes", icon: Key },
             { id: "promos", name: "🎁 Promos Manager", icon: Gift }
           ].map((tab) => (
             <button
@@ -673,160 +699,6 @@ export default function PromoRewardManager() {
             </button>
           </div>
         </form>
-      )}
-
-      {/* 3. ACCESS CODES VIEW */}
-      {activeSubTab === "access-codes" && (
-        <div className="grid lg:grid-cols-3 gap-6 items-start">
-          {/* Create Form */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 lg:col-span-1">
-            <h3 className="text-md font-bold text-white border-b border-slate-850 pb-3 flex items-center gap-2">
-              <Plus className="w-5 h-5 text-indigo-400" />
-              New Access Code
-            </h3>
-
-            <form onSubmit={handleCreateAccessCode} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-indigo-300 uppercase tracking-widest block">Access Code</label>
-                <input
-                  type="text"
-                  required
-                  value={newAccessCode.code}
-                  onChange={(e) => setNewAccessCode({ ...newAccessCode, code: e.target.value.toUpperCase() })}
-                  placeholder="e.g. SPECIALPASS"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500 font-bold uppercase tracking-wider"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-indigo-300 uppercase tracking-widest block">Start Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={newAccessCode.startDate}
-                    onChange={(e) => setNewAccessCode({ ...newAccessCode, startDate: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-indigo-300 uppercase tracking-widest block">Start Time</label>
-                  <input
-                    type="time"
-                    required
-                    value={newAccessCode.startTime}
-                    onChange={(e) => setNewAccessCode({ ...newAccessCode, startTime: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-indigo-300 uppercase tracking-widest block">Expiry Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={newAccessCode.expiryDate}
-                    onChange={(e) => setNewAccessCode({ ...newAccessCode, expiryDate: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-indigo-300 uppercase tracking-widest block">Expiry Time</label>
-                  <input
-                    type="time"
-                    required
-                    value={newAccessCode.expiryTime}
-                    onChange={(e) => setNewAccessCode({ ...newAccessCode, expiryTime: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-indigo-300 uppercase tracking-widest block">Maximum Users Limit</label>
-                <input
-                  type="number"
-                  required
-                  value={newAccessCode.maxUsers}
-                  onChange={(e) => setNewAccessCode({ ...newAccessCode, maxUsers: e.target.value })}
-                  placeholder="e.g. 500"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={creatingAccessCode}
-                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-500/10 transition-all disabled:opacity-50"
-              >
-                {creatingAccessCode ? "Creating..." : "✨ Create Code"}
-              </button>
-            </form>
-          </div>
-
-          {/* List Codes */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden lg:col-span-2">
-            <div className="px-6 py-5 border-b border-slate-850">
-              <h3 className="text-md font-bold text-white flex items-center gap-2">
-                <Key className="w-5 h-5 text-indigo-400" />
-                Active Access Codes ({accessCodes.length})
-              </h3>
-            </div>
-
-            {accessCodes.length === 0 ? (
-              <p className="text-xs text-slate-500 text-center py-10">No access codes found. Create one to enable users to access the promo rewards page.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-950/50 text-slate-400 font-bold uppercase text-[9px] tracking-widest border-b border-slate-850">
-                      <th className="p-4">Access Code</th>
-                      <th className="p-4">Validity Range</th>
-                      <th className="p-4">Users Limit</th>
-                      <th className="p-4">Status</th>
-                      <th className="p-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-850">
-                    {accessCodes.map((code) => (
-                      <tr key={code.id} className="hover:bg-slate-950/25">
-                        <td className="p-4 font-black text-white flex items-center gap-2">
-                          {code.code}
-                          <button onClick={() => triggerCopy(code.code, code.id)} className="text-slate-500 hover:text-white">
-                            {copiedId === code.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                          </button>
-                        </td>
-                        <td className="p-4 text-slate-400 font-medium">
-                          <p className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {code.startDate} {code.startTime}</p>
-                          <p className="flex items-center gap-1 mt-1 text-rose-400"><Clock className="w-3 h-3" /> {code.expiryDate} {code.expiryTime}</p>
-                        </td>
-                        <td className="p-4 font-bold text-indigo-400">
-                          {code.usedCount} / {code.maxUsers || "unlimited"}
-                        </td>
-                        <td className="p-4">
-                          <button onClick={() => handleToggleAccessCode(code.id, code.enabled)}>
-                            {code.enabled ? (
-                              <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase">Active</span>
-                            ) : (
-                              <span className="bg-slate-800 border border-slate-700 text-slate-500 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase">Disabled</span>
-                            )}
-                          </button>
-                        </td>
-                        <td className="p-4 text-right">
-                          <button onClick={() => handleDeleteAccessCode(code.id)} className="p-2 bg-rose-500/5 hover:bg-rose-500/10 border border-rose-500/10 text-rose-400 rounded-xl transition-all">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
       )}
 
       {/* 4. PROMOS MANAGER VIEW */}
@@ -1299,129 +1171,188 @@ export default function PromoRewardManager() {
             {promos.length === 0 ? (
               <p className="text-xs text-slate-500 text-center py-10">No promos found. Create a promo so users can enter and claim their balance rewards.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-950/50 text-slate-400 font-bold uppercase text-[9px] tracking-widest border-b border-slate-850">
-                      <th className="p-4">Promo details</th>
-                      <th className="p-4">Reward Amount</th>
-                      <th className="p-4">Budget Progress</th>
-                      <th className="p-4">Claim Limit</th>
-                      <th className="p-4">Status</th>
-                      <th className="p-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-850">
-                    {promos.map((promo) => (
-                      <tr key={promo.id} className="hover:bg-slate-950/25">
-                        <td className="p-4 space-y-2">
-                          <div>
-                            <p className="font-bold text-white text-xs">{promo.name}</p>
-                            <p className="font-black text-indigo-400 mt-1 flex items-center gap-1.5 uppercase">
-                              `{promo.code}`
-                              <button onClick={() => triggerCopy(promo.code, promo.id)} className="text-slate-500 hover:text-white">
-                                {copiedId === promo.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                              </button>
-                            </p>
+              <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                {promos.map((promo) => {
+                  const hasAccessCode = promo.requireAccessCode === true;
+                  const promoUrl = promo.promoPageUrl || `${window.location.origin}/promo/${promo.pageId || promo.randomPageId || promo.id}`;
+                  return (
+                    <div key={promo.id} className="bg-slate-950/45 border border-slate-850 rounded-2xl p-5 space-y-5 relative flex flex-col justify-between">
+                      {/* Top Header */}
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h4 className="font-black text-white text-sm tracking-tight">{promo.name}</h4>
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <span className="font-mono text-xs font-black text-indigo-400 bg-indigo-500/5 border border-indigo-500/10 px-2 py-0.5 rounded uppercase">
+                              {promo.code}
+                            </span>
+                            <button onClick={() => triggerCopy(promo.code, promo.id)} className="text-slate-500 hover:text-white transition-all">
+                              {copiedId === promo.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
                           </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => handleTogglePromo(promo.id, promo.enabled)}
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border transition-all ${
+                              promo.enabled 
+                                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
+                                : "bg-slate-800 border-slate-700 text-slate-500"
+                            }`}
+                          >
+                            {promo.enabled ? "Active" : "Disabled"}
+                          </button>
                           
-                          {/* Promo Page Actions Toolbar */}
-                          <div className="flex flex-wrap gap-1.5 mt-2">
-                            {/* Copy Page Link */}
-                            <button 
-                              onClick={() => {
-                                const url = promo.promoPageUrl || `${window.location.origin}/promo/${promo.pageId || promo.randomPageId || promo.id}`;
-                                console.log("Copy link URL:", url);
-                                triggerCopy(url, `link-${promo.id}`);
-                              }}
-                              className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-bold text-slate-300 hover:text-indigo-400 rounded-lg flex items-center gap-1 transition-all"
-                            >
-                              {copiedId === `link-${promo.id}` ? (
-                                <>
-                                  <Check className="w-3 h-3 text-emerald-400" />
-                                  <span className="text-emerald-400 font-black">Copied!</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="w-3 h-3" />
-                                  <span>Copy Link</span>
-                                </>
-                              )}
-                            </button>
+                          <button 
+                            onClick={() => handleDeletePromo(promo.id)} 
+                            className="p-1.5 bg-rose-500/5 hover:bg-rose-500/10 border border-rose-500/10 text-rose-400 rounded-xl transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
 
-                            {/* Preview Page */}
-                            <button 
-                              onClick={() => setPreviewPromo(promo)}
-                              className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-bold text-slate-300 hover:text-indigo-400 rounded-lg flex items-center gap-1 transition-all"
-                            >
-                              <Eye className="w-3 h-3" />
-                              <span>Preview</span>
-                            </button>
+                      {/* Info and Progress Grid */}
+                      <div className="grid grid-cols-2 gap-4 text-xs">
+                        <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-850/40">
+                          <p className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Reward Amount</p>
+                          <p className="font-black text-emerald-400 text-sm mt-1">₹{promo.rewardAmount.toFixed(2)}</p>
+                        </div>
+                        <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-850/40">
+                          <p className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Claim Limit</p>
+                          <p className="font-black text-slate-300 text-sm mt-1">{promo.usedCount} / {promo.maxUsers || "∞"}</p>
+                        </div>
+                      </div>
 
-                            {/* Open Page */}
-                            <a 
-                              href={promo.promoPageUrl || `/promo/${promo.pageId || promo.randomPageId || promo.id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-bold text-slate-300 hover:text-indigo-400 rounded-lg flex items-center gap-1.5 transition-all"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              <span>Open</span>
-                            </a>
+                      {/* Budget Progress Bar */}
+                      <div className="bg-slate-900/40 border border-slate-850/30 rounded-xl p-3 text-xs space-y-2">
+                        <div className="flex justify-between items-center text-slate-400">
+                          <span className="font-bold">Budget Progress</span>
+                          <span className="font-black">₹{promo.budgetUsed} / ₹{promo.totalBudget}</span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-indigo-500 to-purple-500" 
+                            style={{ width: `${Math.min(100, (promo.budgetUsed / promo.totalBudget) * 100)}%` }} 
+                          />
+                        </div>
+                      </div>
 
-                            {/* QR Code */}
-                            <button 
-                              onClick={() => setQrPromo(promo)}
-                              className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-bold text-slate-300 hover:text-indigo-400 rounded-lg flex items-center gap-1 transition-all"
-                            >
-                              <QrCode className="w-3 h-3" />
-                              <span>QR Code</span>
-                            </button>
+                      {/* 🔒 Access Code Settings Section */}
+                      <div className="bg-slate-900/80 border border-slate-850/70 rounded-xl p-4 space-y-4">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-black text-slate-300 flex items-center gap-1.5">
+                            🔒 Require Access Code
+                          </span>
+                          <button
+                            onClick={() => {
+                              const nextState = !hasAccessCode;
+                              handleUpdatePromoField(promo.id, "requireAccessCode", nextState);
+                              // Auto-generate a code if turning ON and currently empty
+                              if (nextState && !promo.accessCode) {
+                                handleUpdatePromoField(promo.id, "accessCode", generateRandomCode());
+                              }
+                            }}
+                            className={`w-12 h-6 rounded-full p-1 transition-all duration-200 focus:outline-none ${
+                              hasAccessCode ? 'bg-indigo-600' : 'bg-slate-800'
+                            }`}
+                          >
+                            <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-all duration-200 ${
+                              hasAccessCode ? 'translate-x-6' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
 
-                            {/* Regenerate Link */}
-                            <button 
-                              onClick={() => handleRegenerateLink(promo.id)}
-                              className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-rose-500 hover:bg-rose-500/5 text-[10px] font-bold text-slate-300 hover:text-rose-400 rounded-lg flex items-center gap-1 transition-all"
-                              title="Regenerate Page Link"
-                            >
-                              <RefreshCw className="w-3 h-3" />
-                              <span>Regen</span>
-                            </button>
-                          </div>
-                        </td>
-                        <td className="p-4 font-black text-emerald-400 text-sm">
-                          ₹{promo.rewardAmount.toFixed(2)}
-                        </td>
-                        <td className="p-4 font-medium text-slate-400">
-                          <p>₹{promo.budgetUsed} / ₹{promo.totalBudget}</p>
-                          <div className="w-24 h-1.5 bg-slate-950 rounded-full overflow-hidden mt-1.5">
-                            <div 
-                              className="h-full bg-indigo-500" 
-                              style={{ width: `${Math.min(100, (promo.budgetUsed / promo.totalBudget) * 100)}%` }} 
-                            />
-                          </div>
-                        </td>
-                        <td className="p-4 font-bold text-slate-400">
-                          {promo.usedCount} / {promo.maxUsers || "unlimited"}
-                        </td>
-                        <td className="p-4">
-                          <button onClick={() => handleTogglePromo(promo.id, promo.enabled)}>
-                            {promo.enabled ? (
-                              <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase">Active</span>
-                            ) : (
-                              <span className="bg-slate-800 border border-slate-700 text-slate-500 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase">Disabled</span>
+                        {hasAccessCode && (
+                          <div className="space-y-3">
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={promo.accessCode || ""}
+                                onChange={(e) => handleUpdatePromoField(promo.id, "accessCode", e.target.value)}
+                                placeholder="Access Code (e.g. RS-A8B9)"
+                                className="flex-1 bg-slate-950 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-3 py-2 text-xs font-black text-white uppercase tracking-wider focus:outline-none transition-all"
+                              />
+                              <button
+                                onClick={() => handleUpdatePromoField(promo.id, "accessCode", generateRandomCode())}
+                                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1"
+                                title="Regenerate Access Code (AI)"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                <span>Regen</span>
+                              </button>
+                            </div>
+                            
+                            {promo.accessCode && (
+                              <button
+                                onClick={() => triggerCopy(promo.accessCode || "", `code-${promo.id}`)}
+                                className="w-full py-2 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-black text-slate-400 hover:text-indigo-400 rounded-lg flex items-center justify-center gap-1.5 transition-all"
+                              >
+                                {copiedId === `code-${promo.id}` ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span className="text-emerald-400 font-bold">Access Code Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>Copy Access Code</span>
+                                  </>
+                                )}
+                              </button>
                             )}
-                          </button>
-                        </td>
-                        <td className="p-4 text-right">
-                          <button onClick={() => handleDeletePromo(promo.id)} className="p-2 bg-rose-500/5 hover:bg-rose-500/10 border border-rose-500/10 text-rose-400 rounded-xl transition-all">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Footer Actions */}
+                      <div className="pt-4 border-t border-slate-850/50 flex flex-wrap gap-2">
+                        <button 
+                          onClick={() => triggerCopy(promoUrl, `link-${promo.id}`)}
+                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-[10px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center gap-1.5 transition-all"
+                        >
+                          {copiedId === `link-${promo.id}` ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span className="text-emerald-400 font-black">Copied Link!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>Copy Link</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button 
+                          onClick={() => setPreviewPromo(promo)}
+                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-[10px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center gap-1.5 transition-all"
+                        >
+                          <Eye className="w-3 h-3 text-indigo-400" />
+                          <span>Preview</span>
+                        </button>
+
+                        <a 
+                          href={promoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-[10px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center gap-1.5 transition-all"
+                        >
+                          <ExternalLink className="w-3 h-3 text-blue-400" />
+                          <span>Open</span>
+                        </a>
+
+                        <button 
+                          onClick={() => setQrPromo(promo)}
+                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-[10px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center gap-1.5 transition-all"
+                        >
+                          <QrCode className="w-3 h-3 text-purple-400" />
+                          <span>QR Code</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

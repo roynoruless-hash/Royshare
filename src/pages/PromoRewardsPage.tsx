@@ -170,7 +170,7 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
     setLoading(true);
     setApiError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/promo/status?userId=${userId}`);
+      const res = await fetch(`${API_BASE}/api/promo/status?userId=${userId}&promoId=${promoId}`);
       if (!res.ok) {
         throw new Error(`API returned HTTP status ${res.status}`);
       }
@@ -273,7 +273,7 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
       const res = await fetch(`${API_BASE}/api/promo/unlock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, accessCode: accessCodeInput.trim() })
+        body: JSON.stringify({ userId, accessCode: accessCodeInput.trim(), promoId })
       });
       const data = await res.json();
 
