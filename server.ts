@@ -4587,6 +4587,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         expiryDate: expiryDate || "",
         expiryTime: expiryTime || "",
         enabled: enabled ?? true,
+        promoPageUrl: `https://royshare.onrender.com/promo/${codeUpper}`,
         createdAt: new Date().toISOString()
       });
 
@@ -4614,6 +4615,82 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Regenerate Promo Page URL
+  app.post("/api/admin/promo/promos/regenerate/:id", async (req, res) => {
+    try {
+      const idUpper = req.params.id.toUpperCase();
+      const ref = doc(db, "promo_codes", idUpper);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: "Promo not found" });
+      }
+      
+      const domain = req.body.domain || "https://royshare.onrender.com";
+      const promoPageUrl = `${domain}/promo/${idUpper}`;
+      
+      await updateDoc(ref, { promoPageUrl });
+      res.json({ success: true, promoPageUrl });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Get Promo details (unauthenticated / with status check)
+  app.get("/api/promo/details/:id", async (req, res) => {
+    try {
+      const idUpper = req.params.id.toUpperCase();
+      const promoRef = doc(db, "promo_codes", idUpper);
+      const promoSnap = await getDoc(promoRef);
+
+      if (!promoSnap.exists()) {
+        return res.status(404).json({ success: false, error: "Promo not found" });
+      }
+
+      const promoData = promoSnap.data();
+      
+      // Check status
+      const now = new Date();
+      let status: "active" | "disabled" | "expired" = "active";
+      
+      if (!promoData.enabled) {
+        status = "disabled";
+      } else {
+        const startStr = `${promoData.startDate}T${promoData.startTime || "00:00"}:00`;
+        const expiryStr = `${promoData.expiryDate}T${promoData.expiryTime || "23:59"}:00`;
+        const start = new Date(startStr);
+        const expiry = new Date(expiryStr);
+        
+        if (!isNaN(start.getTime()) && !isNaN(expiry.getTime())) {
+          if (now < start) {
+            status = "disabled"; // Not yet active is closed
+          } else if (now > expiry) {
+            status = "expired";
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        promo: {
+          id: promoSnap.id,
+          name: promoData.name,
+          code: promoData.code,
+          rewardAmount: promoData.rewardAmount,
+          enabled: promoData.enabled,
+          startDate: promoData.startDate,
+          startTime: promoData.startTime,
+          expiryDate: promoData.expiryDate,
+          expiryTime: promoData.expiryTime,
+          status,
+          promoPageUrl: promoData.promoPageUrl || `https://royshare.onrender.com/promo/${idUpper}`
+        }
+      });
+    } catch (e: any) {
+      console.error("Error in GET /api/promo/details/:id:", e);
+      res.status(500).json({ error: e.message || "Server error" });
     }
   });
 

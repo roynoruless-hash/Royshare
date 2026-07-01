@@ -17,7 +17,9 @@ import {
   RefreshCw,
   Calendar,
   Clock,
-  ExternalLink
+  ExternalLink,
+  Eye,
+  QrCode
 } from "lucide-react";
 
 interface AccessCode {
@@ -46,6 +48,7 @@ interface Promo {
   expiryDate: string;
   expiryTime: string;
   enabled: boolean;
+  promoPageUrl?: string;
 }
 
 interface PromoAnalytics {
@@ -72,6 +75,10 @@ export default function PromoRewardManager() {
 
   // Copy Feedback
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Preview and QR Code Modals
+  const [previewPromo, setPreviewPromo] = useState<Promo | null>(null);
+  const [qrPromo, setQrPromo] = useState<Promo | null>(null);
 
   // Forms States
   const [savingSettings, setSavingSettings] = useState(false);
@@ -137,6 +144,24 @@ export default function PromoRewardManager() {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  const handleRegenerateLink = async (promoId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/promo/promos/regenerate/${promoId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain: window.location.origin })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPromos((prev) =>
+          prev.map((p) => (p.id === promoId ? { ...p, promoPageUrl: data.promoPageUrl } : p))
+        );
+      }
+    } catch (err) {
+      console.error("Error regenerating link:", err);
+    }
   };
 
   // Toggle handlers
@@ -810,14 +835,79 @@ export default function PromoRewardManager() {
                   <tbody className="divide-y divide-slate-850">
                     {promos.map((promo) => (
                       <tr key={promo.id} className="hover:bg-slate-950/25">
-                        <td className="p-4">
-                          <p className="font-bold text-white text-xs">{promo.name}</p>
-                          <p className="font-black text-indigo-400 mt-1 flex items-center gap-1.5 uppercase">
-                            `{promo.code}`
-                            <button onClick={() => triggerCopy(promo.code, promo.id)} className="text-slate-500 hover:text-white">
-                              {copiedId === promo.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <td className="p-4 space-y-2">
+                          <div>
+                            <p className="font-bold text-white text-xs">{promo.name}</p>
+                            <p className="font-black text-indigo-400 mt-1 flex items-center gap-1.5 uppercase">
+                              `{promo.code}`
+                              <button onClick={() => triggerCopy(promo.code, promo.id)} className="text-slate-500 hover:text-white">
+                                {copiedId === promo.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                              </button>
+                            </p>
+                          </div>
+                          
+                          {/* Promo Page Actions Toolbar */}
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {/* Copy Page Link */}
+                            <button 
+                              onClick={() => {
+                                const url = promo.promoPageUrl || `${window.location.origin}/promo/${promo.code}`;
+                                triggerCopy(url, `link-${promo.id}`);
+                              }}
+                              className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-bold text-slate-300 hover:text-indigo-400 rounded-lg flex items-center gap-1 transition-all"
+                            >
+                              {copiedId === `link-${promo.id}` ? (
+                                <>
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                  <span className="text-emerald-400 font-black">Copied!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy Link</span>
+                                </>
+                              )}
                             </button>
-                          </p>
+
+                            {/* Preview Page */}
+                            <button 
+                              onClick={() => setPreviewPromo(promo)}
+                              className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-bold text-slate-300 hover:text-indigo-400 rounded-lg flex items-center gap-1 transition-all"
+                            >
+                              <Eye className="w-3 h-3" />
+                              <span>Preview</span>
+                            </button>
+
+                            {/* Open Page */}
+                            <a 
+                              href={promo.promoPageUrl || `/promo/${promo.code}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-bold text-slate-300 hover:text-indigo-400 rounded-lg flex items-center gap-1.5 transition-all"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span>Open</span>
+                            </a>
+
+                            {/* QR Code */}
+                            <button 
+                              onClick={() => setQrPromo(promo)}
+                              className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-bold text-slate-300 hover:text-indigo-400 rounded-lg flex items-center gap-1 transition-all"
+                            >
+                              <QrCode className="w-3 h-3" />
+                              <span>QR Code</span>
+                            </button>
+
+                            {/* Regenerate Link */}
+                            <button 
+                              onClick={() => handleRegenerateLink(promo.id)}
+                              className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-rose-500 hover:bg-rose-500/5 text-[10px] font-bold text-slate-300 hover:text-rose-400 rounded-lg flex items-center gap-1 transition-all"
+                              title="Regenerate Page Link"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              <span>Regen</span>
+                            </button>
+                          </div>
                         </td>
                         <td className="p-4 font-black text-emerald-400 text-sm">
                           ₹{promo.rewardAmount.toFixed(2)}
@@ -854,6 +944,78 @@ export default function PromoRewardManager() {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {/* Preview Page Modal */}
+      {previewPromo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm" onClick={() => setPreviewPromo(null)} />
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-3xl relative overflow-hidden shadow-2xl flex flex-col h-[85vh] z-50 animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-850 flex items-center justify-between bg-slate-950/40">
+              <div>
+                <h3 className="font-bold text-white text-xs uppercase tracking-wider flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-indigo-400" />
+                  Promo Page Live Preview
+                </h3>
+                <p className="text-[10px] text-slate-400 mt-1">Code: <span className="font-mono text-indigo-400 font-bold uppercase">{previewPromo.code}</span></p>
+              </div>
+              <button 
+                onClick={() => setPreviewPromo(null)}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+              >
+                Close
+              </button>
+            </div>
+            {/* Embedded Live Web Iframe */}
+            <div className="flex-1 bg-[#020617] overflow-hidden relative">
+              <iframe 
+                src={`/promo/${previewPromo.code}?userId=ADMIN_PREVIEW`} 
+                title="Promo Preview"
+                className="w-full h-full border-0"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QR Code Modal */}
+      {qrPromo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm" onClick={() => setQrPromo(null)} />
+          <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center max-w-sm w-full relative overflow-hidden shadow-2xl space-y-6 z-50 animate-in fade-in zoom-in-95 duration-150">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 to-purple-500" />
+            <div>
+              <h3 className="font-black text-white text-xs uppercase tracking-widest flex items-center justify-center gap-2">
+                <QrCode className="w-4 h-4 text-indigo-400" />
+                Promo Page QR Code
+              </h3>
+              <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">Scan to claim premium promo reward</p>
+            </div>
+            
+            <div className="bg-white p-4 rounded-2xl inline-block border border-slate-800 shadow-inner">
+              <img 
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&color=020617&data=${encodeURIComponent(qrPromo.promoPageUrl || `${window.location.origin}/promo/${qrPromo.code}`)}`}
+                alt="QR Code"
+                className="w-44 h-44 mx-auto"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+
+            <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-850 text-left">
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Target URL</span>
+              <span className="text-xs text-indigo-400 break-all font-mono font-medium block mt-1">
+                {qrPromo.promoPageUrl || `${window.location.origin}/promo/${qrPromo.code}`}
+              </span>
+            </div>
+
+            <button 
+              onClick={() => setQrPromo(null)}
+              className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-2xl text-xs font-black uppercase tracking-widest active:scale-95 transition-all shadow-lg"
+            >
+              Done
+            </button>
           </div>
         </div>
       )}

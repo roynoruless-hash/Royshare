@@ -61,12 +61,17 @@ interface PromoRewardsSettings {
   twitterEnabled?: boolean;
 }
 
-export default function PromoRewardsPage() {
+export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [username, setUsername] = useState<string>("User");
   const [telegramId, setTelegramId] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(true);
   const [settings, setSettings] = useState<PromoRewardsSettings | null>(null);
+
+  // Loaded Promo from link States
+  const [loadedPromo, setLoadedPromo] = useState<any>(null);
+  const [promoDetailsLoading, setPromoDetailsLoading] = useState<boolean>(!!promoId);
+  const [promoErrorStatus, setPromoErrorStatus] = useState<"disabled" | "expired" | "not_found" | null>(null);
   
   // Lock Stage States
   const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
@@ -106,6 +111,39 @@ export default function PromoRewardsPage() {
       setLoading(false);
     }
   }, []);
+
+  // Fetch Promo Details if promoId is provided from route
+  useEffect(() => {
+    if (!promoId) return;
+
+    const fetchPromoDetails = async () => {
+      setPromoDetailsLoading(true);
+      setPromoErrorStatus(null);
+      try {
+        const res = await fetch(`${API_BASE}/api/promo/details/${promoId}`);
+        const data = await res.json();
+        if (data.success && data.promo) {
+          setLoadedPromo(data.promo);
+          if (data.promo.status === "disabled") {
+            setPromoErrorStatus("disabled");
+          } else if (data.promo.status === "expired") {
+            setPromoErrorStatus("expired");
+          } else {
+            setPromoCodeInput(data.promo.code);
+          }
+        } else {
+          setPromoErrorStatus("not_found");
+        }
+      } catch (err) {
+        console.error("Error fetching promo details:", err);
+        setPromoErrorStatus("not_found");
+      } finally {
+        setPromoDetailsLoading(false);
+      }
+    };
+
+    fetchPromoDetails();
+  }, [promoId]);
 
   const fetchStatusAndSettings = async () => {
     if (!userId) return;
@@ -321,11 +359,62 @@ export default function PromoRewardsPage() {
     }
   };
 
-  if (loading) {
+  if (loading || promoDetailsLoading) {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6">
         <Disc className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
         <p className="text-slate-400 font-medium tracking-wide">Syncing Security System...</p>
+      </div>
+    );
+  }
+
+  // Check specific promo status first
+  if (promoErrorStatus === "disabled") {
+    return (
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
+        <AlertTriangle className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
+        <h1 className="text-2xl font-black mb-2 text-white">Promo Page Currently Closed.</h1>
+        <p className="text-slate-400 max-w-sm mb-6 text-sm">
+          This promo rewards page is currently disabled or closed by the administrator. Check back soon!
+        </p>
+      </div>
+    );
+  }
+
+  if (promoErrorStatus === "expired") {
+    return (
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
+        <motion.div 
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="bg-slate-900 border border-rose-500/30 p-10 rounded-3xl max-w-md w-full space-y-6 shadow-2xl shadow-rose-950/10"
+        >
+          <span className="text-6xl block animate-bounce">⌛</span>
+          <h1 className="text-3xl font-black text-rose-500 tracking-tight">Better Luck Next Time</h1>
+          <div className="h-0.5 bg-gradient-to-r from-transparent via-rose-500/20 to-transparent w-full" />
+          <p className="text-slate-300 font-bold text-lg font-sans">This promo has expired.</p>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            Promo claims are no longer available for this code. Keep an eye on our Telegram Channel for upcoming promo drops!
+          </p>
+          <button
+            disabled
+            className="w-full py-4 rounded-2xl bg-slate-800 text-slate-500 font-bold uppercase tracking-wider cursor-not-allowed border border-slate-700/50"
+          >
+            Redemption Expired
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (promoErrorStatus === "not_found") {
+    return (
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
+        <AlertTriangle className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
+        <h1 className="text-2xl font-black mb-2 text-white">Promo Not Found</h1>
+        <p className="text-slate-400 max-w-sm mb-6 text-sm">
+          The specified promo page does not exist or has been deleted.
+        </p>
       </div>
     );
   }
@@ -558,10 +647,25 @@ export default function PromoRewardsPage() {
           
           <div>
             <h3 className="font-black text-white text-sm uppercase tracking-wider flex items-center gap-2">
-              🎁 Enter Promo Code
+              {loadedPromo ? "🎁 Loaded Promo Reward" : "🎁 Enter Promo Code"}
             </h3>
-            <p className="text-slate-400 text-xs mt-0.5">Enter active promo coupon code to receive your reward.</p>
+            <p className="text-slate-400 text-xs mt-0.5">
+              {loadedPromo ? "This promo has been loaded directly from your link." : "Enter active promo coupon code to receive your reward."}
+            </p>
           </div>
+
+          {loadedPromo && (
+            <div className="bg-indigo-600/10 border border-indigo-500/20 p-4 rounded-2xl flex items-center justify-between">
+              <div className="text-left">
+                <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest block">Promo Reward Name</span>
+                <span className="text-xs font-bold text-white mt-1 block">{loadedPromo.name}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest block">Reward Amount</span>
+                <span className="text-xs font-black text-emerald-400 mt-1 block">₹{loadedPromo.rewardAmount.toFixed(2)}</span>
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleRedeemSubmit} className="space-y-4">
             <input
@@ -570,8 +674,8 @@ export default function PromoRewardsPage() {
               value={promoCodeInput}
               onChange={(e) => setPromoCodeInput(e.target.value)}
               placeholder="e.g. WELCOME50"
-              disabled={redeeming}
-              className="w-full bg-slate-950/80 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-2xl px-5 py-4 text-white font-black placeholder:text-slate-700 text-center uppercase tracking-wider focus:outline-none transition-all"
+              disabled={redeeming || !!promoId}
+              className={`w-full bg-slate-950/80 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-2xl px-5 py-4 text-white font-black placeholder:text-slate-700 text-center uppercase tracking-wider focus:outline-none transition-all ${!!promoId ? "opacity-75 cursor-not-allowed" : ""}`}
             />
 
             {redeemError && (

@@ -213,6 +213,12 @@ export default function App() {
       return <PromoRewardsPage />;
     }
 
+    const promoMatch = window.location.pathname.match(/^\/promo\/([a-zA-Z0-9_-]+)/);
+    if (promoMatch) {
+      const promoId = promoMatch[1];
+      return <PromoRewardsPage promoId={promoId} />;
+    }
+
     if (window.location.pathname === "/earn-rewards") {
       return <EarnRewardsPage />;
     }
