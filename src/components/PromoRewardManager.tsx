@@ -50,6 +50,7 @@ interface Promo {
   enabled: boolean;
   promoPageUrl?: string;
   randomPageId?: string;
+  pageId?: string;
 }
 
 interface PromoAnalytics {
@@ -852,7 +853,8 @@ export default function PromoRewardManager() {
                             {/* Copy Page Link */}
                             <button 
                               onClick={() => {
-                                const url = promo.promoPageUrl || `${window.location.origin}/promo/${promo.randomPageId || promo.id}`;
+                                const url = promo.promoPageUrl || `${window.location.origin}/promo/${promo.pageId || promo.randomPageId || promo.id}`;
+                                console.log("Copy link URL:", url);
                                 triggerCopy(url, `link-${promo.id}`);
                               }}
                               className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-bold text-slate-300 hover:text-indigo-400 rounded-lg flex items-center gap-1 transition-all"
@@ -881,7 +883,7 @@ export default function PromoRewardManager() {
 
                             {/* Open Page */}
                             <a 
-                              href={promo.promoPageUrl || `/promo/${promo.randomPageId || promo.id}`}
+                              href={promo.promoPageUrl || `/promo/${promo.pageId || promo.randomPageId || promo.id}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="px-2 py-1 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-bold text-slate-300 hover:text-indigo-400 rounded-lg flex items-center gap-1.5 transition-all"
@@ -972,7 +974,7 @@ export default function PromoRewardManager() {
             {/* Embedded Live Web Iframe */}
             <div className="flex-1 bg-[#020617] overflow-hidden relative">
               <iframe 
-                src={`/promo/${previewPromo.randomPageId || previewPromo.id}?userId=ADMIN_PREVIEW`} 
+                src={`/promo/${previewPromo.pageId || previewPromo.randomPageId || previewPromo.id}?userId=ADMIN_PREVIEW`} 
                 title="Promo Preview"
                 className="w-full h-full border-0"
               />
@@ -997,7 +999,7 @@ export default function PromoRewardManager() {
             
             <div className="bg-white p-4 rounded-2xl inline-block border border-slate-800 shadow-inner">
               <img 
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&color=020617&data=${encodeURIComponent(qrPromo.promoPageUrl || `${window.location.origin}/promo/${qrPromo.randomPageId || qrPromo.id}`)}`}
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&color=020617&data=${encodeURIComponent(qrPromo.promoPageUrl || `${window.location.origin}/promo/${qrPromo.pageId || qrPromo.randomPageId || qrPromo.id}`)}`}
                 alt="QR Code"
                 className="w-44 h-44 mx-auto"
                 referrerPolicy="no-referrer"
@@ -1007,7 +1009,7 @@ export default function PromoRewardManager() {
             <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-850 text-left">
               <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Target URL</span>
               <span className="text-xs text-indigo-400 break-all font-mono font-medium block mt-1">
-                {qrPromo.promoPageUrl || `${window.location.origin}/promo/${qrPromo.randomPageId || qrPromo.id}`}
+                {qrPromo.promoPageUrl || `${window.location.origin}/promo/${qrPromo.pageId || qrPromo.randomPageId || qrPromo.id}`}
               </span>
             </div>
 

@@ -4628,21 +4628,25 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       // Generate a completely random alphanumeric 12-character Page ID
       const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-      let randomPageId = "";
+      let pageId = "";
       for (let i = 0; i < 12; i++) {
-        randomPageId += chars.charAt(Math.floor(Math.random() * chars.length));
+        pageId += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-      if (randomPageId.toUpperCase() === codeUpper) {
-        randomPageId += "X";
+      if (pageId.toUpperCase() === codeUpper) {
+        pageId += "X";
       }
 
+      console.log("Generated pageId:", pageId);
+
       const domain = req.body.domain || "https://royshare.onrender.com";
-      const promoPageUrl = `${domain}/promo/${randomPageId}`;
+      const promoPageUrl = `${domain}/promo/${pageId}`;
 
       await setDoc(docRef, {
         name,
         code: codeUpper,
-        randomPageId,
+        promoCode: codeUpper,
+        pageId: pageId,
+        randomPageId: pageId,
         rewardAmount: Number(rewardAmount),
         totalBudget: Number(totalBudget),
         budgetUsed: 0,
@@ -4657,8 +4661,12 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         createdAt: new Date().toISOString()
       });
 
-      res.json({ success: true, randomPageId });
+      console.log("Firestore write success");
+      console.log("Firestore document id:", docRef.id);
+
+      res.json({ success: true, randomPageId: pageId, pageId });
     } catch (e: any) {
+      console.error("Error in POST /api/admin/promo/promos:", e);
       res.status(500).json({ error: "Server error" });
     }
   });
@@ -4694,39 +4702,49 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(404).json({ error: "Promo not found" });
       }
       
-      const data = snap.data();
-      let randomPageId = data.randomPageId;
-      if (!randomPageId) {
-        const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        randomPageId = "";
-        for (let i = 0; i < 12; i++) {
-          randomPageId += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        if (randomPageId.toUpperCase() === idUpper) {
-          randomPageId += "X";
-        }
+      const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      let pageId = "";
+      for (let i = 0; i < 12; i++) {
+        pageId += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      if (pageId.toUpperCase() === idUpper) {
+        pageId += "X";
       }
 
+      console.log("Generated pageId:", pageId);
+
       const domain = req.body.domain || "https://royshare.onrender.com";
-      const promoPageUrl = `${domain}/promo/${randomPageId}`;
+      const promoPageUrl = `${domain}/promo/${pageId}`;
       
-      await updateDoc(ref, { promoPageUrl, randomPageId });
-      res.json({ success: true, promoPageUrl, randomPageId });
+      await updateDoc(ref, { promoPageUrl, pageId, randomPageId: pageId });
+      res.json({ success: true, promoPageUrl, randomPageId: pageId, pageId });
     } catch (e: any) {
       res.status(500).json({ error: "Server error" });
     }
   });
 
-  // Get Promo details by randomPageId (unauthenticated / with status check)
+  // Get Promo details by pageId (unauthenticated / with status check)
   app.get("/api/promo/details/:id", async (req, res) => {
     try {
-      const randomPageId = req.params.id;
-      if (!randomPageId) {
+      const routeParam = req.params.id;
+      console.log("Route parameter:", routeParam);
+
+      if (!routeParam) {
+        console.log("Firestore lookup result: Not Found (Missing route parameter)");
         return res.status(400).json({ success: false, error: "Missing page ID" });
       }
 
-      const q = query(collection(db, "promo_codes"), where("randomPageId", "==", randomPageId));
-      const qSnap = await getDocs(q);
+      const promoCodesColl = collection(db, "promo_codes");
+      let q = query(promoCodesColl, where("pageId", "==", routeParam));
+      let qSnap = await getDocs(q);
+
+      if (qSnap.empty) {
+        // Fallback query to randomPageId
+        q = query(promoCodesColl, where("randomPageId", "==", routeParam));
+        qSnap = await getDocs(q);
+      }
+
+      console.log("Firestore lookup result:", !qSnap.empty ? "Found" : "Not Found");
 
       if (qSnap.empty) {
         return res.status(404).json({ success: false, error: "Promo not found" });
@@ -4737,24 +4755,47 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       
       // Check status
       const now = new Date();
-      let status: "active" | "disabled" | "expired" = "active";
+      let status: "pending" | "active" | "expired" | "disabled" | "budget_finished" | "claim_limit_reached" = "active";
       
+      const startStr = `${promoData.startDate}T${promoData.startTime || "00:00"}:00`;
+      const expiryStr = `${promoData.expiryDate}T${promoData.expiryTime || "23:59"}:00`;
+      const start = new Date(startStr);
+      const expiry = new Date(expiryStr);
+
+      const maxUsers = Number(promoData.maxUsers || 0);
+      const usedCount = Number(promoData.usedCount || 0);
+      const totalBudget = Number(promoData.totalBudget || 0);
+      const budgetUsed = Number(promoData.budgetUsed || 0);
+      const rewardAmount = Number(promoData.rewardAmount || 0);
+
       if (!promoData.enabled) {
         status = "disabled";
+      } else if (maxUsers > 0 && usedCount >= maxUsers) {
+        status = "claim_limit_reached";
+      } else if (totalBudget > 0 && (budgetUsed >= totalBudget || (totalBudget - budgetUsed) < rewardAmount)) {
+        status = "budget_finished";
       } else {
-        const startStr = `${promoData.startDate}T${promoData.startTime || "00:00"}:00`;
-        const expiryStr = `${promoData.expiryDate}T${promoData.expiryTime || "23:59"}:00`;
-        const start = new Date(startStr);
-        const expiry = new Date(expiryStr);
-        
         if (!isNaN(start.getTime()) && !isNaN(expiry.getTime())) {
           if (now < start) {
-            status = "disabled"; // Not yet active is closed
+            status = "pending";
           } else if (now > expiry) {
             status = "expired";
+          } else {
+            status = "active";
           }
         }
       }
+
+      // Log every decision
+      console.log("--- PROMO STATUS DECISION ---");
+      console.log("Current server time:", now.toISOString());
+      console.log("Start datetime (string):", startStr, "Parsed:", !isNaN(start.getTime()) ? start.toISOString() : "Invalid");
+      console.log("Expiry datetime (string):", expiryStr, "Parsed:", !isNaN(expiry.getTime()) ? expiry.toISOString() : "Invalid");
+      console.log("Enabled value:", promoData.enabled);
+      console.log("Budget details:", { totalBudget, budgetUsed, rewardAmount });
+      console.log("Claim limit details:", { maxUsers, usedCount });
+      console.log("Computed status:", status);
+      console.log("-----------------------------");
 
       // STRICT CONSTRAINTS: Never reveal code, Firestore document ID, or internal IDs
       res.json({
@@ -4768,8 +4809,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           expiryDate: promoData.expiryDate,
           expiryTime: promoData.expiryTime,
           status,
-          randomPageId: promoData.randomPageId,
-          promoPageUrl: promoData.promoPageUrl || `https://royshare.onrender.com/promo/${randomPageId}`
+          pageId: promoData.pageId || promoData.randomPageId,
+          randomPageId: promoData.randomPageId || promoData.pageId,
+          promoPageUrl: promoData.promoPageUrl || `https://royshare.onrender.com/promo/${routeParam}`
         }
       });
     } catch (e: any) {

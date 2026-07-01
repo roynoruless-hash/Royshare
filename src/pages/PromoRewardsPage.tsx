@@ -71,7 +71,8 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
   // Loaded Promo from link States
   const [loadedPromo, setLoadedPromo] = useState<any>(null);
   const [promoDetailsLoading, setPromoDetailsLoading] = useState<boolean>(!!promoId);
-  const [promoErrorStatus, setPromoErrorStatus] = useState<"disabled" | "expired" | "not_found" | null>(null);
+  const [promoErrorStatus, setPromoErrorStatus] = useState<"disabled" | "expired" | "not_found" | "pending" | "budget_finished" | "claim_limit_reached" | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
   
   // Lock Stage States
   const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
@@ -99,6 +100,9 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const queryUserId = params.get("userId");
+    if (queryUserId === "ADMIN_PREVIEW") {
+      console.log("Preview Opened");
+    }
     const tg = (window as any).Telegram?.WebApp;
     if (tg) tg.expand();
     const tgUserId = tg?.initDataUnsafe?.user?.id;
@@ -120,26 +124,40 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
     }
 
     const fetchPromoDetails = async () => {
+      console.log("Fetching Promo...");
+      console.log("Route pageId:", promoId);
       setPromoDetailsLoading(true);
       setPromoErrorStatus(null);
+      setApiError(null);
       try {
         const res = await fetch(`${API_BASE}/api/promo/details/${promoId}`);
+        if (res.status === 404) {
+          console.log("Document Missing");
+          setPromoErrorStatus("not_found");
+          return;
+        }
+        if (!res.ok) {
+          throw new Error(`API returned HTTP status ${res.status}`);
+        }
         const data = await res.json();
         if (data.success && data.promo) {
+          console.log("Document Found");
           setLoadedPromo(data.promo);
-          if (data.promo.status === "disabled") {
-            setPromoErrorStatus("disabled");
-          } else if (data.promo.status === "expired") {
-            setPromoErrorStatus("expired");
+          if (data.promo.status && data.promo.status !== "active") {
+            setPromoErrorStatus(data.promo.status);
+          } else {
+            setPromoErrorStatus(null);
           }
         } else {
+          console.log("Document Missing");
           setPromoErrorStatus("not_found");
         }
-      } catch (err) {
-        console.error("Error fetching promo details:", err);
-        setPromoErrorStatus("not_found");
+      } catch (err: any) {
+        console.error("API Error:", err);
+        setApiError(err.message || "Failed to load promo rewards details.");
       } finally {
         setPromoDetailsLoading(false);
+        console.log("Loading Finished");
       }
     };
 
@@ -148,8 +166,13 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
 
   const fetchStatusAndSettings = async () => {
     if (!userId) return;
+    setLoading(true);
+    setApiError(null);
     try {
       const res = await fetch(`${API_BASE}/api/promo/status?userId=${userId}`);
+      if (!res.ok) {
+        throw new Error(`API returned HTTP status ${res.status}`);
+      }
       const data = await res.json();
       if (data.success) {
         setSettings(data.settings);
@@ -160,11 +183,15 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
           setIsUnlocked(true);
           setSessionExpiry(data.session.expiresAt);
         }
+      } else {
+        throw new Error(data.error || "Failed to load status");
       }
-    } catch (err) {
-      console.error("Error fetching promo rewards status:", err);
+    } catch (err: any) {
+      console.error("API Error:", err);
+      setApiError(err.message || "Failed to load promo rewards status.");
     } finally {
       setLoading(false);
+      console.log("Loading Finished");
     }
   };
 
@@ -358,16 +385,30 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
     }
   };
 
-  if (loading || promoDetailsLoading) {
+  if (apiError) {
     return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6">
-        <Disc className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
-        <p className="text-slate-400 font-medium tracking-wide">Syncing Security System...</p>
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
+        <AlertTriangle className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
+        <h1 className="text-2xl font-black mb-2 text-white">API Error</h1>
+        <p className="text-slate-400 max-w-sm mb-6 text-sm">
+          {apiError}
+        </p>
       </div>
     );
   }
 
-  // Check specific promo status first
+  if (promoErrorStatus === "not_found") {
+    return (
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
+        <AlertTriangle className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
+        <h1 className="text-2xl font-black mb-2 text-white">Promo Not Found</h1>
+        <p className="text-slate-400 max-w-sm mb-6 text-sm">
+          The requested promo code or page ID does not exist. Please check the link or try another.
+        </p>
+      </div>
+    );
+  }
+
   if (promoErrorStatus === "disabled") {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
@@ -376,6 +417,70 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
         <p className="text-slate-400 max-w-sm mb-6 text-sm">
           This promo rewards page is currently disabled or closed by the administrator. Check back soon!
         </p>
+      </div>
+    );
+  }
+
+  if (promoErrorStatus === "pending") {
+    return (
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
+        <AlertTriangle className="w-16 h-16 text-indigo-500 mb-4 animate-pulse" />
+        <h1 className="text-2xl font-black mb-2 text-white">Promo Has Not Started Yet</h1>
+        <p className="text-slate-400 max-w-sm mb-6 text-sm">
+          This promo rewards page is currently scheduled but has not started yet. Please check back later!
+        </p>
+      </div>
+    );
+  }
+
+  if (promoErrorStatus === "budget_finished") {
+    return (
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
+        <motion.div 
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="bg-slate-900 border border-rose-500/30 p-10 rounded-3xl max-w-md w-full space-y-6 shadow-2xl shadow-rose-950/10"
+        >
+          <span className="text-6xl block animate-bounce">💸</span>
+          <h1 className="text-3xl font-black text-rose-500 tracking-tight">Better Luck Next Time</h1>
+          <div className="h-0.5 bg-gradient-to-r from-transparent via-rose-500/20 to-transparent w-full" />
+          <p className="text-slate-300 font-bold text-lg font-sans">Budget Fully Exhausted</p>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            This promo has run out of its allocated reward budget. Keep an eye on our Telegram Channel for upcoming promo drops!
+          </p>
+          <button
+            disabled
+            className="w-full py-4 rounded-2xl bg-slate-800 text-slate-500 font-bold uppercase tracking-wider cursor-not-allowed border border-slate-700/50"
+          >
+            Budget Finished
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (promoErrorStatus === "claim_limit_reached") {
+    return (
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
+        <motion.div 
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="bg-slate-900 border border-rose-500/30 p-10 rounded-3xl max-w-md w-full space-y-6 shadow-2xl shadow-rose-950/10"
+        >
+          <span className="text-6xl block animate-bounce">🎟️</span>
+          <h1 className="text-3xl font-black text-rose-500 tracking-tight">Better Luck Next Time</h1>
+          <div className="h-0.5 bg-gradient-to-r from-transparent via-rose-500/20 to-transparent w-full" />
+          <p className="text-slate-300 font-bold text-lg font-sans">Claim Limit Reached</p>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            This promo reward has reached its maximum claim limit. Keep an eye on our Telegram Channel for upcoming promo drops!
+          </p>
+          <button
+            disabled
+            className="w-full py-4 rounded-2xl bg-slate-800 text-slate-500 font-bold uppercase tracking-wider cursor-not-allowed border border-slate-700/50"
+          >
+            Claims Closed
+          </button>
+        </motion.div>
       </div>
     );
   }
@@ -406,14 +511,11 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
     );
   }
 
-  if (promoErrorStatus === "not_found") {
+  if (loading || promoDetailsLoading) {
     return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
-        <AlertTriangle className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
-        <h1 className="text-2xl font-black mb-2 text-white">Promo Not Found</h1>
-        <p className="text-slate-400 max-w-sm mb-6 text-sm">
-          The specified promo page does not exist or has been deleted.
-        </p>
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6">
+        <Disc className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
+        <p className="text-slate-400 font-medium tracking-wide">Syncing Security System...</p>
       </div>
     );
   }
