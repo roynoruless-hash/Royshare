@@ -1515,30 +1515,6 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         wheel: { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] },
         box: { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] },
         scratch: { enabled: true, dailyLimit: 3, cooldown: 0, rewards: [] },
-        coinrain: {
-          enabled: true,
-          dailyLimit: 2,
-          cooldown: 0,
-          duration: 30,
-          coinSpawnRate: 1.5,
-          bombSpawnRate: 0.3,
-          coinSpeed: 3,
-          bombSpeed: 3,
-          coinSize: 32,
-          goldenCoinChance: 0.1,
-          doubleCoinChance: 0.05,
-          shieldChance: 0.05,
-          magnetChance: 0.05,
-          timeBoostChance: 0.05,
-          bombDamagePercent: 40,
-          conversionTable: [
-            { coins: 100, rate: 0.01 },
-            { coins: 500, rate: 0.05 },
-            { coins: 1000, rate: 0.10 },
-            { coins: 5000, rate: 0.50 },
-            { coins: 10000, rate: 1.00 }
-          ]
-        },
         totalSpins: 0,
         totalRewardsDistributed: 0,
       };
@@ -3747,30 +3723,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const wheelConfig = settings.wheel || { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] };
       const boxConfig = settings.box || { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] };
       const scratchConfig = settings.scratch || { enabled: true, dailyLimit: 3, cooldown: 0, rewards: [] };
-      const coinrainConfig = settings.coinrain || {
-        enabled: true,
-        dailyLimit: 2,
-        cooldown: 0,
-        duration: 30,
-        coinSpawnRate: 1.5,
-        bombSpawnRate: 0.3,
-        coinSpeed: 3,
-        bombSpeed: 3,
-        coinSize: 32,
-        goldenCoinChance: 0.1,
-        doubleCoinChance: 0.05,
-        shieldChance: 0.05,
-        magnetChance: 0.05,
-        timeBoostChance: 0.05,
-        bombDamagePercent: 40,
-        conversionTable: [
-          { coins: 100, rate: 0.01 },
-          { coins: 500, rate: 0.05 },
-          { coins: 1000, rate: 0.10 },
-          { coins: 5000, rate: 0.50 },
-          { coins: 10000, rate: 1.00 }
-        ]
-      };
 
       if (!enabled) {
         return res.json({ enabled: false, message: "Daily Bonus is currently disabled by administrator." });
@@ -3794,7 +3746,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         wheel: { count: 0, lastTime: null },
         box: { count: 0, lastTime: null },
         scratch: { count: 0, lastTime: null },
-        coinrain: { count: 0, lastTime: null },
         pendingRewards: {}
       };
 
@@ -3860,23 +3811,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         modules: {
           wheel: computeModuleStatus(wheelConfig, stateData.wheel),
           box: computeModuleStatus(boxConfig, stateData.box),
-          scratch: computeModuleStatus(scratchConfig, stateData.scratch),
-          coinrain: {
-            ...computeModuleStatus(coinrainConfig, stateData.coinrain),
-            duration: coinrainConfig.duration || 30,
-            coinSpawnRate: coinrainConfig.coinSpawnRate ?? 1.5,
-            bombSpawnRate: coinrainConfig.bombSpawnRate ?? 0.3,
-            coinSpeed: coinrainConfig.coinSpeed ?? 3,
-            bombSpeed: coinrainConfig.bombSpeed ?? 3,
-            coinSize: coinrainConfig.coinSize ?? 32,
-            goldenCoinChance: coinrainConfig.goldenCoinChance ?? 0.1,
-            doubleCoinChance: coinrainConfig.doubleCoinChance ?? 0.05,
-            shieldChance: coinrainConfig.shieldChance ?? 0.05,
-            magnetChance: coinrainConfig.magnetChance ?? 0.05,
-            timeBoostChance: coinrainConfig.timeBoostChance ?? 0.05,
-            bombDamagePercent: coinrainConfig.bombDamagePercent ?? 40,
-            conversionTable: coinrainConfig.conversionTable || []
-          }
+          scratch: computeModuleStatus(scratchConfig, stateData.scratch)
         },
         pendingRewards: stateData.pendingRewards || {},
         currency
@@ -4058,7 +3993,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         });
 
         // Update Statistics
-        const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : type === "scratch" ? "scratchRewards" : "coinrainRewards";
+        const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : "scratchRewards";
         transaction.set(statsRef, { 
           [rewardField]: increment(rewardAmount),
           totalClaims: increment(1),
@@ -4124,213 +4059,601 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  // Coin Rain Endpoints
-  app.post("/api/daily-bonus/coinrain/start", async (req, res) => {
+  // 🎁 PREMIUM PROMO REWARD SYSTEM ENDPOINTS
+  
+  // Helpers
+  function isPromoActive(startDate: string, startTime: string, expiryDate: string, expiryTime: string): boolean {
+    const now = new Date();
+    const startStr = `${startDate}T${startTime || "00:00"}:00`;
+    const expiryStr = `${expiryDate}T${expiryTime || "23:59"}:00`;
+    const start = new Date(startStr);
+    const expiry = new Date(expiryStr);
+    if (isNaN(start.getTime()) || isNaN(expiry.getTime())) {
+      return true;
+    }
+    return now >= start && now <= expiry;
+  }
+
+  async function checkTelegramJoin(botToken: string, chatId: string, telegramId: string): Promise<boolean> {
     try {
-      const { userId } = req.body;
+      if (!chatId || !telegramId) return true;
+      const formattedChatId = chatId.startsWith("@") ? chatId : `@${chatId}`;
+      const res = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${formattedChatId}&user_id=${telegramId}`);
+      const data = await res.json();
+      if (data.ok && data.result) {
+        const status = data.result.status;
+        return ["creator", "administrator", "member", "restricted"].includes(status);
+      }
+      return false;
+    } catch (e) {
+      console.error(`Telegram check failed for chat ${chatId}:`, e);
+      return true; // fallback
+    }
+  }
+
+  // Get Status and settings
+  app.get("/api/promo/status", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
       if (!userId) return res.status(400).json({ error: "Missing userId" });
 
-      const settingsSnap = await getDoc(doc(db, "settings", "daily_bonus"));
-      if (!settingsSnap.exists()) return res.status(500).json({ error: "Daily Bonus settings not found" });
-      const settings = settingsSnap.data();
-
-      const coinrainConfig = settings.coinrain || {
-        enabled: true,
-        dailyLimit: 2,
-        cooldown: 0,
-        duration: 30
-      };
-
-      if (!coinrainConfig.enabled) {
-        return res.status(400).json({ error: "Coin Rain is currently disabled" });
-      }
-
-      const stateDocRef = doc(db, "daily_bonus_state", userId);
-      const stateSnap = await getDoc(stateDocRef);
-      if (!stateSnap.exists()) return res.status(404).json({ error: "Daily Bonus state not found" });
-      const stateData = stateSnap.data();
-
-      // Check daily limit and cooldown
-      const usage = stateData.coinrain || { count: 0, lastTime: null };
-      if (usage.count >= coinrainConfig.dailyLimit) {
-        return res.status(400).json({ error: "Daily limit reached for Coin Rain" });
-      }
-
-      if (usage.lastTime && coinrainConfig.cooldown > 0) {
-        const lastTime = new Date(usage.lastTime).getTime();
-        const now = Date.now();
-        const diffMinutes = (now - lastTime) / (1000 * 60);
-        if (diffMinutes < coinrainConfig.cooldown) {
-          return res.status(400).json({ error: `Please wait ${Math.ceil(coinrainConfig.cooldown - diffMinutes)} more minutes.` });
-        }
-      }
-
-      // Generate secure session ID
-      const sessionId = "coinrain_" + Math.random().toString(36).substring(2, 11);
+      const settingsDocRef = doc(db, "settings", "promo_rewards");
+      let settingsSnap = await getDoc(settingsDocRef);
       
-      // Update session in DB to prevent multiple tabs/replays
-      await updateDoc(stateDocRef, {
-        activeCoinRainSession: {
-          sessionId,
-          startTime: Date.now(),
-          isFinished: false
-        }
-      });
-
-      return res.json({
-        success: true,
-        sessionId,
-        config: coinrainConfig
-      });
-    } catch (e: any) {
-      console.error("Error in /api/daily-bonus/coinrain/start:", e);
-      res.status(500).json({ error: e.message || "Server error" });
-    }
-  });
-
-  app.post("/api/daily-bonus/coinrain/finish", async (req, res) => {
-    try {
-      const { 
-        userId, 
-        sessionId, 
-        score, 
-        bombHits, 
-        powerupsUsed, 
-        duration, 
-        tapsCount,
-        totalCoinsCollected,
-        goldenCoinsCollected,
-        coinsLostByBombs,
-        finalScore
-      } = req.body;
-      if (!userId || !sessionId) return res.status(400).json({ error: "Missing parameters" });
-
-      const settingsSnap = await getDoc(doc(db, "settings", "daily_bonus"));
-      if (!settingsSnap.exists()) return res.status(500).json({ error: "Daily Bonus settings not found" });
-      const settings = settingsSnap.data();
-      const coinrainConfig = settings.coinrain || {
+      const defaultSettings = {
         enabled: true,
-        dailyLimit: 2,
-        cooldown: 0,
-        duration: 30,
-        conversionTable: []
+        adsterraBannerCode: "",
+        monetagAdCode: "",
+        expiryMinutes: 120,
+        expiryEnabled: false,
+        pageOpenedCount: 0,
+        pageUnlockedCount: 0,
+        wrongAccessCount: 0,
+        successClaimCount: 0,
+        failedClaimCount: 0,
+        budgetUsed: 0,
+        uniqueUsersCount: 0,
+        tgChannelUrl: "https://t.me/royshare_official",
+        tgChannelEnabled: true,
+        tgGroupUrl: "https://t.me/royshare_chat",
+        tgGroupEnabled: true,
+        instagramUrl: "https://www.instagram.com/royshare_official",
+        instagramEnabled: true,
+        facebookUrl: "https://www.facebook.com/profile.php?id=61591256922373",
+        facebookEnabled: true,
+        youtubeUrl: "https://youtube.com/@royshare",
+        youtubeEnabled: true,
+        discordUrl: "https://discord.gg/2Q2CSmFk",
+        discordEnabled: true,
+        twitterUrl: "https://x.com/RoyShare_0",
+        twitterEnabled: true
       };
 
-      const stateDocRef = doc(db, "daily_bonus_state", userId);
-      const stateSnap = await getDoc(stateDocRef);
-      if (!stateSnap.exists()) return res.status(404).json({ error: "State not found" });
-      const stateData = stateSnap.data();
-
-      const session = stateData.activeCoinRainSession;
-      if (!session || session.sessionId !== sessionId || session.isFinished) {
-        return res.status(400).json({ error: "Invalid, duplicate, or expired game session." });
+      if (!settingsSnap.exists()) {
+        await setDoc(settingsDocRef, defaultSettings);
+        settingsSnap = await getDoc(settingsDocRef);
       }
 
-      // Check elapsed time
-      const elapsedSeconds = (Date.now() - session.startTime) / 1000;
-      const configuredDuration = Number(duration) || coinrainConfig.duration || 30;
+      const settingsData = { ...defaultSettings, ...settingsSnap.data() };
 
-      // 1. Speed Hack: if client finishes too fast
-      if (elapsedSeconds < configuredDuration - 3) {
-        return res.status(400).json({ error: "Game session ended too fast (Speed Hack / Cheat detected)" });
-      }
-
-      // 2. Expiration: if client finishes too slow (e.g. they paused the tab or manipulated timing)
-      if (elapsedSeconds > configuredDuration + 15) {
-        return res.status(400).json({ error: "Game session expired (Timing verification failed)" });
-      }
-
-      // 3. Auto Clicker / Macro: if clicks/taps count vs duration is physically impossible (CPS > 20)
-      if (tapsCount && tapsCount / configuredDuration > 20) {
-        return res.status(400).json({ error: "High click rate detected (Auto Clicker / Macro block)" });
-      }
-
-      // 4. Score Limit Verification
-      const baseCoinRate = Number(coinrainConfig.coinSpawnRate) || 1.5;
-      const maxPossibleScore = baseCoinRate * configuredDuration * 12; // extremely generous buffer
-      if (Number(score) > maxPossibleScore || Number(score) < 0) {
-        return res.status(400).json({ error: "Score verification failed (Modified score detected)" });
-      }
-
-      // Calculate money reward
-      let rewardAmount = 0;
-      const table = coinrainConfig.conversionTable || [];
-      if (table.length > 0) {
-        const sortedTable = [...table].sort((a: any, b: any) => a.coins - b.coins);
-        let activeTier = null;
-        for (const tier of sortedTable) {
-          if (score >= tier.coins) {
-            activeTier = tier;
-          }
-        }
-        if (activeTier) {
-          rewardAmount = score * (Number(activeTier.rate) / Number(activeTier.coins));
-        } else {
-          const lowest = sortedTable[0];
-          rewardAmount = score * (Number(lowest.rate) / Number(lowest.coins));
-        }
-      } else {
-        rewardAmount = score * 0.0001;
-      }
-
-      // Round to 2 decimal places
-      rewardAmount = Math.round(rewardAmount * 100) / 100;
-
-      const now = new Date().toISOString();
-      const usageCount = (stateData.coinrain?.count || 0) + 1;
-
-      await updateDoc(stateDocRef, {
-        coinrain: {
-          count: usageCount,
-          lastTime: now
-        },
-        pendingRewards: {
-          ...(stateData.pendingRewards || {}),
-          coinrain: {
-            amount: rewardAmount,
-            label: `₹${rewardAmount.toFixed(2)}`,
-            timestamp: now,
-            claimed: rewardAmount === 0,
-            coinsCollected: score,
-            bombHits: bombHits || 0,
-            powerupsUsed: powerupsUsed || 0,
-            totalCoinsCollected: totalCoinsCollected || 0,
-            goldenCoinsCollected: goldenCoinsCollected || 0,
-            coinsLostByBombs: coinsLostByBombs || 0,
-            finalScore: finalScore || score
-          }
-        },
-        activeCoinRainSession: null // reset session
+      // Increment Page Opened Count
+      await updateDoc(settingsDocRef, {
+        pageOpenedCount: increment(1)
       });
 
-      // Update statistics
-      try {
-        const today = new Date().toISOString().split("T")[0];
-        const statsRef = doc(db, "daily_bonus_stats", today);
-        const statsSnap = await getDoc(statsRef);
-        if (!statsSnap.exists()) {
-          await setDoc(statsRef, { date: today, uniqueUsers: 1, totalClaims: 0, totalRewards: 0 });
+      // Fetch user profile
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.exists() ? userSnap.data() : null;
+
+      // Check for active session
+      const sessionRef = doc(db, "promo_sessions", userId);
+      const sessionSnap = await getDoc(sessionRef);
+      let unlocked = false;
+      let session = null;
+
+      if (sessionSnap.exists()) {
+        const sData = sessionSnap.data();
+        const expiresAt = new Date(sData.expiresAt);
+        if (expiresAt > new Date()) {
+          unlocked = true;
+          session = sData;
         }
-        await updateDoc(statsRef, {
-          totalCoinRains: increment(1),
-          coinRainRewards: increment(rewardAmount)
-        });
-      } catch (statErr) {
-        console.error("Error updating stats for Coin Rain finish:", statErr);
       }
 
-      return res.json({
+      res.json({
         success: true,
-        rewardAmount,
-        coinsCollected: score,
-        bombHits,
-        powerupsUsed
+        settings: settingsData,
+        user: userData,
+        unlocked,
+        session
       });
+
     } catch (e: any) {
-      console.error("Error in /api/daily-bonus/coinrain/finish:", e);
+      console.error("Error in GET /api/promo/status:", e);
       res.status(500).json({ error: e.message || "Server error" });
     }
   });
+
+  // Unlock Promo page
+  app.post("/api/promo/unlock", async (req, res) => {
+    try {
+      const { userId, accessCode } = req.body;
+      if (!userId || !accessCode) return res.status(400).json({ error: "Missing parameters" });
+
+      const settingsDocRef = doc(db, "settings", "promo_rewards");
+      const settingsSnap = await getDoc(settingsDocRef);
+      const expiryMinutes = settingsSnap.exists() ? (settingsSnap.data()?.expiryMinutes ?? 120) : 120;
+
+      // Fetch the access code
+      const codeRef = doc(db, "promo_access_codes", accessCode.toUpperCase());
+      const codeSnap = await getDoc(codeRef);
+
+      if (!codeSnap.exists() || !codeSnap.data().enabled) {
+        await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
+        return res.status(400).json({ success: false, error: "Invalid Access Code. Please try again." });
+      }
+
+      const codeData = codeSnap.data();
+      
+      // Verify start / end dates
+      if (!isPromoActive(codeData.startDate, codeData.startTime, codeData.expiryDate, codeData.expiryTime)) {
+        await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
+        return res.status(400).json({ success: false, error: "This Access Code has expired or is not yet active." });
+      }
+
+      // Verify max users limits
+      if (codeData.maxUsers && codeData.usedCount >= codeData.maxUsers) {
+        await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
+        return res.status(400).json({ success: false, error: "This Access Code has reached its maximum user limit." });
+      }
+
+      // Create Session
+      const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
+      const sessionRef = doc(db, "promo_sessions", userId);
+      await setDoc(sessionRef, {
+        userId,
+        accessCode: accessCode.toUpperCase(),
+        unlockedAt: new Date().toISOString(),
+        expiresAt
+      });
+
+      // Update analytics
+      await updateDoc(settingsDocRef, { pageUnlockedCount: increment(1) });
+
+      res.json({
+        success: true,
+        expiresAt
+      });
+
+    } catch (e: any) {
+      console.error("Error in POST /api/promo/unlock:", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // Redeem Promo reward
+  app.post("/api/promo/redeem", async (req, res) => {
+    try {
+      const { userId, promoCode } = req.body;
+      if (!userId || !promoCode) return res.status(400).json({ error: "Missing parameters" });
+
+      const codeUpper = promoCode.toUpperCase();
+      const settingsDocRef = doc(db, "settings", "promo_rewards");
+
+      // Verify Session exists and is active
+      const sessionRef = doc(db, "promo_sessions", userId);
+      const sessionSnap = await getDoc(sessionRef);
+      if (!sessionSnap.exists()) {
+        return res.status(400).json({ error: "Your access session has expired or is not active." });
+      }
+      const sData = sessionSnap.data();
+      if (new Date(sData.expiresAt) < new Date()) {
+        return res.status(400).json({ error: "Your access session has expired. Please unlock again." });
+      }
+
+      // Check original Access Code
+      const accessCodeRef = doc(db, "promo_access_codes", sData.accessCode);
+      const accessSnap = await getDoc(accessCodeRef);
+      if (!accessSnap.exists() || !accessSnap.data().enabled) {
+        return res.status(400).json({ error: "The associated Access Code is no longer active." });
+      }
+
+      // Fetch Telegram configs for task validation
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        return res.status(400).json({ error: "User profile not found." });
+      }
+      const userData = userSnap.data();
+      const tgUserId = userData.telegramId || "";
+
+      // Validate Telegram Group & Channel joins if bot token and configurations are active
+      if (tgSettingsSnap.exists()) {
+        const { botToken, channelUsername, groupUsername } = tgSettingsSnap.data();
+        if (botToken) {
+          const promoSettingsSnap = await getDoc(settingsDocRef);
+          if (promoSettingsSnap.exists()) {
+            const ps = promoSettingsSnap.data();
+            
+            // Check Channel Join
+            if (ps.tgChannelEnabled && channelUsername) {
+              if (!tgUserId) return res.status(400).json({ error: "Please link your Telegram ID to verify Channel subscription." });
+              const joined = await checkTelegramJoin(botToken, channelUsername, tgUserId);
+              if (!joined) return res.status(400).json({ error: `Please join our Telegram Channel (${channelUsername}) first!` });
+            }
+
+            // Check Group Join
+            if (ps.tgGroupEnabled && groupUsername) {
+              if (!tgUserId) return res.status(400).json({ error: "Please link your Telegram ID to verify Group membership." });
+              const joined = await checkTelegramJoin(botToken, groupUsername, tgUserId);
+              if (!joined) return res.status(400).json({ error: `Please join our Telegram Chat Group (${groupUsername}) first!` });
+            }
+          }
+        }
+      }
+
+      let rewardAmount = 0;
+      const today = new Date().toISOString().split("T")[0];
+      const todayTime = new Date().toLocaleTimeString();
+
+      // Start transaction to verify limits and credit reward
+      await runTransaction(db, async (transaction) => {
+        // 1. Promo code
+        const promoRef = doc(db, "promo_codes", codeUpper);
+        const promoSnap = await transaction.get(promoRef);
+        if (!promoSnap.exists() || !promoSnap.data().enabled) {
+          throw new Error("Invalid or inactive promo code.");
+        }
+        const promoData = promoSnap.data();
+
+        // 2. Date ranges
+        if (!isPromoActive(promoData.startDate, promoData.startTime, promoData.expiryDate, promoData.expiryTime)) {
+          throw new Error("This promo code has expired or is not active yet.");
+        }
+
+        // 3. Max Users
+        if (promoData.maxUsers && promoData.usedCount >= promoData.maxUsers) {
+          throw new Error("This promo code has reached its maximum claim limit.");
+        }
+
+        // 4. Budget
+        rewardAmount = Number(promoData.rewardAmount || 0);
+        const totalBudget = Number(promoData.totalBudget || 0);
+        const currentBudgetUsed = Number(promoData.budgetUsed || 0);
+        if (currentBudgetUsed + rewardAmount > totalBudget) {
+          throw new Error("This promo code has run out of its allocated budget.");
+        }
+
+        // 5. Already Claimed Check
+        const claimRef = doc(db, "promo_claims", `${userId}_${codeUpper}`);
+        const claimSnap = await transaction.get(claimRef);
+        if (claimSnap.exists() && claimSnap.data().status === "Success") {
+          throw new Error("You have already claimed this promo code!");
+        }
+
+        // 6. Access Code limit increment
+        transaction.update(accessCodeRef, { usedCount: increment(1) });
+
+        // 7. Promo Code counts
+        transaction.update(promoRef, {
+          usedCount: increment(1),
+          budgetUsed: increment(rewardAmount)
+        });
+
+        // 8. User Wallets
+        transaction.update(userRef, {
+          bonusBalance: increment(rewardAmount),
+          availableBalance: increment(rewardAmount),
+          earnings: increment(rewardAmount)
+        });
+
+        // 9. Analytics in settings
+        transaction.update(settingsDocRef, {
+          successClaimCount: increment(1),
+          budgetUsed: increment(rewardAmount)
+        });
+
+        // 10. Unique User Tracking
+        const userStatsRef = doc(db, "promo_user_stats", userId);
+        const userStatsSnap = await transaction.get(userStatsRef);
+        let isNewUnique = false;
+        if (!userStatsSnap.exists()) {
+          isNewUnique = true;
+          transaction.set(userStatsRef, {
+            claimedCount: 1,
+            firstClaimAt: new Date().toISOString()
+          });
+        } else {
+          transaction.update(userStatsRef, { claimedCount: increment(1) });
+        }
+
+        if (isNewUnique) {
+          transaction.update(settingsDocRef, { uniqueUsersCount: increment(1) });
+        }
+
+        // 11. Write Success Claim
+        transaction.set(claimRef, {
+          userId,
+          username: userData.name || userData.username || "User",
+          telegramId: tgUserId,
+          promoCode: codeUpper,
+          rewardAmount,
+          status: "Success",
+          date: today,
+          time: todayTime,
+          createdAt: new Date().toISOString()
+        });
+      });
+
+      // Send Telegram notification
+      try {
+        if (tgSettingsSnap.exists()) {
+          const { botToken, rewardChannelId } = tgSettingsSnap.data();
+          if (botToken) {
+            const userName = userData.name || userData.username || "User";
+            const message = `🎁 *Premium Promo Code Redeemed!*\n\n👤 *User:* ${userName}\n🎟 *Promo Code:* \`${codeUpper}\`\n💰 *Reward:* ₹${rewardAmount.toFixed(2)}\n📅 *Date:* ${today} | ${todayTime}\n\nBalance updated instantly! 🥳`;
+            
+            if (rewardChannelId) {
+              await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chat_id: rewardChannelId, text: message, parse_mode: "Markdown" })
+              });
+            }
+            if (tgUserId) {
+              await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chat_id: tgUserId, text: message, parse_mode: "Markdown" })
+              });
+            }
+          }
+        }
+      } catch (tgErr) {
+        console.error("Error sending TG notification for promo reward:", tgErr);
+      }
+
+      res.json({
+        success: true,
+        promoCode: codeUpper,
+        rewardAmount
+      });
+
+    } catch (e: any) {
+      console.error("Error in POST /api/promo/redeem:", e);
+      const settingsDocRef = doc(db, "settings", "promo_rewards");
+      await updateDoc(settingsDocRef, { failedClaimCount: increment(1) }).catch(() => {});
+      res.status(400).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // Get User claims history
+  app.get("/api/promo/claims", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
+      if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+      const claimsRef = collection(db, "promo_claims");
+      const q = query(claimsRef, where("userId", "==", userId), limit(50));
+      const snap = await getDocs(q);
+      
+      const claims: any[] = [];
+      snap.forEach((doc) => {
+        claims.push({ id: doc.id, ...doc.data() });
+      });
+
+      // Sort by date/time descending on backend if timestamp is there
+      claims.sort((a, b) => {
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      });
+
+      res.json({
+        success: true,
+        claims
+      });
+
+    } catch (e: any) {
+      console.error("Error in GET /api/promo/claims:", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+
+  // 🎁 ADMIN PROMO REWARD SYSTEM ENDPOINTS
+  
+  // Get Promo settings
+  app.get("/api/admin/promo/settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "promo_rewards");
+      const snap = await getDoc(docRef);
+      res.json({ success: true, settings: snap.exists() ? snap.data() : {} });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Update Promo settings
+  app.put("/api/admin/promo/settings", async (req, res) => {
+    try {
+      const docRef = doc(db, "settings", "promo_rewards");
+      await setDoc(docRef, req.body, { merge: true });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Get Access Codes
+  app.get("/api/admin/promo/access-codes", async (req, res) => {
+    try {
+      const ref = collection(db, "promo_access_codes");
+      const snap = await getDocs(ref);
+      const codes: any[] = [];
+      snap.forEach((doc) => {
+        codes.push({ id: doc.id, ...doc.data() });
+      });
+      res.json({ success: true, codes });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Create Access Code
+  app.post("/api/admin/promo/access-codes", async (req, res) => {
+    try {
+      const { code, startDate, startTime, expiryDate, expiryTime, maxUsers, enabled } = req.body;
+      if (!code) return res.status(400).json({ error: "Code is required" });
+
+      const codeUpper = code.toUpperCase();
+      const docRef = doc(db, "promo_access_codes", codeUpper);
+      
+      await setDoc(docRef, {
+        code: codeUpper,
+        startDate: startDate || "",
+        startTime: startTime || "",
+        expiryDate: expiryDate || "",
+        expiryTime: expiryTime || "",
+        maxUsers: maxUsers ? Number(maxUsers) : 0,
+        usedCount: 0,
+        enabled: enabled ?? true,
+        createdAt: new Date().toISOString()
+      });
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Delete Access Code
+  app.delete("/api/admin/promo/access-codes/:id", async (req, res) => {
+    try {
+      await deleteDoc(doc(db, "promo_access_codes", req.params.id));
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Toggle Access Code
+  app.put("/api/admin/promo/access-codes/:id", async (req, res) => {
+    try {
+      const ref = doc(db, "promo_access_codes", req.params.id);
+      await updateDoc(ref, { enabled: req.body.enabled });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Get Promos
+  app.get("/api/admin/promo/promos", async (req, res) => {
+    try {
+      const ref = collection(db, "promo_codes");
+      const snap = await getDocs(ref);
+      const promos: any[] = [];
+      snap.forEach((doc) => {
+        promos.push({ id: doc.id, ...doc.data() });
+      });
+      res.json({ success: true, promos });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Create Promo Code
+  app.post("/api/admin/promo/promos", async (req, res) => {
+    try {
+      const { name, code, rewardAmount, totalBudget, maxUsers, startDate, startTime, expiryDate, expiryTime, enabled } = req.body;
+      if (!name || !code || !rewardAmount || !totalBudget) {
+        return res.status(400).json({ error: "Missing required parameters" });
+      }
+
+      const codeUpper = code.toUpperCase();
+      const docRef = doc(db, "promo_codes", codeUpper);
+
+      await setDoc(docRef, {
+        name,
+        code: codeUpper,
+        rewardAmount: Number(rewardAmount),
+        totalBudget: Number(totalBudget),
+        budgetUsed: 0,
+        maxUsers: maxUsers ? Number(maxUsers) : 0,
+        usedCount: 0,
+        startDate: startDate || "",
+        startTime: startTime || "",
+        expiryDate: expiryDate || "",
+        expiryTime: expiryTime || "",
+        enabled: enabled ?? true,
+        createdAt: new Date().toISOString()
+      });
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Delete Promo Code
+  app.delete("/api/admin/promo/promos/:id", async (req, res) => {
+    try {
+      await deleteDoc(doc(db, "promo_codes", req.params.id));
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Toggle Promo Code
+  app.put("/api/admin/promo/promos/:id", async (req, res) => {
+    try {
+      const ref = doc(db, "promo_codes", req.params.id);
+      await updateDoc(ref, { enabled: req.body.enabled });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Get Analytics
+  app.get("/api/admin/promo/analytics", async (req, res) => {
+    try {
+      const settingsDocRef = doc(db, "settings", "promo_rewards");
+      const snap = await getDoc(settingsDocRef);
+      const data = snap.exists() ? snap.data() : {};
+
+      // Calculate total remaining budget across promos
+      const promosRef = collection(db, "promo_codes");
+      const promosSnap = await getDocs(promosRef);
+      let totalBudgetLimit = 0;
+      let totalBudgetSpent = 0;
+
+      promosSnap.forEach((doc) => {
+        const pd = doc.data();
+        totalBudgetLimit += Number(pd.totalBudget || 0);
+        totalBudgetSpent += Number(pd.budgetUsed || 0);
+      });
+
+      res.json({
+        success: true,
+        analytics: {
+          pageOpenedCount: data.pageOpenedCount || 0,
+          pageUnlockedCount: data.pageUnlockedCount || 0,
+          wrongAccessCount: data.wrongAccessCount || 0,
+          successClaimCount: data.successClaimCount || 0,
+          failedClaimCount: data.failedClaimCount || 0,
+          budgetUsed: data.budgetUsed || totalBudgetSpent,
+          remainingBudget: Math.max(0, totalBudgetLimit - totalBudgetSpent),
+          uniqueUsersCount: data.uniqueUsersCount || 0
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
 
   // Earn Rewards endpoints
   app.get("/api/earn-rewards/settings", async (req, res) => {

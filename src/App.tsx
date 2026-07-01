@@ -20,6 +20,7 @@ import MultiPageEngine from "./components/MultiPageEngine";
 
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const DailyBonusPage = lazy(() => import("./pages/DailyBonusPage"));
+const PromoRewardsPage = lazy(() => import("./pages/PromoRewardsPage"));
 const EarnRewardsPage = lazy(() => import("./pages/EarnRewardsPage"));
 const RewardTasksPage = lazy(() => import("./pages/RewardTasksPage"));
 const VerifyWithdrawalPage = lazy(() => import("./pages/VerifyWithdrawalPage"));
@@ -206,6 +207,10 @@ export default function App() {
 
     if (window.location.pathname === "/daily-bonus") {
       return <DailyBonusPage />;
+    }
+
+    if (window.location.pathname === "/promo-rewards") {
+      return <PromoRewardsPage />;
     }
 
     if (window.location.pathname === "/earn-rewards") {
