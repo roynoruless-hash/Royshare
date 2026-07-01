@@ -1515,6 +1515,30 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         wheel: { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] },
         box: { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] },
         scratch: { enabled: true, dailyLimit: 3, cooldown: 0, rewards: [] },
+        coinrain: {
+          enabled: true,
+          dailyLimit: 2,
+          cooldown: 0,
+          duration: 30,
+          coinSpawnRate: 1.5,
+          bombSpawnRate: 0.3,
+          coinSpeed: 3,
+          bombSpeed: 3,
+          coinSize: 32,
+          goldenCoinChance: 0.1,
+          doubleCoinChance: 0.05,
+          shieldChance: 0.05,
+          magnetChance: 0.05,
+          timeBoostChance: 0.05,
+          bombDamagePercent: 40,
+          conversionTable: [
+            { coins: 100, rate: 0.01 },
+            { coins: 500, rate: 0.05 },
+            { coins: 1000, rate: 0.10 },
+            { coins: 5000, rate: 0.50 },
+            { coins: 10000, rate: 1.00 }
+          ]
+        },
         totalSpins: 0,
         totalRewardsDistributed: 0,
       };
@@ -3723,6 +3747,30 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const wheelConfig = settings.wheel || { enabled: true, dailyLimit: 2, cooldown: 0, rewards: [] };
       const boxConfig = settings.box || { enabled: true, dailyLimit: 1, cooldown: 0, rewards: [] };
       const scratchConfig = settings.scratch || { enabled: true, dailyLimit: 3, cooldown: 0, rewards: [] };
+      const coinrainConfig = settings.coinrain || {
+        enabled: true,
+        dailyLimit: 2,
+        cooldown: 0,
+        duration: 30,
+        coinSpawnRate: 1.5,
+        bombSpawnRate: 0.3,
+        coinSpeed: 3,
+        bombSpeed: 3,
+        coinSize: 32,
+        goldenCoinChance: 0.1,
+        doubleCoinChance: 0.05,
+        shieldChance: 0.05,
+        magnetChance: 0.05,
+        timeBoostChance: 0.05,
+        bombDamagePercent: 40,
+        conversionTable: [
+          { coins: 100, rate: 0.01 },
+          { coins: 500, rate: 0.05 },
+          { coins: 1000, rate: 0.10 },
+          { coins: 5000, rate: 0.50 },
+          { coins: 10000, rate: 1.00 }
+        ]
+      };
 
       if (!enabled) {
         return res.json({ enabled: false, message: "Daily Bonus is currently disabled by administrator." });
@@ -3746,6 +3794,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         wheel: { count: 0, lastTime: null },
         box: { count: 0, lastTime: null },
         scratch: { count: 0, lastTime: null },
+        coinrain: { count: 0, lastTime: null },
         pendingRewards: {}
       };
 
@@ -3811,7 +3860,23 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         modules: {
           wheel: computeModuleStatus(wheelConfig, stateData.wheel),
           box: computeModuleStatus(boxConfig, stateData.box),
-          scratch: computeModuleStatus(scratchConfig, stateData.scratch)
+          scratch: computeModuleStatus(scratchConfig, stateData.scratch),
+          coinrain: {
+            ...computeModuleStatus(coinrainConfig, stateData.coinrain),
+            duration: coinrainConfig.duration || 30,
+            coinSpawnRate: coinrainConfig.coinSpawnRate ?? 1.5,
+            bombSpawnRate: coinrainConfig.bombSpawnRate ?? 0.3,
+            coinSpeed: coinrainConfig.coinSpeed ?? 3,
+            bombSpeed: coinrainConfig.bombSpeed ?? 3,
+            coinSize: coinrainConfig.coinSize ?? 32,
+            goldenCoinChance: coinrainConfig.goldenCoinChance ?? 0.1,
+            doubleCoinChance: coinrainConfig.doubleCoinChance ?? 0.05,
+            shieldChance: coinrainConfig.shieldChance ?? 0.05,
+            magnetChance: coinrainConfig.magnetChance ?? 0.05,
+            timeBoostChance: coinrainConfig.timeBoostChance ?? 0.05,
+            bombDamagePercent: coinrainConfig.bombDamagePercent ?? 40,
+            conversionTable: coinrainConfig.conversionTable || []
+          }
         },
         pendingRewards: stateData.pendingRewards || {},
         currency
@@ -3993,7 +4058,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         });
 
         // Update Statistics
-        const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : "scratchRewards";
+        const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : type === "scratch" ? "scratchRewards" : "coinrainRewards";
         transaction.set(statsRef, { 
           [rewardField]: increment(rewardAmount),
           totalClaims: increment(1),
@@ -4020,8 +4085,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         if (telegramSettingsSnap.exists()) {
           const { botToken, rewardChannelId } = telegramSettingsSnap.data();
           if (botToken && (rewardChannelId || tgUserId)) {
-            const emoji = type === "wheel" ? "🎡" : type === "box" ? "📦" : "🎫";
-            const typeLabel = type === "wheel" ? "Wheel Spin" : type === "box" ? "Mystery Box" : "Scratch Card";
+            const emoji = type === "wheel" ? "🎡" : type === "box" ? "📦" : type === "scratch" ? "🎫" : "🪙";
+            const typeLabel = type === "wheel" ? "Wheel Spin" : type === "box" ? "Mystery Box" : type === "scratch" ? "Scratch Card" : "Coin Rain";
             const message = `🎊 *Daily Bonus Claimed!*\n\n👤 *User:* ${userName}\n💰 *Reward:* ₹${rewardAmount.toFixed(2)}\n🎯 *Source:* ${emoji} ${typeLabel}\n📅 *Date:* ${new Date().toLocaleString()}\n\nCongratulations! 🥳`;
             
             if (rewardChannelId) {
@@ -4056,6 +4121,198 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     } catch (e: any) {
       console.error("Error in /api/daily-bonus/claim:", e);
       res.status(400).json({ error: e.message || "Server error" });
+    }
+  });
+
+  // Coin Rain Endpoints
+  app.post("/api/daily-bonus/coinrain/start", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+      const settingsSnap = await getDoc(doc(db, "settings", "daily_bonus"));
+      if (!settingsSnap.exists()) return res.status(500).json({ error: "Daily Bonus settings not found" });
+      const settings = settingsSnap.data();
+
+      const coinrainConfig = settings.coinrain || {
+        enabled: true,
+        dailyLimit: 2,
+        cooldown: 0,
+        duration: 30
+      };
+
+      if (!coinrainConfig.enabled) {
+        return res.status(400).json({ error: "Coin Rain is currently disabled" });
+      }
+
+      const stateDocRef = doc(db, "daily_bonus_state", userId);
+      const stateSnap = await getDoc(stateDocRef);
+      if (!stateSnap.exists()) return res.status(404).json({ error: "Daily Bonus state not found" });
+      const stateData = stateSnap.data();
+
+      // Check daily limit and cooldown
+      const usage = stateData.coinrain || { count: 0, lastTime: null };
+      if (usage.count >= coinrainConfig.dailyLimit) {
+        return res.status(400).json({ error: "Daily limit reached for Coin Rain" });
+      }
+
+      if (usage.lastTime && coinrainConfig.cooldown > 0) {
+        const lastTime = new Date(usage.lastTime).getTime();
+        const now = Date.now();
+        const diffMinutes = (now - lastTime) / (1000 * 60);
+        if (diffMinutes < coinrainConfig.cooldown) {
+          return res.status(400).json({ error: `Please wait ${Math.ceil(coinrainConfig.cooldown - diffMinutes)} more minutes.` });
+        }
+      }
+
+      // Generate secure session ID
+      const sessionId = "coinrain_" + Math.random().toString(36).substring(2, 11);
+      
+      // Update session in DB to prevent multiple tabs/replays
+      await updateDoc(stateDocRef, {
+        activeCoinRainSession: {
+          sessionId,
+          startTime: Date.now(),
+          isFinished: false
+        }
+      });
+
+      return res.json({
+        success: true,
+        sessionId,
+        config: coinrainConfig
+      });
+    } catch (e: any) {
+      console.error("Error in /api/daily-bonus/coinrain/start:", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
+  });
+
+  app.post("/api/daily-bonus/coinrain/finish", async (req, res) => {
+    try {
+      const { userId, sessionId, score, bombHits, powerupsUsed, duration, tapsCount } = req.body;
+      if (!userId || !sessionId) return res.status(400).json({ error: "Missing parameters" });
+
+      const settingsSnap = await getDoc(doc(db, "settings", "daily_bonus"));
+      if (!settingsSnap.exists()) return res.status(500).json({ error: "Daily Bonus settings not found" });
+      const settings = settingsSnap.data();
+      const coinrainConfig = settings.coinrain || {
+        enabled: true,
+        dailyLimit: 2,
+        cooldown: 0,
+        duration: 30,
+        conversionTable: []
+      };
+
+      const stateDocRef = doc(db, "daily_bonus_state", userId);
+      const stateSnap = await getDoc(stateDocRef);
+      if (!stateSnap.exists()) return res.status(404).json({ error: "State not found" });
+      const stateData = stateSnap.data();
+
+      const session = stateData.activeCoinRainSession;
+      if (!session || session.sessionId !== sessionId || session.isFinished) {
+        return res.status(400).json({ error: "Invalid, duplicate, or expired game session." });
+      }
+
+      // Check elapsed time
+      const elapsedSeconds = (Date.now() - session.startTime) / 1000;
+      const configuredDuration = Number(duration) || coinrainConfig.duration || 30;
+
+      // 1. Speed Hack: if client finishes too fast
+      if (elapsedSeconds < configuredDuration - 3) {
+        return res.status(400).json({ error: "Game session ended too fast (Speed Hack / Cheat detected)" });
+      }
+
+      // 2. Expiration: if client finishes too slow (e.g. they paused the tab or manipulated timing)
+      if (elapsedSeconds > configuredDuration + 15) {
+        return res.status(400).json({ error: "Game session expired (Timing verification failed)" });
+      }
+
+      // 3. Auto Clicker / Macro: if clicks/taps count vs duration is physically impossible (CPS > 20)
+      if (tapsCount && tapsCount / configuredDuration > 20) {
+        return res.status(400).json({ error: "High click rate detected (Auto Clicker / Macro block)" });
+      }
+
+      // 4. Score Limit Verification
+      const baseCoinRate = Number(coinrainConfig.coinSpawnRate) || 1.5;
+      const maxPossibleScore = baseCoinRate * configuredDuration * 12; // extremely generous buffer
+      if (Number(score) > maxPossibleScore || Number(score) < 0) {
+        return res.status(400).json({ error: "Score verification failed (Modified score detected)" });
+      }
+
+      // Calculate money reward
+      let rewardAmount = 0;
+      const table = coinrainConfig.conversionTable || [];
+      if (table.length > 0) {
+        const sortedTable = [...table].sort((a: any, b: any) => a.coins - b.coins);
+        let activeTier = null;
+        for (const tier of sortedTable) {
+          if (score >= tier.coins) {
+            activeTier = tier;
+          }
+        }
+        if (activeTier) {
+          rewardAmount = score * (Number(activeTier.rate) / Number(activeTier.coins));
+        } else {
+          const lowest = sortedTable[0];
+          rewardAmount = score * (Number(lowest.rate) / Number(lowest.coins));
+        }
+      } else {
+        rewardAmount = score * 0.0001;
+      }
+
+      // Round to 2 decimal places
+      rewardAmount = Math.round(rewardAmount * 100) / 100;
+
+      const now = new Date().toISOString();
+      const usageCount = (stateData.coinrain?.count || 0) + 1;
+
+      await updateDoc(stateDocRef, {
+        coinrain: {
+          count: usageCount,
+          lastTime: now
+        },
+        pendingRewards: {
+          ...(stateData.pendingRewards || {}),
+          coinrain: {
+            amount: rewardAmount,
+            label: `₹${rewardAmount.toFixed(2)}`,
+            timestamp: now,
+            claimed: rewardAmount === 0,
+            coinsCollected: score,
+            bombHits: bombHits || 0,
+            powerupsUsed: powerupsUsed || 0
+          }
+        },
+        activeCoinRainSession: null // reset session
+      });
+
+      // Update statistics
+      try {
+        const today = new Date().toISOString().split("T")[0];
+        const statsRef = doc(db, "daily_bonus_stats", today);
+        const statsSnap = await getDoc(statsRef);
+        if (!statsSnap.exists()) {
+          await setDoc(statsRef, { date: today, uniqueUsers: 1, totalClaims: 0, totalRewards: 0 });
+        }
+        await updateDoc(statsRef, {
+          totalCoinRains: increment(1),
+          coinRainRewards: increment(rewardAmount)
+        });
+      } catch (statErr) {
+        console.error("Error updating stats for Coin Rain finish:", statErr);
+      }
+
+      return res.json({
+        success: true,
+        rewardAmount,
+        coinsCollected: score,
+        bombHits,
+        powerupsUsed
+      });
+    } catch (e: any) {
+      console.error("Error in /api/daily-bonus/coinrain/finish:", e);
+      res.status(500).json({ error: e.message || "Server error" });
     }
   });
 

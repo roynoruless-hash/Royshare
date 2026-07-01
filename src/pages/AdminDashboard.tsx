@@ -65,7 +65,7 @@ export default function AdminDashboard() {
   const [bonusSettingsLoading, setBonusSettingsLoading] = useState(false);
   const [bonusHistory, setBonusHistory] = useState<any[]>([]);
   const [bonusHistoryLoading, setBonusHistoryLoading] = useState(false);
-  const [bonusView, setBonusView] = useState<'settings' | 'wheel-rewards' | 'box-rewards' | 'scratch-rewards' | 'stats' | 'history'>('settings');
+  const [bonusView, setBonusView] = useState<'settings' | 'wheel-rewards' | 'box-rewards' | 'scratch-rewards' | 'coinrain-rewards' | 'stats' | 'history'>('settings');
   const [bonusSearch, setBonusSearch] = useState("");
   const [dailyBonusStats, setDailyBonusStats] = useState<any>(null);
   const [dailyBonusStatsLoading, setDailyBonusStatsLoading] = useState(false);
@@ -1637,7 +1637,7 @@ export default function AdminDashboard() {
         fetchTaskLogs();
       }
     } else if (activeTab === '🎁 Daily Bonus') {
-      if (['settings', 'wheel-rewards', 'box-rewards', 'scratch-rewards', 'stats'].includes(bonusView)) {
+      if (['settings', 'wheel-rewards', 'box-rewards', 'scratch-rewards', 'coinrain-rewards', 'stats'].includes(bonusView)) {
         fetchBonusSettings();
       }
       if (bonusView === 'history') {
@@ -2726,6 +2726,7 @@ export default function AdminDashboard() {
                   <button onClick={() => setBonusView('wheel-rewards')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'wheel-rewards' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🎡 Wheel</button>
                   <button onClick={() => setBonusView('box-rewards')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'box-rewards' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📦 Box</button>
                   <button onClick={() => setBonusView('scratch-rewards')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'scratch-rewards' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🎫 Scratch</button>
+                  <button onClick={() => setBonusView('coinrain-rewards')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'coinrain-rewards' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>🪙 Coin Rain</button>
                   <button onClick={() => setBonusView('stats')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'stats' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 Stats</button>
                   <button onClick={() => setBonusView('history')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${bonusView === 'history' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📜 History</button>
                   <button onClick={() => { 
@@ -2762,8 +2763,8 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {['wheel', 'box', 'scratch'].map((type) => (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    {['wheel', 'box', 'scratch', 'coinrain'].map((type) => (
                       <div key={type} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
                         <div className="p-4 bg-slate-950/50 border-b border-slate-800 flex items-center justify-between">
                           <h4 className="font-bold text-white capitalize">{type} Module</h4>
@@ -3003,6 +3004,286 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                   )}
+                </div>
+              ) : bonusView === 'coinrain-rewards' && bonusSettings ? (
+                <div className="space-y-6 animate-fade-in">
+                  {/* Coin Rain Settings Card */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
+                    <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+                      <div>
+                        <h3 className="text-lg font-black text-white flex items-center gap-2">🪙 Coin Rain Configuration</h3>
+                        <p className="text-xs text-slate-500 mt-1">Configure difficulty multipliers, durations, spawns, and conversion rates.</p>
+                      </div>
+                      <span className="bg-emerald-500/10 text-emerald-400 font-bold text-xs px-3 py-1.5 rounded-full border border-emerald-500/20">Active Session Secure</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">⏱ Game Duration (Seconds)</label>
+                        <input 
+                          type="number" 
+                          min="5" 
+                          max="300"
+                          value={bonusSettings.coinrain?.duration ?? 30} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, duration: parseInt(e.target.value) || 30 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">🪙 Coin Spawn Rate (Per Sec)</label>
+                        <input 
+                          type="number" 
+                          step="0.1"
+                          min="0.1" 
+                          max="10"
+                          value={bonusSettings.coinrain?.coinSpawnRate ?? 1.5} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, coinSpawnRate: parseFloat(e.target.value) || 1.5 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">💣 Bomb Spawn Rate (Per Sec)</label>
+                        <input 
+                          type="number" 
+                          step="0.1"
+                          min="0" 
+                          max="10"
+                          value={bonusSettings.coinrain?.bombSpawnRate ?? 0.3} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, bombSpawnRate: parseFloat(e.target.value) || 0.3 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">🚀 Coin Falling Speed</label>
+                        <input 
+                          type="number" 
+                          step="0.5"
+                          min="1" 
+                          max="20"
+                          value={bonusSettings.coinrain?.coinSpeed ?? 3} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, coinSpeed: parseFloat(e.target.value) || 3 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">💥 Bomb Falling Speed</label>
+                        <input 
+                          type="number" 
+                          step="0.5"
+                          min="1" 
+                          max="20"
+                          value={bonusSettings.coinrain?.bombSpeed ?? 3} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, bombSpeed: parseFloat(e.target.value) || 3 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">📐 Coin Size (Pixels)</label>
+                        <input 
+                          type="number" 
+                          min="16" 
+                          max="128"
+                          value={bonusSettings.coinrain?.coinSize ?? 32} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, coinSize: parseInt(e.target.value) || 32 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">🌟 Golden Coin Chance (0-1)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          min="0" 
+                          max="1"
+                          value={bonusSettings.coinrain?.goldenCoinChance ?? 0.1} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, goldenCoinChance: parseFloat(e.target.value) || 0.1 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">⭐ Double Coin Chance (0-1)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          min="0" 
+                          max="1"
+                          value={bonusSettings.coinrain?.doubleCoinChance ?? 0.05} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, doubleCoinChance: parseFloat(e.target.value) || 0.05 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">🛡 Shield Power-up Chance (0-1)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          min="0" 
+                          max="1"
+                          value={bonusSettings.coinrain?.shieldChance ?? 0.05} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, shieldChance: parseFloat(e.target.value) || 0.05 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">🧲 Magnet Power-up Chance (0-1)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          min="0" 
+                          max="1"
+                          value={bonusSettings.coinrain?.magnetChance ?? 0.05} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, magnetChance: parseFloat(e.target.value) || 0.05 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">⏱ Time Boost Chance (0-1)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          min="0" 
+                          max="1"
+                          value={bonusSettings.coinrain?.timeBoostChance ?? 0.05} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, timeBoostChance: parseFloat(e.target.value) || 0.05 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black uppercase text-slate-400 mb-1.5">⚡ Bomb Damage % (Default 40%)</label>
+                        <input 
+                          type="number" 
+                          min="0" 
+                          max="100"
+                          value={bonusSettings.coinrain?.bombDamagePercent ?? 40} 
+                          onChange={e => setBonusSettings({
+                            ...bonusSettings, 
+                            coinrain: { ...bonusSettings.coinrain, bombDamagePercent: parseInt(e.target.value) || 40 }
+                          })} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white font-bold text-sm" 
+                        />
+                      </div>
+                    </div>
+
+                    {/* Conversion Table Section */}
+                    <div className="mt-8 border-t border-slate-800 pt-6">
+                      <h4 className="text-md font-bold text-white mb-2">🪙 Coin to Money Conversion Table</h4>
+                      <p className="text-xs text-slate-500 mb-4">Set thresholds to convert collected coins to real money in ₹. Tiers will be computed proportionally.</p>
+                      
+                      <div className="grid gap-3 mb-6 max-w-2xl">
+                        {((bonusSettings.coinrain?.conversionTable) || []).map((row: any, idx: number) => (
+                          <div key={idx} className="flex gap-4 items-center bg-slate-950/40 p-3 rounded-2xl border border-slate-800">
+                            <span className="text-xs font-bold text-slate-500 font-mono w-14">Tier {idx + 1}</span>
+                            <div className="flex-1">
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Coins Collected</label>
+                              <input 
+                                type="number" 
+                                placeholder="Coins" 
+                                value={row.coins} 
+                                onChange={e => {
+                                  const tbl = [...(bonusSettings.coinrain?.conversionTable || [])];
+                                  tbl[idx].coins = parseInt(e.target.value) || 0;
+                                  setBonusSettings({...bonusSettings, coinrain: { ...bonusSettings.coinrain, conversionTable: tbl }});
+                                }} 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-bold" 
+                              />
+                            </div>
+                            <span className="text-slate-500 font-bold mt-4">=</span>
+                            <div className="flex-1">
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Reward Value (₹)</label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 font-mono">₹</span>
+                                <input 
+                                  type="number" 
+                                  step="0.01" 
+                                  placeholder="Rate" 
+                                  value={row.rate} 
+                                  onChange={e => {
+                                    const tbl = [...(bonusSettings.coinrain?.conversionTable || [])];
+                                    tbl[idx].rate = parseFloat(e.target.value) || 0;
+                                    setBonusSettings({...bonusSettings, coinrain: { ...bonusSettings.coinrain, conversionTable: tbl }});
+                                  }} 
+                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-6 pr-3 py-2 text-white text-sm font-black text-emerald-400" 
+                                />
+                              </div>
+                            </div>
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                const tbl = (bonusSettings.coinrain?.conversionTable || []).filter((_: any, i: number) => i !== idx);
+                                setBonusSettings({...bonusSettings, coinrain: { ...bonusSettings.coinrain, conversionTable: tbl }});
+                              }} 
+                              className="p-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl mt-4 border border-red-500/10"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex gap-4">
+                        <button 
+                          type="button" 
+                          onClick={() => {
+                            const currentTbl = bonusSettings.coinrain?.conversionTable || [];
+                            const lastTier = currentTbl[currentTbl.length - 1] || { coins: 0, rate: 0 };
+                            const tbl = [...currentTbl, { coins: lastTier.coins + 1000, rate: parseFloat((lastTier.rate + 0.10).toFixed(2)) }];
+                            setBonusSettings({...bonusSettings, coinrain: { ...bonusSettings.coinrain, conversionTable: tbl }});
+                          }} 
+                          className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs flex items-center gap-2 border border-slate-700"
+                        >
+                          ➕ Add New Conversion Tier
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-8 pt-6 border-t border-slate-800">
+                      <button onClick={() => saveBonusSettings(bonusSettings)} className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-indigo-900/20 flex items-center gap-2">
+                        💾 Save Coin Rain Settings
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ) : bonusView === 'stats' ? (
                 <div className="space-y-6">
