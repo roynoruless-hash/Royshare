@@ -1,111 +1,97 @@
-import { useState, useEffect, useRef } from "react";
-import { API_BASE } from "../config/api";
-import { motion, AnimatePresence } from "motion/react";
+import React, { useState, useEffect } from "react";
 import { 
-  Gift, 
-  Lock, 
-  Unlock, 
-  Send, 
-  Instagram, 
-  Facebook, 
-  Youtube, 
-  Disc, 
-  Twitter, 
-  ChevronRight, 
-  ArrowLeft, 
-  Clock, 
-  AlertTriangle, 
-  History,
-  CheckCircle2,
-  Trophy,
-  Activity,
-  User,
-  Hash
+  Gift, CheckCircle, Clock, ShieldCheck, 
+  ArrowRight, Lock, 
+  AlertCircle, Info, Users,
+  Zap, Trophy, Smartphone, 
+  MessageCircle, Sparkles, LayoutGrid,
+  Loader2, RefreshCw
 } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import confetti from "canvas-confetti";
-import AdScriptRenderer from "../components/AdScriptRenderer";
 
-interface ClaimRecord {
-  id: string;
-  promoName: string;
+const API_BASE = "";
+
+interface PromoSettings {
+  name: string;
+  promoCode: string;
   rewardAmount: number;
-  status: string;
-  date: string;
-  time: string;
-}
-
-interface SocialButtonConfig {
-  enabled: boolean;
-  url: string;
-}
-
-interface PromoRewardsSettings {
-  enabled: boolean;
-  requireAccessCode?: boolean;
-  adsterraBannerCode?: string;
-  monetagAdCode?: string;
+  totalBudget: number;
+  maxUsers: number;
   expiryMinutes: number;
+  enabled: boolean;
+  tgChannelEnabled: boolean;
+  tgGroupEnabled: boolean;
   expiryEnabled: boolean;
-  tgChannelUrl?: string;
-  tgChannelEnabled?: boolean;
-  tgGroupUrl?: string;
-  tgGroupEnabled?: boolean;
-  instagramUrl?: string;
-  instagramEnabled?: boolean;
-  facebookUrl?: string;
-  facebookEnabled?: boolean;
-  youtubeUrl?: string;
-  youtubeEnabled?: boolean;
-  discordUrl?: string;
-  discordEnabled?: boolean;
-  twitterUrl?: string;
-  twitterEnabled?: boolean;
+  requireAccessCode: boolean;
 }
 
-export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
-  const [userId, setUserId] = useState<string | null>(null);
-  const [username, setUsername] = useState<string>("User");
-  const [telegramId, setTelegramId] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(true);
-  const [settings, setSettings] = useState<PromoRewardsSettings | null>(null);
+interface PromoDetails {
+  name: string;
+  rewardAmount: number;
+  totalBudget: number;
+  budgetUsed: number;
+  maxUsers: number;
+  usedCount: number;
+  startDate: string;
+  startTime: string;
+  expiryDate: string;
+  expiryTime: string;
+  enabled: boolean;
+  requireAccessCode: boolean;
+  pageId: string;
+  status?: string;
+  autoPostChannel?: boolean;
+  autoPostGroup?: boolean;
+}
 
-  // Loaded Promo from link States
-  const [loadedPromo, setLoadedPromo] = useState<any>(null);
-  const [promoDetailsLoading, setPromoDetailsLoading] = useState<boolean>(!!promoId);
-  const [promoErrorStatus, setPromoErrorStatus] = useState<"disabled" | "expired" | "not_found" | "pending" | "budget_finished" | "claim_limit_reached" | null>(null);
-  const [apiError, setApiError] = useState<string | null>(null);
-  
-  // Lock Stage States
+interface PromoRewardsPageProps {
+  promoId?: string;
+}
+
+const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [username, setUsername] = useState<string>("");
+  const [telegramId, setTelegramId] = useState<string>("");
+  const [settings, setSettings] = useState<PromoSettings | null>(null);
+  const [loadedPromo, setLoadedPromo] = useState<PromoDetails | null>(null);
   const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
+  const [sessionExpiry, setSessionExpiry] = useState<string | null>(null);
+  const [timeLeftStr, setTimeLeftStr] = useState<string>("");
+  const [isExpired, setIsExpired] = useState<boolean>(false);
+  
+  const [loading, setLoading] = useState<boolean>(true);
+  const [promoDetailsLoading, setPromoDetailsLoading] = useState<boolean>(true);
+  const [promoErrorStatus, setPromoErrorStatus] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
+
   const [accessCodeInput, setAccessCodeInput] = useState<string>("");
-  const [unlockError, setUnlockError] = useState<string | null>(null);
   const [unlocking, setUnlocking] = useState<boolean>(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
   const [showUnlockSuccess, setShowUnlockSuccess] = useState<boolean>(false);
 
-  // Expiry / Session States
-  const [sessionExpiry, setSessionExpiry] = useState<string | null>(null);
-  const [timeLeftStr, setTimeLeftStr] = useState<string>("00:00:00");
-  const [isExpired, setIsExpired] = useState<boolean>(false);
-
-  // Promo Claim States
   const [redeeming, setRedeeming] = useState<boolean>(false);
   const [redeemError, setRedeemError] = useState<string | null>(null);
-  const [claimHistory, setClaimHistory] = useState<ClaimRecord[]>([]);
+  const [redeemSuccess, setRedeemSuccess] = useState<boolean>(false);
+  const [rewardAmount, setRewardAmount] = useState<number>(0);
+  
+  const [claimHistory, setClaimHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
-
-  // Success Celebration Popup
-  const [showSuccessPopup, setShowSuccessPopup] = useState<boolean>(false);
-  const [successData, setSuccessData] = useState<{ amount: number; name: string } | null>(null);
 
   // Initialize URL user parameters and load settings
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const queryUserId = params.get("userId");
-    if (queryUserId === "ADMIN_PREVIEW") {
-      console.log("Preview Opened");
-    }
+    
     const tg = (window as any).Telegram?.WebApp;
-    if (tg) tg.expand();
+    if (tg) {
+      tg.expand();
+      tg.ready();
+      // Apply Telegram Theme Colors
+      if (tg.setHeaderColor) tg.setHeaderColor('#1c1c1c');
+      if (tg.setBackgroundColor) tg.setBackgroundColor('#0f0f0f');
+    }
+
     const tgUserId = tg?.initDataUnsafe?.user?.id;
     const resolvedId = queryUserId || (tgUserId ? String(tgUserId) : null);
 
@@ -125,40 +111,44 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
     }
 
     const fetchPromoDetails = async () => {
-      console.log("Fetching Promo...");
-      console.log("Route pageId:", promoId);
       setPromoDetailsLoading(true);
       setPromoErrorStatus(null);
       setApiError(null);
+      
+      // Safety timeout to prevent infinite loading
+      const timeoutId = setTimeout(() => {
+        setPromoDetailsLoading(false);
+        setApiError("Request timed out. Please try again.");
+      }, 10000);
+
       try {
         const res = await fetch(`${API_BASE}/api/promo/details/${promoId}`);
+        clearTimeout(timeoutId);
+
         if (res.status === 404) {
-          console.log("Document Missing");
           setPromoErrorStatus("not_found");
           return;
         }
+        
         if (!res.ok) {
-          throw new Error(`API returned HTTP status ${res.status}`);
+          throw new Error(`Server returned status ${res.status}`);
         }
+
         const data = await res.json();
         if (data.success && data.promo) {
-          console.log("Document Found");
           setLoadedPromo(data.promo);
           if (data.promo.status && data.promo.status !== "active") {
             setPromoErrorStatus(data.promo.status);
-          } else {
-            setPromoErrorStatus(null);
           }
         } else {
-          console.log("Document Missing");
           setPromoErrorStatus("not_found");
         }
       } catch (err: any) {
-        console.error("API Error:", err);
+        console.error("Fetch Promo Details Error:", err);
         setApiError(err.message || "Failed to load promo rewards details.");
       } finally {
         setPromoDetailsLoading(false);
-        console.log("Loading Finished");
+        clearTimeout(timeoutId);
       }
     };
 
@@ -169,10 +159,22 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
     if (!userId) return;
     setLoading(true);
     setApiError(null);
+
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+      if (!loadedPromo) setApiError("Connection timed out.");
+    }, 12000);
+
     try {
-      const res = await fetch(`${API_BASE}/api/promo/status?userId=${userId}&promoId=${promoId}`);
+      const tg = (window as any).Telegram?.WebApp;
+      const initData = tg?.initData || "";
+      
+      const res = await fetch(`${API_BASE}/api/promo/status?userId=${userId}&promoId=${promoId}&initData=${encodeURIComponent(initData)}`);
+      clearTimeout(timeoutId);
+
       if (!res.ok) {
-        throw new Error(`API returned HTTP status ${res.status}`);
+        const errData = await res.json();
+        throw new Error(errData.error || `API returned HTTP status ${res.status}`);
       }
       const data = await res.json();
       if (data.success) {
@@ -181,24 +183,25 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
         setTelegramId(data.user?.telegramId || "");
         
         if (data.unlocked) {
-          console.log("Promo Unlocked");
           setIsUnlocked(true);
           if (data.session) {
             setSessionExpiry(data.session.expiresAt);
           }
         } else {
-          console.log("Promo Locked");
           setIsUnlocked(false);
         }
       } else {
         throw new Error(data.error || "Failed to load status");
       }
     } catch (err: any) {
-      console.error("API Error:", err);
-      setApiError(err.message || "Failed to load promo rewards status.");
+      console.error("API Error (fetchStatusAndSettings):", err);
+      // Only set error if we don't have promo details yet
+      if (!loadedPromo) {
+        setApiError(err.message || "Failed to load promo rewards status.");
+      }
     } finally {
       setLoading(false);
-      console.log("Loading Finished");
+      clearTimeout(timeoutId);
     }
   };
 
@@ -261,7 +264,6 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
     return () => clearInterval(interval);
   }, [isUnlocked, sessionExpiry, settings]);
 
-  // Access Lock Submission
   const handleUnlockSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!accessCodeInput.trim() || !userId || unlocking) return;
@@ -270,15 +272,17 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
     setUnlockError(null);
 
     try {
+      const tg = (window as any).Telegram?.WebApp;
+      const initData = tg?.initData || "";
+
       const res = await fetch(`${API_BASE}/api/promo/unlock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, accessCode: accessCodeInput.trim(), promoId })
+        body: JSON.stringify({ userId, accessCode: accessCodeInput.trim(), promoId, initData })
       });
       const data = await res.json();
 
       if (data.success) {
-        console.log("Promo Unlocked");
         setShowUnlockSuccess(true);
         setSessionExpiry(data.expiresAt);
         setTimeout(() => {
@@ -298,618 +302,434 @@ export default function PromoRewardsPage({ promoId }: { promoId?: string }) {
     }
   };
 
-  // Monetag Rewarded Ad logic
-  const showMonetagAd = () => {
-    return new Promise<boolean>((resolve) => {
-      const tg = (window as any).Telegram?.WebApp;
-      if (!tg) {
-        console.log("Monetag Ad Simulator: Success");
-        resolve(true);
-        return;
-      }
-
-      const monetagFn = (window as any).show_11210088;
-      if (monetagFn) {
-         monetagFn().then(() => {
-            resolve(true);
-         }).catch((e: any) => {
-            console.error("Monetag Ad Error:", e);
-            alert("Ad failed to load or was closed early. Please try again to claim your reward.");
-            resolve(false);
-         });
-      } else {
-         console.warn("Monetag SDK function not found. Proceeding with claim.");
-         resolve(true); 
-      }
-    });
-  };
-
-  // Promo Redemption Submission
   const handleRedeemSubmit = async () => {
     if (!userId || redeeming || isExpired) return;
 
     setRedeeming(true);
     setRedeemError(null);
 
-    // 1. Show Monetag Mini Ad
-    const adCompleted = await showMonetagAd();
-    if (!adCompleted) {
-      setRedeeming(false);
-      return;
-    }
-
     try {
+      const tg = (window as any).Telegram?.WebApp;
+      const initData = tg?.initData || "";
+
       const res = await fetch(`${API_BASE}/api/promo/redeem`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           userId, 
           randomPageId: promoId,
-          accessCode: "session" // Server checks actual session
+          initData,
+          accessCode: "session" 
         })
       });
       const data = await res.json();
 
       if (data.success) {
-        // Play fireworks & confetti
+        setRewardAmount(data.rewardAmount);
+        setRedeemSuccess(true);
         confetti({
-          particleCount: 180,
-          spread: 80,
-          origin: { y: 0.5 },
-          colors: ['#a855f7', '#6366f1', '#3b82f6', '#ec4899', '#fbbf24']
+          particleCount: 150,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#22c55e', '#3b82f6', '#f59e0b']
         });
-        
-        // Secondary fireworks explosion
-        setTimeout(() => {
-          confetti({
-            particleCount: 100,
-            spread: 60,
-            origin: { x: 0.3, y: 0.6 },
-            colors: ['#ec4899', '#fbbf24']
-          });
-        }, 300);
-        
-        setTimeout(() => {
-          confetti({
-            particleCount: 100,
-            spread: 60,
-            origin: { x: 0.7, y: 0.6 },
-            colors: ['#a855f7', '#3b82f6']
-          });
-        }, 600);
-
-        setSuccessData({ amount: data.rewardAmount, name: data.promoName });
-        setShowSuccessPopup(true);
         fetchClaimHistory();
-        fetchStatusAndSettings();
       } else {
-        setRedeemError(data.error || "Failed to redeem promo reward. Ensure all tasks are completed.");
+        setRedeemError(data.error || "Claim failed. Please check rules.");
       }
     } catch (err) {
       console.error("Redeem error:", err);
-      setRedeemError("Network error. Please try again later.");
+      setRedeemError("Network error. Please try again.");
     } finally {
       setRedeeming(false);
     }
   };
 
-  if (apiError) {
+  const LoadingSpinner = () => (
+    <div className="flex flex-col items-center justify-center p-12 space-y-4">
+      <motion.div
+        animate={{ rotate: 360 }}
+        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+      >
+        <Loader2 className="w-12 h-12 text-blue-500" />
+      </motion.div>
+      <p className="text-gray-400 font-medium animate-pulse">Initializing campaign...</p>
+    </div>
+  );
+
+  const ErrorView = ({ message, type = "error" }: { message: string, type?: "error" | "not_found" | "expired" }) => (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-zinc-900/50 border border-zinc-800 p-8 rounded-3xl text-center space-y-6 max-w-md mx-auto"
+    >
+      <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center ${
+        type === "not_found" ? "bg-orange-500/20 text-orange-500" : "bg-red-500/20 text-red-500"
+      }`}>
+        {type === "not_found" ? <LayoutGrid className="w-10 h-10" /> : <AlertCircle className="w-10 h-10" />}
+      </div>
+      <div className="space-y-2">
+        <h2 className="text-2xl font-bold text-white">
+          {type === "not_found" ? "Promo Not Found" : "Something Went Wrong"}
+        </h2>
+        <p className="text-gray-400 leading-relaxed">{message}</p>
+      </div>
+      <button 
+        onClick={() => window.location.reload()}
+        className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold py-4 rounded-2xl transition-all flex items-center justify-center gap-2"
+      >
+        <RefreshCw className="w-5 h-5" />
+        Try Again
+      </button>
+    </motion.div>
+  );
+
+  if (promoDetailsLoading) {
     return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
-        <AlertTriangle className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
-        <h1 className="text-2xl font-black mb-2 text-white">API Error</h1>
-        <p className="text-slate-400 max-w-sm mb-6 text-sm">
-          {apiError}
-        </p>
+      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
+        <LoadingSpinner />
       </div>
     );
   }
 
   if (promoErrorStatus === "not_found") {
     return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
-        <AlertTriangle className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
-        <h1 className="text-2xl font-black mb-2 text-white">Promo Not Found</h1>
-        <p className="text-slate-400 max-w-sm mb-6 text-sm">
-          The requested promo code or page ID does not exist. Please check the link or try another.
-        </p>
+      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
+        <ErrorView type="not_found" message="This promo link is invalid or has been removed." />
+      </div>
+    );
+  }
+
+  if (promoErrorStatus === "expired" || promoErrorStatus === "budget_finished" || promoErrorStatus === "claim_limit_reached") {
+    return (
+      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
+        <ErrorView 
+          type="expired" 
+          message={
+            promoErrorStatus === "expired" 
+              ? "Sorry, this promo campaign has officially ended." 
+              : promoErrorStatus === "budget_finished" 
+                ? "Campaign concluded: The allocated reward budget has been fully claimed."
+                : "Campaign concluded: All available reward slots have been filled."
+          } 
+        />
       </div>
     );
   }
 
   if (promoErrorStatus === "disabled") {
     return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
-        <AlertTriangle className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
-        <h1 className="text-2xl font-black mb-2 text-white">Promo Page Currently Closed.</h1>
-        <p className="text-slate-400 max-w-sm mb-6 text-sm">
-          This promo rewards page is currently disabled or closed by the administrator. Check back soon!
-        </p>
+      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
+        <ErrorView message="This promo is currently disabled by the administrator." />
       </div>
     );
   }
 
-  if (promoErrorStatus === "pending") {
+  if (!userId) {
     return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
-        <AlertTriangle className="w-16 h-16 text-indigo-500 mb-4 animate-pulse" />
-        <h1 className="text-2xl font-black mb-2 text-white">Promo Has Not Started Yet</h1>
-        <p className="text-slate-400 max-w-sm mb-6 text-sm">
-          This promo rewards page is currently scheduled but has not started yet. Please check back later!
-        </p>
+      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
+        <ErrorView message="Telegram authentication failed. Please open this app inside Telegram." />
       </div>
     );
   }
 
-  if (promoErrorStatus === "budget_finished") {
-    return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
-        <motion.div 
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="bg-slate-900 border border-rose-500/30 p-10 rounded-3xl max-w-md w-full space-y-6 shadow-2xl shadow-rose-950/10"
-        >
-          <span className="text-6xl block animate-bounce">💸</span>
-          <h1 className="text-3xl font-black text-rose-500 tracking-tight">Better Luck Next Time</h1>
-          <div className="h-0.5 bg-gradient-to-r from-transparent via-rose-500/20 to-transparent w-full" />
-          <p className="text-slate-300 font-bold text-lg font-sans">Budget Fully Exhausted</p>
-          <p className="text-slate-400 text-sm leading-relaxed">
-            This promo has run out of its allocated reward budget. Keep an eye on our Telegram Channel for upcoming promo drops!
-          </p>
-          <button
-            disabled
-            className="w-full py-4 rounded-2xl bg-slate-800 text-slate-500 font-bold uppercase tracking-wider cursor-not-allowed border border-slate-700/50"
-          >
-            Budget Finished
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
-
-  if (promoErrorStatus === "claim_limit_reached") {
-    return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
-        <motion.div 
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="bg-slate-900 border border-rose-500/30 p-10 rounded-3xl max-w-md w-full space-y-6 shadow-2xl shadow-rose-950/10"
-        >
-          <span className="text-6xl block animate-bounce">🎟️</span>
-          <h1 className="text-3xl font-black text-rose-500 tracking-tight">Better Luck Next Time</h1>
-          <div className="h-0.5 bg-gradient-to-r from-transparent via-rose-500/20 to-transparent w-full" />
-          <p className="text-slate-300 font-bold text-lg font-sans">Claim Limit Reached</p>
-          <p className="text-slate-400 text-sm leading-relaxed">
-            This promo reward has reached its maximum claim limit. Keep an eye on our Telegram Channel for upcoming promo drops!
-          </p>
-          <button
-            disabled
-            className="w-full py-4 rounded-2xl bg-slate-800 text-slate-500 font-bold uppercase tracking-wider cursor-not-allowed border border-slate-700/50"
-          >
-            Claims Closed
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
-
-  if (promoErrorStatus === "expired") {
-    return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
-        <motion.div 
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="bg-slate-900 border border-rose-500/30 p-10 rounded-3xl max-w-md w-full space-y-6 shadow-2xl shadow-rose-950/10"
-        >
-          <span className="text-6xl block animate-bounce">⌛</span>
-          <h1 className="text-3xl font-black text-rose-500 tracking-tight">Better Luck Next Time</h1>
-          <div className="h-0.5 bg-gradient-to-r from-transparent via-rose-500/20 to-transparent w-full" />
-          <p className="text-slate-300 font-bold text-lg font-sans">This promo has expired.</p>
-          <p className="text-slate-400 text-sm leading-relaxed">
-            Promo claims are no longer available for this code. Keep an eye on our Telegram Channel for upcoming promo drops!
-          </p>
-          <button
-            disabled
-            className="w-full py-4 rounded-2xl bg-slate-800 text-slate-500 font-bold uppercase tracking-wider cursor-not-allowed border border-slate-700/50"
-          >
-            Redemption Expired
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
-
-  if (loading || promoDetailsLoading) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6">
-        <Disc className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
-        <p className="text-slate-400 font-medium tracking-wide">Syncing Security System...</p>
-      </div>
-    );
-  }
-
-  // Access Check if page or settings are globally closed
-  if (!userId || !settings || !settings.enabled) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
-        <AlertTriangle className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
-        <h1 className="text-2xl font-black mb-2 text-white font-sans">Promo Page Currently Closed.</h1>
-        <p className="text-slate-400 max-w-sm mb-6 text-sm">
-          {!userId ? "Please launch this app directly from the RoyShare official Telegram bot." : "Promo Rewards are currently offline or closed by administrator. Check back soon!"}
-        </p>
-      </div>
-    );
-  }
-
-  // 1. PAGE EXPIRED STAGE
-  if (isExpired) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-6 text-center">
-        <motion.div 
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="bg-slate-900 border border-rose-500/30 p-10 rounded-3xl max-w-md w-full space-y-6 shadow-2xl shadow-rose-950/10"
-        >
-          <span className="text-6xl block animate-bounce">⌛</span>
-          <h1 className="text-3xl font-black text-rose-500 tracking-tight">Better Luck Next Time</h1>
-          <div className="h-0.5 bg-gradient-to-r from-transparent via-rose-500/20 to-transparent w-full" />
-          <p className="text-slate-300 font-bold text-lg">This Promo Page Has Expired.</p>
-          <p className="text-slate-400 text-sm leading-relaxed">
-            Promo claims are no longer available. Keep an eye on our Telegram Channel for upcoming promo drops!
-          </p>
-          <button
-            disabled
-            className="w-full py-4 rounded-2xl bg-slate-800 text-slate-500 font-bold uppercase tracking-wider cursor-not-allowed border border-slate-700/50"
-          >
-            Redemption Expired
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
-
-  // 2. ACCESS LOCK STAGE (UNAUTHORIZED)
-  if (!isUnlocked) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-white font-sans p-4">
-        <motion.div 
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.4 }}
-          className="w-full max-w-md bg-slate-900/90 border border-indigo-500/20 rounded-3xl p-8 space-y-8 shadow-2xl relative overflow-hidden"
-        >
-          {/* Neon Top Accent */}
-          <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-blue-500" />
-          
-          <div className="text-center space-y-3">
-            <div className="inline-flex p-4 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 mb-1">
-              {showUnlockSuccess ? (
-                <Unlock className="w-8 h-8 animate-pulse text-emerald-400" />
-              ) : (
-                <Lock className="w-8 h-8 text-indigo-400" />
-              )}
-            </div>
-            <h1 className="text-2xl font-black text-white tracking-tight">🔒 Promo Rewards Locked</h1>
-            <p className="text-slate-400 text-sm">Enter valid Access Code to claim premium rewards.</p>
-          </div>
-
-          <form onSubmit={handleUnlockSubmit} className="space-y-6">
-            <div className="space-y-2">
-              <label className="text-xs font-black text-indigo-300 uppercase tracking-widest block">Access Code</label>
-              <input
-                type="text"
-                required
-                value={accessCodeInput}
-                onChange={(e) => setAccessCodeInput(e.target.value)}
-                placeholder="e.g. ROYPREMIUM77"
-                disabled={unlocking || showUnlockSuccess}
-                className="w-full bg-slate-950/80 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-2xl px-5 py-4 text-white text-center font-black placeholder:text-slate-600 text-lg uppercase tracking-wider focus:outline-none transition-all"
-              />
-            </div>
-
-            {unlockError && (
-              <motion.div 
-                initial={{ opacity: 0, y: -5 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 flex gap-3 text-left"
-              >
-                <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="text-xs font-black text-rose-400 uppercase tracking-wider">Invalid Access Code</h4>
-                  <p className="text-xs text-slate-400 mt-1">Please double-check the code and try again.</p>
-                </div>
-              </motion.div>
-            )}
-
-            {showUnlockSuccess && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 flex gap-3 text-left text-emerald-400"
-              >
-                <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="text-xs font-black uppercase tracking-wider">Access Approved</h4>
-                  <p className="text-xs text-slate-400 mt-1">Unlocking promo reward page...</p>
-                </div>
-              </motion.div>
-            )}
-
-            <button
-              type="submit"
-              disabled={unlocking || showUnlockSuccess || !accessCodeInput.trim()}
-              className="w-full py-4.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {unlocking ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Verifying Code...</span>
-                </>
-              ) : (
-                <span>✨ Unlock Page</span>
-              )}
-            </button>
-          </form>
-        </motion.div>
-      </div>
-    );
-  }
-
-  // 3. MAIN AUTHORIZED PROMO PAGE
   return (
-    <div className="min-h-screen bg-[#020617] text-white font-sans flex flex-col relative overflow-x-hidden">
-      
-      {/* Header Panel */}
-      <header className="p-5 border-b border-slate-900 bg-slate-950/60 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-600/10 rounded-xl border border-indigo-500/20 text-indigo-400">
-              <Gift className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <h1 className="text-sm font-black tracking-wide uppercase">🎁 Promo Rewards</h1>
-              <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                Premium Session Unlocked
-              </p>
-            </div>
-          </div>
-          
-          {/* Header Countdown Timer */}
-          {settings.expiryEnabled && (
-            <div className="flex items-center gap-2 px-3.5 py-1.5 bg-rose-500/10 border border-rose-500/20 rounded-full text-rose-400 animate-pulse">
-              <Clock className="w-3.5 h-3.5" />
-              <span className="text-xs font-black font-mono">{timeLeftStr}</span>
-            </div>
-          )}
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <main className="flex-1 max-w-md mx-auto w-full p-6 space-y-6 pb-20">
+    <div className="min-h-screen bg-[#0f0f0f] text-white font-sans selection:bg-blue-500/30">
+      <div className="max-w-md mx-auto min-h-screen flex flex-col p-4 md:p-6">
         
-        {/* User Stats Card */}
-        <div className="bg-slate-900 border border-slate-800 p-5 rounded-3xl flex items-center justify-between shadow-xl">
-          <div className="flex items-center gap-4">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white font-black text-lg">
-              <User className="w-5 h-5" />
+        <header className="flex items-center justify-between py-4 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+              <Gift className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h4 className="font-bold text-white text-sm">{username}</h4>
-              <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5 font-mono">
-                <Hash className="w-3 h-3 text-indigo-400" />
-                {telegramId || "No Telegram Link"}
-              </p>
+              <h1 className="text-lg font-bold leading-none">Promo Rewards</h1>
+              <span className="text-xs text-gray-500">Official Mini App</span>
             </div>
           </div>
-          <div className="bg-slate-950 px-4 py-2 rounded-2xl border border-slate-800 text-right">
-            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Wallet Balance</span>
-            <span className="text-xs font-bold text-indigo-400">₹ Active Update</span>
+          <div className="flex items-center gap-2 bg-zinc-900 px-3 py-1.5 rounded-full border border-zinc-800">
+            <ShieldCheck className="w-4 h-4 text-green-500" />
+            <span className="text-xs font-medium text-gray-300">Secure</span>
           </div>
-        </div>
+        </header>
 
-        {/* Social Media Tasks Section */}
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-4 shadow-xl">
-          <div>
-            <h3 className="font-black text-white text-sm uppercase tracking-wider">📌 Required Channels</h3>
-            <p className="text-slate-400 text-xs mt-0.5">Join these communities before redeeming to verify claim status.</p>
-          </div>
-
-          <div className="grid gap-2.5">
-            {[
-              { id: 'tgChannel', name: 'Telegram Channel', icon: Send, url: settings.tgChannelUrl, enabled: settings.tgChannelEnabled },
-              { id: 'tgGroup', name: 'Telegram Group', icon: Send, url: settings.tgGroupUrl, enabled: settings.tgGroupEnabled },
-              { id: 'instagram', name: 'Instagram', icon: Instagram, url: settings.instagramUrl, enabled: settings.instagramEnabled },
-              { id: 'facebook', name: 'Facebook', icon: Facebook, url: settings.facebookUrl, enabled: settings.facebookEnabled },
-              { id: 'youtube', name: 'YouTube', icon: Youtube, url: settings.youtubeUrl, enabled: settings.youtubeEnabled },
-              { id: 'discord', name: 'Discord', icon: Disc, url: settings.discordUrl, enabled: settings.discordEnabled },
-              { id: 'twitter', name: 'X (Twitter)', icon: Twitter, url: settings.twitterUrl, enabled: settings.twitterEnabled }
-            ].map((social) => {
-              if (!social.enabled) return null;
-              return (
-                <a
-                  key={social.id}
-                  href={social.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between p-3.5 bg-slate-950 border border-slate-800/80 hover:border-slate-700 hover:bg-slate-950/50 rounded-2xl transition-all"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-indigo-500/5 text-indigo-400">
-                      <social.icon className="w-4 h-4" />
-                    </div>
-                    <span className="text-xs font-bold text-slate-300">{social.name}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] font-bold text-indigo-400 bg-indigo-500/5 border border-indigo-500/10 px-3 py-1 rounded-full uppercase">
-                    Join Channel
-                    <ChevronRight className="w-3 h-3" />
-                  </div>
-                </a>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Promo Code Input Box */}
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-6 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500" />
+        <main className="flex-grow space-y-6">
           
-          <div>
-            <h3 className="font-black text-white text-sm uppercase tracking-wider flex items-center gap-2">
-              🎁 Loaded Promo Reward
-            </h3>
-            <p className="text-slate-400 text-xs mt-0.5">
-              This promo has been loaded directly from your link.
-            </p>
-          </div>
-
-          {loadedPromo && (
-            <div className="bg-indigo-600/10 border border-indigo-500/20 p-4 rounded-2xl flex items-center justify-between">
-              <div className="text-left">
-                <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest block">Promo Reward Name</span>
-                <span className="text-xs font-bold text-white mt-1 block">{loadedPromo.name}</span>
-              </div>
-              <div className="text-right">
-                <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest block">Reward Amount</span>
-                <span className="text-xs font-black text-emerald-400 mt-1 block">₹{loadedPromo.rewardAmount.toFixed(2)}</span>
-              </div>
-            </div>
-          )}
-
-          {redeemError && (
-            <motion.div 
-              initial={{ opacity: 0, y: -5 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 flex gap-3 text-left"
-            >
-              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-slate-400">{redeemError}</p>
-            </motion.div>
-          )}
-
-          <button
-            onClick={() => handleRedeemSubmit()}
-            disabled={redeeming || !loadedPromo}
-            className="w-full py-4.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {redeeming ? (
-              <>
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Verifying Promo...</span>
-              </>
-            ) : (
-              <span>✨ Claim Reward</span>
-            )}
-          </button>
-        </div>
-
-        {/* Claim History Section */}
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-4 shadow-xl">
-          <h3 className="font-black text-white text-sm uppercase tracking-wider flex items-center gap-2">
-            <History className="w-4 h-4 text-indigo-400" />
-            Claim History
-          </h3>
-
-          {historyLoading ? (
-            <div className="flex justify-center py-6">
-              <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : claimHistory.length === 0 ? (
-            <p className="text-xs text-slate-500 text-center py-4">No promo claims recorded yet.</p>
-          ) : (
-            <div className="space-y-2.5">
-              {claimHistory.map((claim) => (
-                <div key={claim.id} className="p-3.5 bg-slate-950 border border-slate-850 rounded-2xl flex items-center justify-between">
-                  <div>
-                    <h4 className="font-bold text-white text-xs">{claim.promoName || "Promo Reward"}</h4>
-                    <p className="text-[10px] text-slate-500 mt-1 font-mono">{claim.date} | {claim.time}</p>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-xs font-black text-emerald-400 block">+₹{claim.rewardAmount.toFixed(2)}</span>
-                    <span className="text-[9px] bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full text-emerald-400 font-black mt-1 inline-block uppercase">
-                      {claim.status}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Adsterra Banner Area */}
-        {settings.adsterraBannerCode && (
-          <div className="bg-slate-950/40 p-4 border border-slate-900 rounded-3xl flex flex-col items-center justify-center overflow-hidden">
-            <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest mb-3">Sponsored Content</p>
-            <AdScriptRenderer scriptCode={settings.adsterraBannerCode} />
-          </div>
-        )}
-
-      </main>
-
-      {/* Footer Area */}
-      <footer className="mt-auto border-t border-slate-900 bg-slate-950 py-8 text-center space-y-2">
-        <p className="text-xs font-black text-white uppercase tracking-wider">RoyShare</p>
-        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Developed by Rishu Roy</p>
-      </footer>
-
-      {/* Claims Success Popup Modal */}
-      <AnimatePresence>
-        {showSuccessPopup && successData && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* Dark Backdrop */}
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowSuccessPopup(false)}
-              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
-            />
-            
-            {/* Pop Card */}
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-slate-900 border border-indigo-500/30 p-8 rounded-3xl text-center max-w-sm w-full relative overflow-hidden shadow-2xl space-y-6"
-            >
-              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-500" />
-              
-              <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto text-3xl animate-bounce">
-                🏆
-              </div>
-
-              <div className="space-y-1">
-                <h2 className="text-2xl font-black text-white tracking-tight">🎉 Congratulations</h2>
-                <p className="text-slate-400 text-xs uppercase tracking-wider font-bold">Promo Redeemed Successfully</p>
-              </div>
-
-              <div className="h-0.5 bg-slate-800 w-full" />
-
-              <div className="space-y-3 text-left">
-                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-850 flex justify-between items-center">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Promo Reward</span>
-                  <span className="text-sm font-bold text-white uppercase truncate max-w-[180px]">{successData.name}</span>
-                </div>
-                <div className="bg-slate-950 p-4 rounded-2xl border border-emerald-500/10 flex justify-between items-center">
-                  <span className="text-[10px] font-black text-emerald-500 uppercase tracking-wider">Reward Won</span>
-                  <span className="text-sm font-bold text-emerald-400">₹{successData.amount.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="bg-emerald-500/5 border border-emerald-500/10 p-3 rounded-2xl text-xs text-slate-400 font-medium">
-                💰 Wallet Updated Successfully
-              </div>
-
-              <button
-                onClick={() => setShowSuccessPopup(false)}
-                className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all shadow-lg"
+          <AnimatePresence mode="wait">
+            {!isUnlocked ? (
+              <motion.div
+                key="locked"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                className="space-y-6"
               >
-                Awesome
-              </button>
-            </motion.div>
+                <div className="bg-zinc-900 rounded-[32px] p-8 border border-zinc-800 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 blur-[60px] -mr-16 -mt-16 rounded-full" />
+                  
+                  <div className="relative text-center space-y-6">
+                    <div className="w-20 h-20 mx-auto bg-zinc-800 rounded-[24px] flex items-center justify-center border border-zinc-700 shadow-inner">
+                      <Lock className="w-10 h-10 text-blue-400" />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <h2 className="text-2xl font-bold">Access Protected</h2>
+                      <p className="text-gray-400 text-sm">Enter the code from the Telegram post to unlock this reward.</p>
+                    </div>
+
+                    <form onSubmit={handleUnlockSubmit} className="space-y-4">
+                      <div className="relative group">
+                        <input
+                          type="text"
+                          placeholder="Enter Access Code"
+                          value={accessCodeInput}
+                          onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
+                          className="w-full bg-black border border-zinc-800 rounded-2xl py-4 px-6 text-center text-xl font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all group-hover:border-zinc-700"
+                        />
+                      </div>
+                      
+                      {unlockError && (
+                        <motion.p 
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="text-red-400 text-sm font-medium bg-red-400/10 py-2 rounded-lg"
+                        >
+                          {unlockError}
+                        </motion.p>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={unlocking || !accessCodeInput.trim()}
+                        className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                      >
+                        {unlocking ? <Loader2 className="w-5 h-5 animate-spin" /> : "Unlock Now"}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900/40 rounded-2xl p-4 border border-zinc-800 flex items-start gap-3">
+                  <Info className="w-5 h-5 text-zinc-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Access codes are unique to each campaign and can be found in the description of our official Telegram posts.
+                  </p>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="unlocked"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-6 pb-20"
+              >
+                <div className="bg-zinc-900 rounded-[32px] overflow-hidden border border-zinc-800 shadow-2xl relative">
+                  <div className="bg-gradient-to-br from-blue-600/20 via-blue-900/20 to-zinc-900 p-8 border-b border-zinc-800">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="bg-blue-500/20 text-blue-400 text-xs font-bold px-3 py-1 rounded-full border border-blue-500/30 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        LIVE CAMPAIGN
+                      </div>
+                      {settings?.expiryEnabled && (
+                        <div className="flex items-center gap-2 text-orange-400 font-mono text-sm bg-orange-400/10 px-3 py-1 rounded-full border border-orange-400/20">
+                          <Clock className="w-4 h-4" />
+                          {timeLeftStr}
+                        </div>
+                      )}
+                    </div>
+                    <h2 className="text-3xl font-extrabold text-white mb-2">{loadedPromo?.name || "Active Reward"}</h2>
+                    <p className="text-gray-400 text-sm">Follow the rules below to claim your reward instantly.</p>
+                  </div>
+
+                  <div className="p-8 space-y-8">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-black/40 p-4 rounded-2xl border border-zinc-800/50 space-y-1">
+                        <span className="text-[10px] text-zinc-500 font-bold tracking-widest uppercase">REWARD AMOUNT</span>
+                        <div className="text-2xl font-black text-green-500">₹{loadedPromo?.rewardAmount}</div>
+                      </div>
+                      <div className="bg-black/40 p-4 rounded-2xl border border-zinc-800/50 space-y-1">
+                        <span className="text-[10px] text-zinc-500 font-bold tracking-widest uppercase">AVAILABLE SLOTS</span>
+                        <div className="text-2xl font-black text-white">
+                          {loadedPromo?.maxUsers ? `${Math.max(0, loadedPromo.maxUsers - loadedPromo.usedCount)}` : "∞"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-bold text-zinc-500 tracking-widest uppercase">CAMPAIGN RULES</h3>
+                      <div className="space-y-3">
+                        {settings?.tgChannelEnabled && (
+                          <div className="flex items-center gap-4 bg-zinc-800/50 p-4 rounded-2xl border border-zinc-700/30">
+                            <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20">
+                              <MessageCircle className="w-5 h-5" />
+                            </div>
+                            <div className="flex-grow">
+                              <div className="text-sm font-bold">Join Official Channel</div>
+                              <div className="text-[10px] text-zinc-500 font-medium">MUST BE A MEMBER</div>
+                            </div>
+                            <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-4 bg-zinc-800/50 p-4 rounded-2xl border border-zinc-700/30">
+                          <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 border border-purple-500/20">
+                            <Users className="w-5 h-5" />
+                          </div>
+                          <div className="flex-grow">
+                            <div className="text-sm font-bold">One Claim per ID</div>
+                            <div className="text-[10px] text-zinc-500 font-medium">ANTI-SPAM ACTIVE</div>
+                          </div>
+                          <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      {redeemError && (
+                        <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3">
+                          <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
+                          <p className="text-sm text-red-400 font-medium">{redeemError}</p>
+                        </div>
+                      )}
+
+                      {!redeemSuccess ? (
+                        <button
+                          onClick={handleRedeemSubmit}
+                          disabled={redeeming || isExpired}
+                          className={`w-full group relative py-5 rounded-2xl font-black text-lg transition-all overflow-hidden ${
+                            isExpired 
+                              ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" 
+                              : "bg-white text-black hover:bg-zinc-100 active:scale-[0.97]"
+                          }`}
+                        >
+                          <div className="relative z-10 flex items-center justify-center gap-3">
+                            {redeeming ? (
+                              <Loader2 className="w-6 h-6 animate-spin" />
+                            ) : (
+                              <>
+                                <Zap className={`w-6 h-6 ${isExpired ? 'text-zinc-500' : 'text-blue-600'}`} />
+                                {isExpired ? "CAMPAIGN EXPIRED" : "CLAIM REWARD NOW"}
+                                <ArrowRight className="w-5 h-5 opacity-50 group-hover:translate-x-1 transition-transform" />
+                              </>
+                            )}
+                          </div>
+                        </button>
+                      ) : (
+                        <motion.div 
+                          initial={{ scale: 0.9, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          className="bg-green-500/10 border border-green-500/20 p-6 rounded-[24px] text-center space-y-4"
+                        >
+                          <div className="w-16 h-16 mx-auto bg-green-500 rounded-full flex items-center justify-center shadow-lg shadow-green-500/30">
+                            <CheckCircle className="w-10 h-10 text-white" />
+                          </div>
+                          <div className="space-y-1">
+                            <h3 className="text-xl font-bold text-white">Reward Claimed!</h3>
+                            <p className="text-green-400 font-medium">₹{rewardAmount} has been added to your balance.</p>
+                          </div>
+                        </motion.div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold text-zinc-500 tracking-widest uppercase">YOUR RECENT CLAIMS</h3>
+                    <button 
+                      onClick={fetchClaimHistory}
+                      className="text-blue-500 text-xs font-bold hover:underline"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {historyLoading ? (
+                      <div className="flex justify-center py-8">
+                        <Loader2 className="w-6 h-6 text-zinc-700 animate-spin" />
+                      </div>
+                    ) : claimHistory.length > 0 ? (
+                      claimHistory.map((claim, idx) => (
+                        <motion.div 
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: idx * 0.05 }}
+                          key={idx}
+                          className="bg-zinc-900/60 p-4 rounded-2xl border border-zinc-800/50 flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-500">
+                              <Trophy className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-bold">{claim.promoName}</div>
+                              <div className="text-[10px] text-zinc-500">{claim.date} at {claim.time}</div>
+                            </div>
+                          </div>
+                          <div className="text-green-500 font-black text-sm">+₹{claim.rewardAmount}</div>
+                        </motion.div>
+                      ))
+                    ) : (
+                      <div className="text-center py-12 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800">
+                        <p className="text-zinc-600 text-sm">No recent claims found.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+        </main>
+
+        <footer className="py-8 text-center space-y-4">
+          <div className="flex items-center justify-center gap-6">
+            <div className="flex flex-col items-center gap-1 opacity-40">
+              <ShieldCheck className="w-5 h-5" />
+              <span className="text-[8px] font-bold uppercase tracking-tighter">Verified</span>
+            </div>
+            <div className="flex flex-col items-center gap-1 opacity-40">
+              <Smartphone className="w-5 h-5" />
+              <span className="text-[8px] font-bold uppercase tracking-tighter">Mini App</span>
+            </div>
+            <div className="flex flex-col items-center gap-1 opacity-40">
+              <Zap className="w-5 h-5" />
+              <span className="text-[8px] font-bold uppercase tracking-tighter">Instant</span>
+            </div>
           </div>
+          <p className="text-[10px] text-zinc-600 font-medium">
+            Powered by Telegram Reward Engine v3.0 • Secure claim verified by Telegram Identity
+          </p>
+        </footer>
+
+      </div>
+
+      <AnimatePresence>
+        {showUnlockSuccess && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-zinc-900 border border-zinc-800 p-10 rounded-[40px] text-center space-y-6 shadow-2xl"
+            >
+              <div className="w-24 h-24 mx-auto bg-green-500 rounded-full flex items-center justify-center shadow-lg shadow-green-500/40">
+                <ShieldCheck className="w-12 h-12 text-white" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-3xl font-black text-white">Unlocked!</h3>
+                <p className="text-gray-400 font-medium">Access granted. Redirecting to reward...</p>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
   );
-}
+};
+
+export default PromoRewardsPage;

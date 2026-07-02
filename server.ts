@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 dotenv.config();
+import crypto from "crypto";
 
 import { handleUpdate, submitWithdrawalRequest } from "./src/bot";
 import express from "express";
@@ -9,7 +10,7 @@ import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 import { createServer as createViteServer } from "vite";
 import { getDb } from "./src/lib/firebase";
-import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion } from "firebase/firestore";
 import { REWARD_TASKS } from "./src/lib/tasks";
 import { GoogleGenAI, Type } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./src/lib/gemini";
@@ -297,6 +298,267 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", ...options })
       });
+  };
+
+  const verifyTelegramInitData = (initData: string, botToken: string): { isValid: boolean; user?: any } => {
+    try {
+      if (!initData) return { isValid: false };
+      const params = new URLSearchParams(initData);
+      const hash = params.get("hash");
+      if (!hash) return { isValid: false };
+
+      const sortedParams: string[] = [];
+      params.forEach((value, key) => {
+        if (key !== "hash") {
+          sortedParams.push(`${key}=${value}`);
+        }
+      });
+      sortedParams.sort();
+
+      const dataCheckString = sortedParams.join("\n");
+      const secretKey = crypto.createHmac("sha256", "WebAppData").update(botToken).digest();
+      const calculatedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+
+      const isValid = calculatedHash === hash;
+      let user = null;
+      if (isValid && params.get("user")) {
+        user = JSON.parse(params.get("user") || "{}");
+      }
+
+      return { isValid, user };
+    } catch (err) {
+      console.error("InitData verification error:", err);
+      return { isValid: false };
+    }
+  };
+
+  const ensureTelegramUserSynced = async (userObj: any) => {
+    if (!userObj || !userObj.id) return;
+    const userDocRef = doc(db, "users", String(userObj.id));
+    const userSnap = await getDoc(userDocRef);
+    const nowIso = new Date().toISOString();
+    
+    if (userSnap.exists()) {
+      const existingData = userSnap.data();
+      const uData: any = { lastActive: nowIso };
+      
+      if (userObj.username) uData.username = userObj.username;
+      if (userObj.first_name) uData.firstName = userObj.first_name;
+      if (userObj.last_name) uData.lastName = userObj.last_name;
+      if (userObj.language_code) uData.languageCode = userObj.language_code;
+      if (userObj.photo_url) uData.photoUrl = userObj.photo_url;
+      
+      await setDoc(userDocRef, uData, { merge: true });
+    } else {
+      await setDoc(userDocRef, {
+        telegramId: userObj.id,
+        username: userObj.username || "",
+        firstName: userObj.first_name || "",
+        lastName: userObj.last_name || "",
+        languageCode: userObj.language_code || "",
+        photoUrl: userObj.photo_url || "",
+        chatId: 0,
+        createdAt: nowIso,
+        lastActive: nowIso,
+        joinDate: nowIso,
+        balance: 0,
+        rewards: 0,
+        referrals: 0,
+        availableBalance: 0,
+        totalEarnings: 0,
+        membershipVerified: false,
+        contactVerified: false
+      });
+    }
+  };
+
+  const getPromoTelegramMessage = (promo: any): string => {
+    const reward = promo.rewardAmount || 0;
+    const limit = promo.maxUsers || "∞";
+    const expiry = promo.expiryDate ? `${promo.expiryDate} ${promo.expiryTime || ""}` : "Soon";
+    
+    return `🎉 <b>NEW PROMO LIVE</b>\n\n` +
+           `💰 <b>Reward :</b> ₹${reward}\n` +
+           `👥 <b>Claim Limit :</b> ${limit} Users\n` +
+           `⏳ <b>Ends :</b> ${expiry}\n` +
+           `🔥 <b>Hurry Up</b>\n\n` +
+           `Click below.`;
+  };
+
+  const postPromoToTelegram = async (promo: any, botToken: string, tgSettings: any): Promise<{ channelPostId?: number, groupPostId?: number, error?: string }> => {
+    console.log("--- Telegram Request Started ---");
+    console.log("Promo ID:", promo.pageId || promo.id);
+    console.log("Bot Token Loaded:", botToken ? "YES (starts with " + botToken.substring(0, 5) + "...)" : "NO");
+    
+    try {
+      const botMeRes = await fetch("https://api.telegram.org/bot" + botToken + "/getMe");
+      const botMe = await botMeRes.json();
+      if (!botMe.ok) {
+        console.error("Telegram API Error (getMe):", botMe.description);
+        return { error: `Telegram getMe failed: ${botMe.description}` };
+      }
+
+      const botUsername = botMe.result.username || "";
+      const miniAppUrl = tgSettings.miniAppUrl || ("https://t.me/" + botUsername + "/app");
+      const claimUrl = miniAppUrl + "?startapp=" + (promo.pageId || promo.id);
+
+      const msgText = getPromoTelegramMessage(promo);
+      const replyMarkup = {
+        inline_keyboard: [
+          [
+            { text: "🎁 Claim Reward", url: claimUrl }
+          ]
+        ]
+      };
+
+      let channelPostId: number | undefined = undefined;
+      let groupPostId: number | undefined = undefined;
+      let lastError: string | undefined = undefined;
+
+      // Send to Channel if enabled
+      if (promo.autoPostChannel && tgSettings.channelUsername) {
+        console.log("Channel ID:", tgSettings.channelUsername);
+        const resCh = await fetch("https://api.telegram.org/bot" + botToken + "/sendMessage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: tgSettings.channelUsername,
+            text: msgText,
+            parse_mode: "HTML",
+            reply_markup: replyMarkup
+          })
+        });
+        const rCh = await resCh.json();
+        console.log("Telegram API Response (Channel):", rCh.ok ? "SUCCESS" : "FAILED", rCh.description || "");
+        
+        if (rCh.ok) {
+          channelPostId = rCh.result.message_id;
+          console.log("Message ID Saved (Channel):", channelPostId);
+          if (promo.pinMessage) {
+            await fetch("https://api.telegram.org/bot" + botToken + "/pinChatMessage", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chat_id: tgSettings.channelUsername, message_id: channelPostId })
+            }).catch(() => {});
+          }
+        } else {
+          lastError = `Channel Error: ${rCh.description}`;
+        }
+      }
+
+      // Send to Group if enabled
+      if (promo.autoPostGroup && (tgSettings.groupUsername || tgSettings.chatId)) {
+        const targetGroup = tgSettings.groupUsername || tgSettings.chatId;
+        console.log("Group ID:", targetGroup);
+        const resGr = await fetch("https://api.telegram.org/bot" + botToken + "/sendMessage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: targetGroup,
+            text: msgText,
+            parse_mode: "HTML",
+            reply_markup: replyMarkup
+          })
+        });
+        const rGr = await resGr.json();
+        console.log("Telegram API Response (Group):", rGr.ok ? "SUCCESS" : "FAILED", rGr.description || "");
+
+        if (rGr.ok) {
+          groupPostId = rGr.result.message_id;
+          console.log("Message ID Saved (Group):", groupPostId);
+          if (promo.pinMessage) {
+            await fetch("https://api.telegram.org/bot" + botToken + "/pinChatMessage", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chat_id: targetGroup, message_id: groupPostId })
+            }).catch(() => {});
+          }
+        } else {
+          lastError = (lastError ? lastError + " | " : "") + `Group Error: ${rGr.description}`;
+        }
+      }
+
+      console.log("--- Telegram Request Completed ---");
+      return { channelPostId, groupPostId, error: lastError };
+    } catch (err: any) {
+      console.error("Telegram Error:", err);
+      return { error: `Network/Request Error: ${err.message}` };
+    }
+  };
+
+  const updatePromoTelegramPost = async (promoId: string, status: string) => {
+    try {
+      const promoRef = doc(db, "promo_codes", promoId);
+      const promoSnap = await getDoc(promoRef);
+      if (!promoSnap.exists()) return;
+      const promo = promoSnap.data();
+
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      if (!tgSettingsSnap.exists()) return;
+      const { botToken, channelUsername, groupUsername, chatId } = tgSettingsSnap.data();
+      if (!botToken) return;
+
+      const channelPostId = promo.telegramChannelPostId;
+      const groupPostId = promo.telegramGroupPostId;
+
+      const deletePost = promo.deleteAfterExpiry === true;
+      const statusText = status === "expired" ? "PROMO EXPIRED" : (status === "budget_finished" ? "BUDGET FINISHED" : "LIMIT REACHED");
+      const editMsg = `⚠️ <b>${statusText}</b>\n\n` +
+                      `🎁 ${promo.name || "Promo Reward"}\n` +
+                      `❌ This campaign has ended and rewards are no longer available.`;
+
+      // 1. Handle Channel
+      if (channelPostId && channelUsername) {
+        if (deletePost) {
+          await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: channelUsername, message_id: channelPostId })
+          }).catch(() => {});
+        } else {
+          await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: channelUsername,
+              message_id: channelPostId,
+              text: editMsg,
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: [] } // Remove buttons
+            })
+          }).catch(() => {});
+        }
+      }
+
+      // 2. Handle Group
+      const targetGroup = groupUsername || chatId;
+      if (groupPostId && targetGroup) {
+        if (deletePost) {
+          await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: targetGroup, message_id: groupPostId })
+          }).catch(() => {});
+        } else {
+          await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: targetGroup,
+              message_id: groupPostId,
+              text: editMsg,
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: [] }
+            })
+          }).catch(() => {});
+        }
+      }
+
+      // Update flag
+      await updateDoc(promoRef, { telegramStatusUpdated: true });
+    } catch (err) {
+      console.error("Error updating Telegram post status:", err);
+    }
   };
 
   app.post("/api/admin/withdrawals/:id/approve", async (req, res) => {
@@ -4094,9 +4356,50 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // Get Status and settings
   app.get("/api/promo/status", async (req, res) => {
     try {
-      const userId = req.query.userId as string;
       const promoId = req.query.promoId as string; // Accept promoId (pageId) from query params
-      if (!userId) return res.status(400).json({ error: "Missing userId" });
+      const initData = req.query.initData as string;
+      let userId = req.query.userId as string;
+
+      if (!promoId) {
+        return res.status(400).json({ error: "Missing promoId" });
+      }
+
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      const botToken = tgSettingsSnap.exists() ? tgSettingsSnap.data()?.botToken : null;
+
+      let verifiedUser: any = null;
+      let tgAuthError: string | null = null;
+
+      if (initData && botToken) {
+        const verified = verifyTelegramInitData(initData, botToken);
+        if (verified.isValid && verified.user) {
+          verifiedUser = verified.user;
+          userId = String(verified.user.id);
+          // Auto sync/create user in Firestore!
+          await ensureTelegramUserSynced(verifiedUser);
+        } else {
+          tgAuthError = "Invalid Telegram signature. Browser bypass rejected.";
+        }
+      }
+
+      // Track Mini App Open
+      if (userId && promoId) {
+        const promoCodesColl = collection(db, "promo_codes");
+        const q = query(promoCodesColl, where("pageId", "==", promoId));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          await updateDoc(qSnap.docs[0].ref, { miniAppOpens: increment(1) }).catch(() => {});
+        }
+      }
+
+      // Allow admin testing, but otherwise enforce Telegram auth or valid query param
+      if (!userId && userId !== "ADMIN_PREVIEW") {
+        return res.status(401).json({ error: "Telegram Authentication is required. Please access this page inside the Telegram Mini App." });
+      }
+
+      if (tgAuthError && userId !== "ADMIN_PREVIEW") {
+        return res.status(401).json({ error: tgAuthError });
+      }
 
       const settingsDocRef = doc(db, "settings", "promo_rewards");
       let settingsSnap = await getDoc(settingsDocRef);
@@ -4162,8 +4465,15 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           qSnap = await getDocs(q);
         }
         if (!qSnap.empty) {
-          promoData = qSnap.docs[0].data();
+          const promoDoc = qSnap.docs[0];
+          promoData = promoDoc.data();
           requireAccessCode = promoData.requireAccessCode === true;
+
+          // Track miniAppOpens and clicks directly inside the Promo document
+          await updateDoc(promoDoc.ref, {
+            miniAppOpens: increment(1),
+            miniAppClicks: increment(1)
+          }).catch(() => {});
         }
       }
 
@@ -4203,7 +4513,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           maxUsers: promoData.maxUsers,
           usedCount: promoData.usedCount,
           totalBudget: promoData.totalBudget,
-          budgetUsed: promoData.budgetUsed
+          budgetUsed: promoData.budgetUsed,
+          // include stats to show on the preview
+          telegramViews: promoData.telegramViews || 0,
+          miniAppOpens: promoData.miniAppOpens || 0,
+          claimsCount: promoData.claimsCount || 0
         } : null
       });
 
@@ -4216,8 +4530,27 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // Unlock Promo page
   app.post("/api/promo/unlock", async (req, res) => {
     try {
-      const { userId, accessCode, promoId } = req.body;
-      if (!userId || !accessCode || !promoId) return res.status(400).json({ error: "Missing parameters" });
+      const { accessCode, promoId, initData } = req.body;
+      let userId = req.body.userId;
+      if (!promoId) return res.status(400).json({ error: "Missing promoId" });
+      const safeAccessCode = accessCode || "";
+
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      const botToken = tgSettingsSnap.exists() ? tgSettingsSnap.data()?.botToken : null;
+
+      if (initData && botToken) {
+        const verified = verifyTelegramInitData(initData, botToken);
+        if (verified.isValid && verified.user) {
+          userId = String(verified.user.id);
+          await ensureTelegramUserSynced(verified.user);
+        } else if (userId !== "ADMIN_PREVIEW") {
+          return res.status(401).json({ error: "Invalid Telegram signature." });
+        }
+      }
+
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
 
       const settingsDocRef = doc(db, "settings", "promo_rewards");
       const settingsSnap = await getDoc(settingsDocRef);
@@ -4245,8 +4578,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       // Check if access code matches (case insensitive)
-      if (!promoData.accessCode || promoData.accessCode.trim().toUpperCase() !== accessCode.trim().toUpperCase()) {
+      if (!promoData.accessCode || promoData.accessCode.trim().toUpperCase() !== safeAccessCode.trim().toUpperCase()) {
         await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
+        await updateDoc(promoDoc.ref, { wrongAccessCount: increment(1) }).catch(() => {});
         console.log("Promo Locked: Invalid Access Code");
         return res.status(400).json({ success: false, error: "Invalid Access Code. Please try again." });
       }
@@ -4277,6 +4611,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(400).json({ success: false, error: "This promo has not started yet." });
       }
       if (!isNaN(expiry.getTime()) && now > expiry) {
+        await updateDoc(promoDoc.ref, { expiredAttempts: increment(1) }).catch(() => {});
         return res.status(400).json({ success: false, error: "This promo has expired." });
       }
 
@@ -4293,6 +4628,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       // Update analytics
       await updateDoc(settingsDocRef, { pageUnlockedCount: increment(1) });
+      await updateDoc(promoDoc.ref, { successfulUnlocks: increment(1) }).catch(() => {});
 
       console.log("Promo Unlocked successfully");
       res.json({
@@ -4309,12 +4645,31 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // Redeem Promo reward
   app.post("/api/promo/redeem", async (req, res) => {
     try {
-      const { userId, randomPageId } = req.body;
-      if (!userId || !randomPageId) return res.status(400).json({ error: "Missing parameters" });
+      const { randomPageId, initData } = req.body;
+      let userId = req.body.userId;
+      if (!randomPageId) return res.status(400).json({ error: "Missing parameters" });
+
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      const botToken = tgSettingsSnap.exists() ? tgSettingsSnap.data()?.botToken : null;
+
+      let verifiedUser: any = null;
+      if (initData && botToken) {
+        const verified = verifyTelegramInitData(initData, botToken);
+        if (verified.isValid && verified.user) {
+          verifiedUser = verified.user;
+          userId = String(verified.user.id);
+          await ensureTelegramUserSynced(verified.user);
+        } else if (userId !== "ADMIN_PREVIEW") {
+          return res.status(401).json({ error: "Invalid Telegram signature. Browser bypass rejected." });
+        }
+      }
+
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
 
       const settingsDocRef = doc(db, "settings", "promo_rewards");
       const settingsSnap = await getDoc(settingsDocRef);
-      const settingsData = settingsSnap.exists() ? settingsSnap.data() : {};
 
       // Retrieve Promo via randomPageId query
       const promoCodesColl = collection(db, "promo_codes");
@@ -4333,49 +4688,63 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const promoData = promoDoc.data();
       const requireAccessCode = promoData.requireAccessCode === true;
 
+      // Fetch user profile early
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        await updateDoc(promoDoc.ref, { failedClaims: increment(1) }).catch(() => {});
+        return res.status(400).json({ error: "User profile not found. Please activate via bot first." });
+      }
+      const userData = userSnap.data();
+      const tgUserId = userData.telegramId || userId;
+
+      const userName = verifiedUser ? (verifiedUser.first_name + (verifiedUser.last_name ? " " + verifiedUser.last_name : "")) : (userData?.firstName || "User");
+      const verifiedUsername = verifiedUser ? (verifiedUser.username || "") : "";
+
       if (requireAccessCode) {
         // Verify Session exists and is active for this user & this specific promo page!
         const sessionRef = doc(db, "promo_sessions", `${userId}_${randomPageId}`);
         const sessionSnap = await getDoc(sessionRef);
         if (!sessionSnap.exists()) {
+          await updateDoc(promoDoc.ref, { failedClaims: increment(1) }).catch(() => {});
           return res.status(400).json({ error: "Your access session has expired or is not active." });
         }
         const sData = sessionSnap.data();
         if (new Date(sData.expiresAt) < new Date()) {
+          await updateDoc(promoDoc.ref, { expiredAttempts: increment(1) }).catch(() => {});
           return res.status(400).json({ error: "Your access session has expired. Please unlock again." });
         }
       }
 
-      // Fetch Telegram configs for task validation
-      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-      const userRef = doc(db, "users", userId);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
-        return res.status(400).json({ error: "User profile not found." });
+      // 5. Already Claimed Check
+      const claimRef = doc(db, "promo_claims", `${userId}_${codeUpper}`);
+      const claimSnap = await getDoc(claimRef);
+      if (claimSnap.exists() && claimSnap.data().status === "Success") {
+        await updateDoc(promoDoc.ref, { duplicateAttempts: increment(1) }).catch(() => {});
+        return res.status(400).json({ error: "You have already claimed this promo reward!" });
       }
-      const userData = userSnap.data();
-      const tgUserId = userData.telegramId || "";
 
       // Validate Telegram Group & Channel joins if bot token and configurations are active
-      if (tgSettingsSnap.exists()) {
-        const { botToken, channelUsername, groupUsername } = tgSettingsSnap.data();
-        if (botToken) {
-          const promoSettingsSnap = await getDoc(settingsDocRef);
-          if (promoSettingsSnap.exists()) {
-            const ps = promoSettingsSnap.data();
-            
-            // Check Channel Join
-            if (ps.tgChannelEnabled && channelUsername) {
-              if (!tgUserId) return res.status(400).json({ error: "Please link your Telegram ID to verify Channel subscription." });
-              const joined = await checkTelegramJoin(botToken, channelUsername, tgUserId);
-              if (!joined) return res.status(400).json({ error: `Please join our Telegram Channel (${channelUsername}) first!` });
+      if (tgSettingsSnap.exists() && botToken) {
+        const promoSettingsSnap = await getDoc(settingsDocRef);
+        if (promoSettingsSnap.exists()) {
+          const ps = promoSettingsSnap.data();
+          
+          // Check Channel Join
+          if (ps.tgChannelEnabled && tgSettingsSnap.data().channelUsername) {
+            const joined = await checkTelegramJoin(botToken, tgSettingsSnap.data().channelUsername, tgUserId);
+            if (!joined) {
+              await updateDoc(promoDoc.ref, { failedClaims: increment(1) }).catch(() => {});
+              return res.status(400).json({ error: `Please join our Telegram Channel (${tgSettingsSnap.data().channelUsername}) first!` });
             }
+          }
 
-            // Check Group Join
-            if (ps.tgGroupEnabled && groupUsername) {
-              if (!tgUserId) return res.status(400).json({ error: "Please link your Telegram ID to verify Group membership." });
-              const joined = await checkTelegramJoin(botToken, groupUsername, tgUserId);
-              if (!joined) return res.status(400).json({ error: `Please join our Telegram Chat Group (${groupUsername}) first!` });
+          // Check Group Join
+          if (ps.tgGroupEnabled && tgSettingsSnap.data().groupUsername) {
+            const joined = await checkTelegramJoin(botToken, tgSettingsSnap.data().groupUsername, tgUserId);
+            if (!joined) {
+              await updateDoc(promoDoc.ref, { failedClaims: increment(1) }).catch(() => {});
+              return res.status(400).json({ error: `Please join our Telegram Chat Group (${tgSettingsSnap.data().groupUsername}) first!` });
             }
           }
         }
@@ -4387,9 +4756,15 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       // Start transaction to verify limits and credit reward
       await runTransaction(db, async (transaction) => {
-        // Re-get inside transaction for locking
+        // 1. Re-get inside transaction for locking (ALL READS FIRST)
         const promoRef = doc(db, "promo_codes", codeUpper);
-        const promoSnap = await transaction.get(promoRef);
+        const userStatsRef = doc(db, "promo_user_stats", userId);
+        
+        const [promoSnap, userStatsSnap] = await Promise.all([
+          transaction.get(promoRef),
+          transaction.get(userStatsRef)
+        ]);
+
         if (!promoSnap.exists() || !promoSnap.data().enabled) {
           throw new Error("Invalid or inactive promo reward.");
         }
@@ -4413,17 +4788,23 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           throw new Error("This promo has run out of its allocated budget.");
         }
 
-        // 5. Already Claimed Check
-        const claimRef = doc(db, "promo_claims", `${userId}_${codeUpper}`);
-        const claimSnap = await transaction.get(claimRef);
-        if (claimSnap.exists() && claimSnap.data().status === "Success") {
-          throw new Error("You have already claimed this promo reward!");
-        }
-
+        // (ALL WRITES AFTER READS)
+        
         // 7. Promo Code counts
         transaction.update(promoRef, {
+
           usedCount: increment(1),
-          budgetUsed: increment(rewardAmount)
+          budgetUsed: increment(rewardAmount),
+          claimsCount: increment(1),
+          // Store claimLogs in doc
+          claimLogs: arrayUnion({
+            userId,
+            username: userName,
+            telegramId: tgUserId,
+            status: "Success",
+            amount: rewardAmount,
+            time: `${today} ${todayTime}`
+          })
         });
 
         // 8. User Wallets
@@ -4440,8 +4821,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         });
 
         // 10. Unique User Tracking
-        const userStatsRef = doc(db, "promo_user_stats", userId);
-        const userStatsSnap = await transaction.get(userStatsRef);
         let isNewUnique = false;
         if (!userStatsSnap.exists()) {
           isNewUnique = true;
@@ -4453,6 +4832,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           transaction.update(userStatsRef, { claimedCount: increment(1) });
         }
 
+
         if (isNewUnique) {
           transaction.update(settingsDocRef, { uniqueUsersCount: increment(1) });
         }
@@ -4460,7 +4840,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         // 11. Write Success Claim
         transaction.set(claimRef, {
           userId,
-          username: userData.name || userData.username || "User",
+          username: userName,
           telegramId: tgUserId,
           promoCode: codeUpper,
           promoName: pData.name || "Promo Reward",
@@ -4475,25 +4855,29 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // Send Telegram notification
       try {
         if (tgSettingsSnap.exists()) {
-          const { botToken, rewardChannelId } = tgSettingsSnap.data();
+          const { botToken, rewardChannelId, adminChatId, chatId } = tgSettingsSnap.data();
           if (botToken) {
-            const userName = userData.name || userData.username || "User";
-            const adminMessage = `🎁 *Premium Promo Code Redeemed!*\n\n👤 *User:* ${userName}\n🎟 *Promo Code:* \`${codeUpper}\`\n💰 *Reward:* ₹${rewardAmount.toFixed(2)}\n📅 *Date:* ${today} | ${todayTime}\n\nBalance updated instantly! 🥳`;
-            const userMessage = `🎁 *Premium Promo Reward Redeemed!*\n\n👤 *User:* ${userName}\n🎟 *Reward:* ₹${rewardAmount.toFixed(2)}\n📅 *Date:* ${today} | ${todayTime}\n\nBalance updated instantly! 🥳`;
+            const finalAdminChat = adminChatId || chatId;
+            const eventMsg = `✅ <b>Reward Claimed</b>\n\n` +
+                             `👤 <b>User:</b> ${userName}\n` +
+                             `🆔 <b>Telegram ID:</b> <code>${tgUserId}</code>\n` +
+                             `💰 <b>Reward:</b> ₹${rewardAmount}\n` +
+                             `🎁 <b>Promo:</b> ${promoData.name || "Promo"}\n` +
+                             `🕒 <b>Time:</b> ${today} ${todayTime}`;
             
             if (rewardChannelId) {
               await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ chat_id: rewardChannelId, text: adminMessage, parse_mode: "Markdown" })
-              });
+                body: JSON.stringify({ chat_id: rewardChannelId, text: eventMsg, parse_mode: "HTML" })
+              }).catch(() => {});
             }
-            if (tgUserId) {
+            if (finalAdminChat) {
               await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ chat_id: tgUserId, text: userMessage, parse_mode: "Markdown" })
-              });
+                body: JSON.stringify({ chat_id: finalAdminChat, text: eventMsg, parse_mode: "HTML" })
+              }).catch(() => {});
             }
           }
         }
@@ -4506,6 +4890,27 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         promoName: promoData.name || "Promo Reward",
         rewardAmount
       });
+
+      // Post-redemption: check if finished
+      try {
+        const finalSnap = await getDoc(promoDoc.ref);
+        if (finalSnap.exists()) {
+          const fData = finalSnap.data();
+          const max = Number(fData.maxUsers || 0);
+          const used = Number(fData.usedCount || 0);
+          const budget = Number(fData.totalBudget || 0);
+          const spent = Number(fData.budgetUsed || 0);
+          const reward = Number(fData.rewardAmount || 0);
+
+          if ((max > 0 && used >= max) || (budget > 0 && spent + reward > budget)) {
+            if (!fData.telegramStatusUpdated) {
+              updatePromoTelegramPost(promoDoc.id, used >= max ? "limit_reached" : "budget_finished").catch(() => {});
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error in post-redemption check:", err);
+      }
 
     } catch (e: any) {
       console.error("Error in POST /api/promo/redeem:", e);
@@ -4789,13 +5194,25 @@ Provide the response strictly in JSON format matching the schema requested.`;
   // Create Promo Code
   app.post("/api/admin/promo/promos", async (req, res) => {
     try {
-      const { name, code, rewardAmount, totalBudget, maxUsers, startDate, startTime, expiryDate, expiryTime, enabled, requireAccessCode, accessCode } = req.body;
+      const { 
+        name, code, rewardAmount, totalBudget, maxUsers, 
+        startDate, startTime, expiryDate, expiryTime, 
+        enabled, requireAccessCode, accessCode,
+        autoPostChannel, autoPostGroup, pinMessage, deleteAfterExpiry, schedulePost
+      } = req.body;
+
       if (!name || !code || !rewardAmount || !totalBudget) {
         return res.status(400).json({ error: "Missing required parameters" });
       }
 
       const codeUpper = code.toUpperCase();
       const docRef = doc(db, "promo_codes", codeUpper);
+
+      // Check if already exists
+      const existing = await getDoc(docRef);
+      if (existing.exists()) {
+        return res.status(400).json({ error: "Promo code already exists" });
+      }
 
       // Generate a completely random alphanumeric 12-character Page ID
       const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -4812,7 +5229,7 @@ Provide the response strictly in JSON format matching the schema requested.`;
       const domain = req.body.domain || "https://royshare.onrender.com";
       const promoPageUrl = `${domain}/promo/${pageId}`;
 
-      await setDoc(docRef, {
+      const promoData: any = {
         name,
         code: codeUpper,
         promoCode: codeUpper,
@@ -4831,16 +5248,61 @@ Provide the response strictly in JSON format matching the schema requested.`;
         requireAccessCode: requireAccessCode ?? false,
         accessCode: accessCode || "",
         promoPageUrl,
-        createdAt: new Date().toISOString()
-      });
+        createdAt: new Date().toISOString(),
+        // Telegram Campaign Fields
+        autoPostChannel: autoPostChannel ?? true,
+        autoPostGroup: autoPostGroup ?? true,
+        pinMessage: pinMessage ?? false,
+        deleteAfterExpiry: deleteAfterExpiry ?? false,
+        schedulePost: schedulePost ?? false,
+        // Analytics
+        telegramViews: 0,
+        miniAppOpens: 0,
+        successfulUnlocks: 0,
+        failedClaims: 0,
+        duplicateAttempts: 0,
+        expiredAttempts: 0,
+        wrongAccessCount: 0,
+        claimLogs: []
+      };
 
-      console.log("Firestore write success");
-      console.log("Firestore document id:", docRef.id);
+      await setDoc(docRef, promoData);
 
-      res.json({ success: true, randomPageId: pageId, pageId });
+      // Trigger Automatic Telegram Post
+      let tgResult = { channelPostId: null, groupPostId: null, error: null };
+      try {
+        const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        if (tgSettingsSnap.exists()) {
+          const tgSettings = tgSettingsSnap.data();
+          const botToken = tgSettings.botToken;
+          if (botToken && (promoData.autoPostChannel || promoData.autoPostGroup)) {
+            const result = await postPromoToTelegram(promoData, botToken, tgSettings);
+            tgResult = { 
+              channelPostId: result.channelPostId || null, 
+              groupPostId: result.groupPostId || null,
+              error: result.error || null
+            };
+            // Update the doc with post IDs
+            await updateDoc(docRef, {
+              telegramChannelPostId: tgResult.channelPostId,
+              telegramGroupPostId: tgResult.groupPostId,
+              telegramMessageId: tgResult.channelPostId || tgResult.groupPostId
+            });
+          } else if (!botToken && (promoData.autoPostChannel || promoData.autoPostGroup)) {
+            tgResult.error = "Bot token missing in Telegram settings";
+          }
+        } else {
+          tgResult.error = "Telegram settings not found in database";
+        }
+      } catch (tgErr: any) {
+        console.error("Auto-post Telegram error:", tgErr);
+        tgResult.error = tgErr.message;
+      }
+
+      res.json({ success: true, randomPageId: pageId, pageId, telegram: tgResult });
     } catch (e: any) {
       console.error("Error in POST /api/admin/promo/promos:", e);
-      res.status(500).json({ error: "Server error" });
+      res.status(500).json({ error: e.message || "Server error" });
     }
   });
 
@@ -4901,6 +5363,269 @@ Provide the response strictly in JSON format matching the schema requested.`;
       res.status(500).json({ error: "Server error" });
     }
   });
+
+  // Resend Telegram Post
+  app.post("/api/admin/promo/promos/resend/:id", async (req, res) => {
+    try {
+      const idUpper = req.params.id.toUpperCase();
+      const ref = doc(db, "promo_codes", idUpper);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: "Promo not found" });
+      }
+
+      const promo = snap.data();
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      if (!tgSettingsSnap.exists()) {
+        return res.status(400).json({ error: "Telegram Settings not found" });
+      }
+
+      const tgSettings = tgSettingsSnap.data();
+      const botToken = tgSettings.botToken;
+      if (!botToken) {
+        return res.status(400).json({ error: "Telegram bot token missing in settings" });
+      }
+
+      const result = await postPromoToTelegram(promo, botToken, tgSettings);
+      
+      // Update Firestore document with new post IDs
+      await updateDoc(ref, {
+        telegramChannelPostId: result.channelPostId || null,
+        telegramGroupPostId: result.groupPostId || null,
+        telegramMessageId: result.channelPostId || result.groupPostId || null,
+        expiredProcessed: false // reset in case they manually resend
+      });
+
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      console.error("Resend error:", e);
+      res.status(500).json({ error: e.message || "Failed to resend Telegram post" });
+    }
+  });
+
+  // Pin Telegram Messages
+  app.post("/api/admin/promo/promos/pin/:id", async (req, res) => {
+    try {
+      const idUpper = req.params.id.toUpperCase();
+      const ref = doc(db, "promo_codes", idUpper);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: "Promo not found" });
+      }
+
+      const promo = snap.data();
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      if (!tgSettingsSnap.exists()) {
+        return res.status(400).json({ error: "Telegram Settings not found" });
+      }
+
+      const tgSettings = tgSettingsSnap.data();
+      const botToken = tgSettings.botToken;
+      if (!botToken) {
+        return res.status(400).json({ error: "Telegram bot token missing" });
+      }
+
+      let successCount = 0;
+      if (promo.telegramChannelPostId && tgSettings.channelUsername) {
+        const pinRes = await fetch("https://api.telegram.org/bot" + botToken + "/pinChatMessage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: tgSettings.channelUsername, message_id: promo.telegramChannelPostId })
+        });
+        const r = await pinRes.json();
+        if (r.ok) successCount++;
+      }
+
+      if (promo.telegramGroupPostId && (tgSettings.groupUsername || tgSettings.chatId)) {
+        const targetGroup = tgSettings.groupUsername || tgSettings.chatId;
+        const pinRes = await fetch("https://api.telegram.org/bot" + botToken + "/pinChatMessage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: targetGroup, message_id: promo.telegramGroupPostId })
+        });
+        const r = await pinRes.json();
+        if (r.ok) successCount++;
+      }
+
+      res.json({ success: true, pinnedCount: successCount });
+    } catch (e: any) {
+      console.error("Pin error:", e);
+      res.status(500).json({ error: e.message || "Failed to pin messages" });
+    }
+  });
+
+  // Broadcast Telegram Post
+  app.post("/api/admin/promo/promos/broadcast/:id", async (req, res) => {
+    try {
+      const idUpper = req.params.id.toUpperCase();
+      const ref = doc(db, "promo_codes", idUpper);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: "Promo not found" });
+      }
+
+      const promo = snap.data();
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      if (!tgSettingsSnap.exists()) {
+        return res.status(400).json({ error: "Telegram Settings not found" });
+      }
+
+      const tgSettings = tgSettingsSnap.data();
+      const botToken = tgSettings.botToken;
+      if (!botToken) {
+        return res.status(400).json({ error: "Telegram bot token missing" });
+      }
+
+      // Re-trigger the post helper to Channel & Group, updating the Firestore record
+      const result = await postPromoToTelegram(promo, botToken, tgSettings);
+      
+      await updateDoc(ref, {
+        telegramChannelPostId: result.channelPostId || null,
+        telegramGroupPostId: result.groupPostId || null,
+        telegramMessageId: result.channelPostId || result.groupPostId || null,
+        expiredProcessed: false
+      });
+
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      console.error("Broadcast error:", e);
+      res.status(500).json({ error: e.message || "Broadcast failed" });
+    }
+  });
+
+  // Track Telegram Views
+  app.post("/api/promo/track-view/:id", async (req, res) => {
+    try {
+      const ref = doc(db, "promo_codes", req.params.id.toUpperCase());
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: "Not found" });
+      }
+      await updateDoc(ref, {
+        telegramViews: increment(1)
+      });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Start background routine to automatically check for expired or finished promos and edit/delete their Telegram posts
+  setInterval(async () => {
+    try {
+      const now = new Date();
+      const promoCodesColl = collection(db, "promo_codes");
+      const q = query(promoCodesColl, where("enabled", "==", true));
+      const qSnap = await getDocs(q);
+      
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      if (!tgSettingsSnap.exists()) return;
+      const tgSettings = tgSettingsSnap.data();
+      const botToken = tgSettings?.botToken;
+      if (!botToken) return;
+
+      for (const promoDoc of qSnap.docs) {
+        const promo = promoDoc.data();
+        const startStr = `${promo.startDate}T${promo.startTime || "00:00"}:00`;
+        const expiryStr = `${promo.expiryDate}T${promo.expiryTime || "23:59"}:00`;
+        const start = new Date(startStr);
+        const expiry = new Date(expiryStr);
+        
+        const maxUsers = Number(promo.maxUsers || 0);
+        const usedCount = Number(promo.usedCount || 0);
+        const totalBudget = Number(promo.totalBudget || 0);
+        const budgetUsed = Number(promo.budgetUsed || 0);
+        const rewardAmount = Number(promo.rewardAmount || 0);
+
+        let isEnded = false;
+        let endReason = "";
+
+        if (!isNaN(expiry.getTime()) && now > expiry) {
+          isEnded = true;
+          endReason = "Expired";
+        } else if (maxUsers > 0 && usedCount >= maxUsers) {
+          isEnded = true;
+          endReason = "Claim Limit Reached";
+        } else if (totalBudget > 0 && (budgetUsed >= totalBudget || (totalBudget - budgetUsed) < rewardAmount)) {
+          isEnded = true;
+          endReason = "Budget Exhausted";
+        }
+
+        if (isEnded && !promo.expiredProcessed) {
+          console.log(`Promo Campaign finished: ${promo.code}. Reason: ${endReason}`);
+          
+          if (promo.deleteAfterExpiry) {
+            // Delete Channel Post
+            if (promo.telegramChannelPostId && tgSettings.channelUsername) {
+              await fetch("https://api.telegram.org/bot" + botToken + "/deleteMessage", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chat_id: tgSettings.channelUsername, message_id: promo.telegramChannelPostId })
+              }).catch(() => {});
+            }
+            // Delete Group Post
+            if (promo.telegramGroupPostId && (tgSettings.groupUsername || tgSettings.chatId)) {
+              const targetGroup = tgSettings.groupUsername || tgSettings.chatId;
+              await fetch("https://api.telegram.org/bot" + botToken + "/deleteMessage", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chat_id: targetGroup, message_id: promo.telegramGroupPostId })
+              }).catch(() => {});
+            }
+          } else {
+            // Edit Post to state: ⚠️ Promo Ended
+            const msgText = `⚠️ <b>Promo Campaign Ended</b>\n\n` +
+                            `🎁 <b>Promo:</b> ${promo.name}\n` +
+                            `🏁 <b>Status:</b> Closed (${endReason})\n\n` +
+                            `Thank you for participating! 🥳`;
+            
+            const replyMarkup = {
+              inline_keyboard: [
+                [
+                  { text: "🚫 Campaign Ended", url: "https://t.me/" }
+                ]
+              ]
+            };
+
+            // Edit Channel Post
+            if (promo.telegramChannelPostId && tgSettings.channelUsername) {
+              await fetch("https://api.telegram.org/bot" + botToken + "/editMessageText", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: tgSettings.channelUsername,
+                  message_id: promo.telegramChannelPostId,
+                  text: msgText,
+                  parse_mode: "HTML",
+                  reply_markup: replyMarkup
+                })
+              }).catch(() => {});
+            }
+            // Edit Group Post
+            if (promo.telegramGroupPostId && (tgSettings.groupUsername || tgSettings.chatId)) {
+              const targetGroup = tgSettings.groupUsername || tgSettings.chatId;
+              await fetch("https://api.telegram.org/bot" + botToken + "/editMessageText", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: targetGroup,
+                  message_id: promo.telegramGroupPostId,
+                  text: msgText,
+                  parse_mode: "HTML",
+                  reply_markup: replyMarkup
+                })
+              }).catch(() => {});
+            }
+          }
+
+          // Mark as processed
+          await updateDoc(promoDoc.ref, { expiredProcessed: true, enabled: false });
+        }
+      }
+    } catch (err) {
+      console.error("Error in background promo expiry routine:", err);
+    }
+  }, 60000);
 
   // Get Promo details by pageId (unauthenticated / with status check)
   app.get("/api/promo/details/:id", async (req, res) => {
@@ -4975,6 +5700,12 @@ Provide the response strictly in JSON format matching the schema requested.`;
       console.log("Claim limit details:", { maxUsers, usedCount });
       console.log("Computed status:", status);
       console.log("-----------------------------");
+
+      // Auto-update Telegram if expired or finished
+      if (status !== "active" && status !== "pending" && !promoData.telegramStatusUpdated) {
+        // Trigger background update
+        updatePromoTelegramPost(promoDoc.id, status).catch(() => {});
+      }
 
       // STRICT CONSTRAINTS: Never reveal code, Firestore document ID, or internal IDs
       res.json({

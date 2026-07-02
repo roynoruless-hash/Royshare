@@ -26,7 +26,12 @@ import {
   Edit3,
   Save,
   CheckCircle,
-  HelpCircle
+  HelpCircle,
+  Send,
+  Pin,
+  Radio,
+  FileText,
+  BarChart
 } from "lucide-react";
 
 interface AccessCode {
@@ -73,6 +78,13 @@ interface PromoAnalytics {
   uniqueUsersCount: number;
 }
 
+const getTelegramMessagePreview = (promo: any): string => {
+  if (!promo) return "";
+  const reward = promo.rewardAmount || 0;
+  const limit = promo.maxUsers || "∞";
+  return `🎉 NEW PROMO LIVE\n\n💰 Reward : ₹${reward}\n👥 Claim Limit : ${limit} Users\n🔥 Hurry Up\n\nClick "🎁 Claim Reward" below.`;
+};
+
 export default function PromoRewardManager() {
   const [activeSubTab, setActiveSubTab] = useState<"settings" | "promos" | "analytics">("promos");
   const [loading, setLoading] = useState<boolean>(true);
@@ -83,6 +95,13 @@ export default function PromoRewardManager() {
   const [accessCodes, setAccessCodes] = useState<AccessCode[]>([]);
   const [promos, setPromos] = useState<Promo[]>([]);
   const [analytics, setAnalytics] = useState<PromoAnalytics | null>(null);
+
+  // Card-level navigation state: Record<promoId, "rules" | "analytics" | "telegram" | "logs">
+  const [cardTabs, setCardTabs] = useState<Record<string, "rules" | "analytics" | "telegram" | "logs">>({});
+
+  // Dialog / Modal previews
+  const [msgPreviewPromo, setMsgPreviewPromo] = useState<any | null>(null);
+  const [activeLogsPromo, setActiveLogsPromo] = useState<any | null>(null);
 
   // Copy Feedback
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -95,6 +114,33 @@ export default function PromoRewardManager() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [creatingAccessCode, setCreatingAccessCode] = useState(false);
   const [creatingPromo, setCreatingPromo] = useState(false);
+
+  // Action Pending States
+  const [actionPending, setActionPending] = useState<Record<string, boolean>>({});
+
+  const handleManualAction = async (promoId: string, actionType: "resend" | "pin" | "broadcast") => {
+    setActionPending(prev => ({ ...prev, [`${promoId}-${actionType}`]: true }));
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/promo/promos/${actionType}/${promoId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (actionType === "resend") alert("Telegram Post successfully resent to Channel/Group!");
+        if (actionType === "pin") alert(`Message successfully pinned in ${data.pinnedCount} Telegram chats!`);
+        if (actionType === "broadcast") alert("Campaign post rebroadcast successfully!");
+        fetchData();
+      } else {
+        alert(data.error || `Failed to execute ${actionType} action.`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(`Error running manual campaign action: ${err.message}`);
+    } finally {
+      setActionPending(prev => ({ ...prev, [`${promoId}-${actionType}`]: false }));
+    }
+  };
 
   // Access Code Form
   const [newAccessCode, setNewAccessCode] = useState({
@@ -116,7 +162,12 @@ export default function PromoRewardManager() {
     startDate: "",
     startTime: "",
     expiryDate: "",
-    expiryTime: ""
+    expiryTime: "",
+    autoPostChannel: true,
+    autoPostGroup: true,
+    pinMessage: false,
+    deleteAfterExpiry: false,
+    schedulePost: false
   });
 
   // AI Promo Generator States
@@ -449,6 +500,9 @@ export default function PromoRewardManager() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newPromo)
       });
+      
+      const data = await res.json();
+      
       if (res.ok) {
         setNewPromo({
           name: "",
@@ -459,13 +513,28 @@ export default function PromoRewardManager() {
           startDate: "",
           startTime: "",
           expiryDate: "",
-          expiryTime: ""
+          expiryTime: "",
+          autoPostChannel: true,
+          autoPostGroup: true,
+          pinMessage: false,
+          deleteAfterExpiry: false,
+          schedulePost: false
         });
         fetchData();
-        alert("Promo Code created successfully!");
+        
+        let msg = "Promo Code created successfully!";
+        if (data.telegram?.error) {
+          msg += `\n\n⚠️ TELEGRAM ERROR: ${data.telegram.error}`;
+        } else if (data.telegram?.channelPostId || data.telegram?.groupPostId) {
+          msg += "\n\n✅ Automatic Telegram Post triggered successfully.";
+        }
+        alert(msg);
+      } else {
+        alert(`Error: ${data.error || "Failed to create promo"}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Create promo error:", err);
+      alert(`Network error: ${err.message}`);
     } finally {
       setCreatingPromo(false);
     }
@@ -1148,6 +1217,65 @@ export default function PromoRewardManager() {
                 />
               </div>
 
+              {/* 📢 AUTO TELEGRAM POST CONFIG */}
+              <div className="bg-slate-950/60 border border-slate-850 p-4 rounded-2xl space-y-3">
+                <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest block flex items-center gap-1">
+                  📢 Auto Telegram Post Config
+                </span>
+                
+                <div className="grid grid-cols-2 gap-3.5 text-[11px] text-slate-300 font-medium">
+                  <label className="flex items-center gap-2 cursor-pointer hover:text-white transition-all">
+                    <input 
+                      type="checkbox"
+                      checked={newPromo.autoPostChannel}
+                      onChange={(e) => setNewPromo({ ...newPromo, autoPostChannel: e.target.checked })}
+                      className="rounded border-slate-800 bg-slate-900 text-indigo-600 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span>Auto Post Channel</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer hover:text-white transition-all">
+                    <input 
+                      type="checkbox"
+                      checked={newPromo.autoPostGroup}
+                      onChange={(e) => setNewPromo({ ...newPromo, autoPostGroup: e.target.checked })}
+                      className="rounded border-slate-800 bg-slate-900 text-indigo-600 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span>Auto Post Group</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer hover:text-white transition-all">
+                    <input 
+                      type="checkbox"
+                      checked={newPromo.pinMessage}
+                      onChange={(e) => setNewPromo({ ...newPromo, pinMessage: e.target.checked })}
+                      className="rounded border-slate-800 bg-slate-900 text-indigo-600 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span>Pin Message</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer hover:text-white transition-all">
+                    <input 
+                      type="checkbox"
+                      checked={newPromo.schedulePost}
+                      onChange={(e) => setNewPromo({ ...newPromo, schedulePost: e.target.checked })}
+                      className="rounded border-slate-800 bg-slate-900 text-indigo-600 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span>Schedule Post</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer hover:text-white transition-all col-span-2">
+                    <input 
+                      type="checkbox"
+                      checked={newPromo.deleteAfterExpiry}
+                      onChange={(e) => setNewPromo({ ...newPromo, deleteAfterExpiry: e.target.checked })}
+                      className="rounded border-slate-800 bg-slate-900 text-indigo-600 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span className="text-rose-400">Delete Telegram Post After Expiry</span>
+                  </label>
+                </div>
+              </div>
+
               <button
                 type="submit"
                 disabled={creatingPromo}
@@ -1175,12 +1303,25 @@ export default function PromoRewardManager() {
                 {promos.map((promo) => {
                   const hasAccessCode = promo.requireAccessCode === true;
                   const promoUrl = promo.promoPageUrl || `${window.location.origin}/promo/${promo.pageId || promo.randomPageId || promo.id}`;
+                  const activeCardTab = cardTabs[promo.id] || "rules";
+
+                  // Extra analytics fields
+                  const views = (promo as any).telegramViews || 0;
+                  const opens = (promo as any).miniAppOpens || 0;
+                  const unlocks = (promo as any).successfulUnlocks || 0;
+                  const claims = promo.usedCount || 0;
+                  const failed = (promo as any).failedClaims || 0;
+                  const duplicates = (promo as any).duplicateAttempts || 0;
+                  const expired = (promo as any).expiredAttempts || 0;
+                  const wrongKeys = (promo as any).wrongAccessCount || 0;
+                  const logs = (promo as any).claimLogs || [];
+
                   return (
-                    <div key={promo.id} className="bg-slate-950/45 border border-slate-850 rounded-2xl p-5 space-y-5 relative flex flex-col justify-between">
+                    <div key={promo.id} className="bg-slate-950/45 border border-slate-850 rounded-2xl p-5 space-y-4 relative flex flex-col justify-between min-h-[480px]">
                       {/* Top Header */}
                       <div className="flex justify-between items-start">
                         <div>
-                          <h4 className="font-black text-white text-sm tracking-tight">{promo.name}</h4>
+                          <h4 className="font-black text-white text-sm tracking-tight truncate max-w-[150px]">{promo.name}</h4>
                           <div className="flex items-center gap-2 mt-1.5">
                             <span className="font-mono text-xs font-black text-indigo-400 bg-indigo-500/5 border border-indigo-500/10 px-2 py-0.5 rounded uppercase">
                               {promo.code}
@@ -1212,121 +1353,331 @@ export default function PromoRewardManager() {
                         </div>
                       </div>
 
-                      {/* Info and Progress Grid */}
-                      <div className="grid grid-cols-2 gap-4 text-xs">
-                        <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-850/40">
-                          <p className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Reward Amount</p>
-                          <p className="font-black text-emerald-400 text-sm mt-1">₹{promo.rewardAmount.toFixed(2)}</p>
-                        </div>
-                        <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-850/40">
-                          <p className="text-slate-500 font-bold uppercase text-[9px] tracking-wider">Claim Limit</p>
-                          <p className="font-black text-slate-300 text-sm mt-1">{promo.usedCount} / {promo.maxUsers || "∞"}</p>
-                        </div>
-                      </div>
-
-                      {/* Budget Progress Bar */}
-                      <div className="bg-slate-900/40 border border-slate-850/30 rounded-xl p-3 text-xs space-y-2">
-                        <div className="flex justify-between items-center text-slate-400">
-                          <span className="font-bold">Budget Progress</span>
-                          <span className="font-black">₹{promo.budgetUsed} / ₹{promo.totalBudget}</span>
-                        </div>
-                        <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-gradient-to-r from-indigo-500 to-purple-500" 
-                            style={{ width: `${Math.min(100, (promo.budgetUsed / promo.totalBudget) * 100)}%` }} 
-                          />
-                        </div>
-                      </div>
-
-                      {/* 🔒 Access Code Settings Section */}
-                      <div className="bg-slate-900/80 border border-slate-850/70 rounded-xl p-4 space-y-4">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-black text-slate-300 flex items-center gap-1.5">
-                            🔒 Require Access Code
-                          </span>
-                          <button
-                            onClick={() => {
-                              const nextState = !hasAccessCode;
-                              handleUpdatePromoField(promo.id, "requireAccessCode", nextState);
-                              // Auto-generate a code if turning ON and currently empty
-                              if (nextState && !promo.accessCode) {
-                                handleUpdatePromoField(promo.id, "accessCode", generateRandomCode());
-                              }
-                            }}
-                            className={`w-12 h-6 rounded-full p-1 transition-all duration-200 focus:outline-none ${
-                              hasAccessCode ? 'bg-indigo-600' : 'bg-slate-800'
+                      {/* Card-Level Tab Menu */}
+                      <div className="flex border-b border-slate-850/60 text-[9px] font-black uppercase tracking-wider bg-slate-950/50 p-1 rounded-xl">
+                        {(["rules", "telegram", "analytics", "logs"] as const).map((tab) => (
+                          <button 
+                            key={tab}
+                            onClick={() => setCardTabs(prev => ({ ...prev, [promo.id]: tab }))}
+                            className={`flex-1 py-1.5 text-center rounded-lg transition-all ${
+                              activeCardTab === tab 
+                                ? "bg-indigo-600/15 text-indigo-400 border border-indigo-500/20" 
+                                : "text-slate-400 hover:text-white border border-transparent"
                             }`}
                           >
-                            <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-all duration-200 ${
-                              hasAccessCode ? 'translate-x-6' : 'translate-x-0'
-                            }`} />
+                            {tab === "rules" ? "⚙️ Rules" : tab === "telegram" ? "📢 Tg" : tab === "analytics" ? "📊 Stats" : "📋 Logs"}
                           </button>
-                        </div>
+                        ))}
+                      </div>
 
-                        {hasAccessCode && (
-                          <div className="space-y-3">
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                value={promo.accessCode || ""}
-                                onChange={(e) => handleUpdatePromoField(promo.id, "accessCode", e.target.value)}
-                                placeholder="Access Code (e.g. RS-A8B9)"
-                                className="flex-1 bg-slate-950 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-3 py-2 text-xs font-black text-white uppercase tracking-wider focus:outline-none transition-all"
-                              />
-                              <button
-                                onClick={() => handleUpdatePromoField(promo.id, "accessCode", generateRandomCode())}
-                                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1"
-                                title="Regenerate Access Code (AI)"
-                              >
-                                <RefreshCw className="w-3.5 h-3.5" />
-                                <span>Regen</span>
-                              </button>
+                      {/* Tab Contents */}
+                      <div className="flex-1 py-2">
+                        {activeCardTab === "rules" && (
+                          <div className="space-y-4 animate-in fade-in duration-200">
+                            {/* Info Grid */}
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                              <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-850/40">
+                                <p className="text-slate-500 font-bold uppercase text-[8px] tracking-wider">Reward Amount</p>
+                                <p className="font-black text-emerald-400 text-xs mt-0.5">₹{promo.rewardAmount.toFixed(2)}</p>
+                              </div>
+                              <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-850/40">
+                                <p className="text-slate-500 font-bold uppercase text-[8px] tracking-wider">Claim Limit</p>
+                                <p className="font-black text-slate-300 text-xs mt-0.5">{promo.usedCount} / {promo.maxUsers || "∞"}</p>
+                              </div>
+                            </div>
+
+                            {/* Budget Progress Bar */}
+                            <div className="bg-slate-900/40 border border-slate-850/30 rounded-xl p-2.5 text-xs space-y-1.5">
+                              <div className="flex justify-between items-center text-slate-400 text-[10px]">
+                                <span className="font-bold">Budget Progress</span>
+                                <span className="font-black">₹{promo.budgetUsed} / ₹{promo.totalBudget}</span>
+                              </div>
+                              <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-gradient-to-r from-indigo-500 to-purple-500" 
+                                  style={{ width: `${Math.min(100, (promo.budgetUsed / promo.totalBudget) * 100)}%` }} 
+                                />
+                              </div>
+                            </div>
+
+                            {/* Require Access Code Settings */}
+                            <div className="bg-slate-900/80 border border-slate-850/70 rounded-xl p-3 space-y-3">
+                              <div className="flex justify-between items-center">
+                                <span className="text-[10px] font-black text-slate-300 flex items-center gap-1">
+                                  🔒 Require Access Code
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    const nextState = !hasAccessCode;
+                                    handleUpdatePromoField(promo.id, "requireAccessCode", nextState);
+                                    if (nextState && !promo.accessCode) {
+                                      handleUpdatePromoField(promo.id, "accessCode", generateRandomCode());
+                                    }
+                                  }}
+                                  className={`w-10 h-5 rounded-full p-0.5 transition-all duration-200 focus:outline-none ${
+                                    hasAccessCode ? 'bg-indigo-600' : 'bg-slate-800'
+                                  }`}
+                                >
+                                  <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-all duration-200 ${
+                                    hasAccessCode ? 'translate-x-5' : 'translate-x-0'
+                                  }`} />
+                                </button>
+                              </div>
+
+                              {hasAccessCode && (
+                                <div className="space-y-2">
+                                  <div className="flex gap-1.5">
+                                    <input
+                                      type="text"
+                                      value={promo.accessCode || ""}
+                                      onChange={(e) => handleUpdatePromoField(promo.id, "accessCode", e.target.value)}
+                                      placeholder="Access Code"
+                                      className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs font-black text-white uppercase tracking-wider focus:outline-none transition-all"
+                                    />
+                                    <button
+                                      onClick={() => handleUpdatePromoField(promo.id, "accessCode", generateRandomCode())}
+                                      className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider transition-all"
+                                      title="Generate random code"
+                                    >
+                                      Regen
+                                    </button>
+                                  </div>
+                                  
+                                  {promo.accessCode && (
+                                    <button
+                                      onClick={() => triggerCopy(promo.accessCode || "", `code-${promo.id}`)}
+                                      className="w-full py-1.5 bg-slate-950 border border-slate-850 hover:border-indigo-500 text-[9px] font-black text-slate-400 hover:text-indigo-400 rounded-lg flex items-center justify-center gap-1 transition-all"
+                                    >
+                                      {copiedId === `code-${promo.id}` ? (
+                                        <span className="text-emerald-400 font-bold">Access Code Copied!</span>
+                                      ) : (
+                                        <span>Copy Access Code</span>
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {activeCardTab === "telegram" && (
+                          <div className="space-y-3.5 animate-in fade-in duration-200 text-xs">
+                            {/* Campaign Toggles */}
+                            <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-850/40 space-y-2">
+                              <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Posting Settings</span>
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-[10px] text-slate-400">
+                                <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-all">
+                                  <input 
+                                    type="checkbox"
+                                    checked={(promo as any).autoPostChannel !== false}
+                                    onChange={(e) => handleUpdatePromoField(promo.id, "autoPostChannel", e.target.checked)}
+                                    className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0 w-3 h-3"
+                                  />
+                                  <span>Auto Post Channel</span>
+                                </label>
+
+                                <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-all">
+                                  <input 
+                                    type="checkbox"
+                                    checked={(promo as any).autoPostGroup !== false}
+                                    onChange={(e) => handleUpdatePromoField(promo.id, "autoPostGroup", e.target.checked)}
+                                    className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0 w-3 h-3"
+                                  />
+                                  <span>Auto Post Group</span>
+                                </label>
+
+                                <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-all">
+                                  <input 
+                                    type="checkbox"
+                                    checked={(promo as any).pinMessage === true}
+                                    onChange={(e) => handleUpdatePromoField(promo.id, "pinMessage", e.target.checked)}
+                                    className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0 w-3 h-3"
+                                  />
+                                  <span>Pin Message</span>
+                                </label>
+
+                                <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-all">
+                                  <input 
+                                    type="checkbox"
+                                    checked={(promo as any).schedulePost === true}
+                                    onChange={(e) => handleUpdatePromoField(promo.id, "schedulePost", e.target.checked)}
+                                    className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0 w-3 h-3"
+                                  />
+                                  <span>Schedule Post</span>
+                                </label>
+
+                                <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-all col-span-2 text-rose-400/90">
+                                  <input 
+                                    type="checkbox"
+                                    checked={(promo as any).deleteAfterExpiry === true}
+                                    onChange={(e) => handleUpdatePromoField(promo.id, "deleteAfterExpiry", e.target.checked)}
+                                    className="rounded border-slate-800 bg-slate-950 text-rose-600 focus:ring-0 w-3 h-3"
+                                  />
+                                  <span>Delete After Expiry</span>
+                                </label>
+
+                                <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-all col-span-2 text-amber-400/90">
+                                  <input 
+                                    type="checkbox"
+                                    checked={(promo as any).editAfterChanges !== false}
+                                    onChange={(e) => handleUpdatePromoField(promo.id, "editAfterChanges", e.target.checked)}
+                                    className="rounded border-slate-800 bg-slate-950 text-amber-600 focus:ring-0 w-3 h-3"
+                                  />
+                                  <span>Edit Post After Changes</span>
+                                </label>
+                              </div>
+                            </div>
+
+                            {/* Campaign Manual Controls */}
+                            <div className="space-y-2">
+                              <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Manual Bot Commands</span>
+                              
+                              <div className="grid grid-cols-3 gap-1.5 text-[9px] font-bold">
+                                <button
+                                  onClick={() => handleManualAction(promo.id, "resend")}
+                                  disabled={actionPending[`${promo.id}-resend`]}
+                                  className="py-1.5 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/20 text-indigo-400 rounded-lg flex flex-col items-center justify-center gap-1 transition-all"
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                  <span>{actionPending[`${promo.id}-resend`] ? "Sending..." : "Resend"}</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleManualAction(promo.id, "pin")}
+                                  disabled={actionPending[`${promo.id}-pin`]}
+                                  className="py-1.5 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 text-blue-400 rounded-lg flex flex-col items-center justify-center gap-1 transition-all"
+                                >
+                                  <Pin className="w-3.5 h-3.5" />
+                                  <span>{actionPending[`${promo.id}-pin`] ? "Pinning..." : "Pin"}</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleManualAction(promo.id, "broadcast")}
+                                  disabled={actionPending[`${promo.id}-broadcast`]}
+                                  className="py-1.5 bg-purple-600/10 hover:bg-purple-600/20 border border-purple-500/20 text-purple-400 rounded-lg flex flex-col items-center justify-center gap-1 transition-all"
+                                >
+                                  <Radio className="w-3.5 h-3.5" />
+                                  <span>{actionPending[`${promo.id}-broadcast`] ? "Broadcasting..." : "Broadcast"}</span>
+                                </button>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-1.5 text-[9px] font-bold">
+                                <button
+                                  onClick={() => {
+                                    const text = getTelegramMessagePreview(promo);
+                                    triggerCopy(text, `tgcopy-${promo.id}`);
+                                    alert("Post formatted text copied! Ready to manually paste anywhere.");
+                                  }}
+                                  className="py-1.5 bg-slate-900 border border-slate-850 text-slate-300 rounded-lg hover:text-white transition-all flex items-center justify-center gap-1"
+                                >
+                                  {copiedId === `tgcopy-${promo.id}` ? "Copied!" : "Copy Post"}
+                                </button>
+                                <button
+                                  onClick={() => setMsgPreviewPromo(promo)}
+                                  className="py-1.5 bg-slate-900 border border-slate-850 text-slate-300 rounded-lg hover:text-white transition-all flex items-center justify-center gap-1"
+                                >
+                                  Preview Msg
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {activeCardTab === "analytics" && (
+                          <div className="space-y-2 animate-in fade-in duration-200">
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Detailed View Metrics</span>
+                            <div className="grid grid-cols-2 gap-2 text-[10px]">
+                              <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-850/40">
+                                <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider block">TG Post Views</span>
+                                <span className="text-white font-black text-xs">{views}</span>
+                              </div>
+                              <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-850/40">
+                                <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider block">Mini App Opens</span>
+                                <span className="text-white font-black text-xs">{opens}</span>
+                              </div>
+                              <div className="bg-[#0e2c1d] p-2 rounded-lg border border-emerald-500/20">
+                                <span className="text-[8px] text-emerald-400 font-bold uppercase tracking-wider block">Access Unlocks</span>
+                                <span className="text-emerald-400 font-black text-xs">{unlocks}</span>
+                              </div>
+                              <div className="bg-[#0e2c1d] p-2 rounded-lg border border-emerald-500/20">
+                                <span className="text-[8px] text-emerald-400 font-bold uppercase tracking-wider block">Success Claims</span>
+                                <span className="text-emerald-400 font-black text-xs">{claims}</span>
+                              </div>
+                              <div className="bg-[#2c1216] p-2 rounded-lg border border-rose-500/20">
+                                <span className="text-[8px] text-rose-400 font-bold uppercase tracking-wider block">Failed Claims</span>
+                                <span className="text-rose-400 font-black text-xs">{failed}</span>
+                              </div>
+                              <div className="bg-[#2c2012] p-2 rounded-lg border border-amber-500/20">
+                                <span className="text-[8px] text-amber-500 font-bold uppercase tracking-wider block">Wrong Access Keys</span>
+                                <span className="text-amber-500 font-black text-xs">{wrongKeys}</span>
+                              </div>
+                              <div className="bg-[#2c2012] p-2 rounded-lg border border-amber-500/20">
+                                <span className="text-[8px] text-amber-500 font-bold uppercase tracking-wider block">Duplicate Claims</span>
+                                <span className="text-amber-500 font-black text-xs">{duplicates}</span>
+                              </div>
+                              <div className="bg-[#2c1216] p-2 rounded-lg border border-rose-500/20 col-span-2">
+                                <span className="text-[8px] text-rose-400 font-bold uppercase tracking-wider block">Expired Attempt Clicks</span>
+                                <span className="text-rose-400 font-black text-xs">{expired}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {activeCardTab === "logs" && (
+                          <div className="space-y-2 animate-in fade-in duration-200">
+                            <div className="flex justify-between items-center">
+                              <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Claim Transactions ({logs.length})</span>
+                              {logs.length > 0 && (
+                                <button 
+                                  onClick={() => setActiveLogsPromo(promo)}
+                                  className="text-[8px] text-indigo-400 font-bold hover:underline"
+                                >
+                                  View All
+                                </button>
+                              )}
                             </div>
                             
-                            {promo.accessCode && (
-                              <button
-                                onClick={() => triggerCopy(promo.accessCode || "", `code-${promo.id}`)}
-                                className="w-full py-2 bg-slate-950 border border-slate-850 hover:border-indigo-500 hover:bg-indigo-500/5 text-[10px] font-black text-slate-400 hover:text-indigo-400 rounded-lg flex items-center justify-center gap-1.5 transition-all"
-                              >
-                                {copiedId === `code-${promo.id}` ? (
-                                  <>
-                                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                    <span className="text-emerald-400 font-bold">Access Code Copied!</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="w-3.5 h-3.5" />
-                                    <span>Copy Access Code</span>
-                                  </>
-                                )}
-                              </button>
+                            {logs.length === 0 ? (
+                              <p className="text-[10px] text-slate-500 text-center py-6">No redemptions tracked yet for this promo.</p>
+                            ) : (
+                              <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                                {logs.slice(0, 4).map((log: any, idx: number) => (
+                                  <div key={idx} className="bg-slate-900/50 p-2 rounded-lg border border-slate-850/40 flex justify-between items-center text-[9px]">
+                                    <div>
+                                      <p className="text-white font-bold truncate max-w-[100px]">{log.firstName} {log.lastName || ""}</p>
+                                      <p className="text-slate-500 font-mono font-medium">@{log.username || log.telegramId}</p>
+                                    </div>
+                                    <div className="text-right">
+                                      <p className={log.status === "success" ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                                        {log.status === "success" ? `+₹${log.amount}` : "failed"}
+                                      </p>
+                                      <p className="text-slate-500 text-[8px] mt-0.5">{log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ""}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             )}
                           </div>
                         )}
                       </div>
 
                       {/* Footer Actions */}
-                      <div className="pt-4 border-t border-slate-850/50 flex flex-wrap gap-2">
+                      <div className="pt-3 border-t border-slate-850/50 flex flex-wrap gap-1.5">
                         <button 
                           onClick={() => triggerCopy(promoUrl, `link-${promo.id}`)}
-                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-[10px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center gap-1.5 transition-all"
+                          className="flex-1 min-w-[70px] px-2 py-1.5 bg-slate-900 hover:bg-slate-850 text-[9px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center justify-center gap-1 transition-all"
                         >
                           {copiedId === `link-${promo.id}` ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-400" />
-                              <span className="text-emerald-400 font-black">Copied Link!</span>
-                            </>
+                            <span className="text-emerald-400 font-black">Copied!</span>
                           ) : (
-                            <>
-                              <Copy className="w-3 h-3" />
-                              <span>Copy Link</span>
-                            </>
+                            <span>Copy Link</span>
                           )}
                         </button>
 
                         <button 
                           onClick={() => setPreviewPromo(promo)}
-                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-[10px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center gap-1.5 transition-all"
+                          className="px-2 py-1.5 bg-slate-900 hover:bg-slate-850 text-[9px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center justify-center gap-1 transition-all"
                         >
                           <Eye className="w-3 h-3 text-indigo-400" />
                           <span>Preview</span>
@@ -1336,7 +1687,7 @@ export default function PromoRewardManager() {
                           href={promoUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-[10px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center gap-1.5 transition-all"
+                          className="px-2 py-1.5 bg-slate-900 hover:bg-slate-850 text-[9px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center justify-center gap-1 transition-all"
                         >
                           <ExternalLink className="w-3 h-3 text-blue-400" />
                           <span>Open</span>
@@ -1344,10 +1695,10 @@ export default function PromoRewardManager() {
 
                         <button 
                           onClick={() => setQrPromo(promo)}
-                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 text-[10px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center gap-1.5 transition-all"
+                          className="px-2 py-1.5 bg-slate-900 hover:bg-slate-850 text-[9px] font-black uppercase tracking-wider text-slate-300 hover:text-white rounded-lg flex items-center justify-center gap-1 transition-all"
                         >
                           <QrCode className="w-3 h-3 text-purple-400" />
-                          <span>QR Code</span>
+                          <span>QR</span>
                         </button>
                       </div>
                     </div>
@@ -1426,6 +1777,137 @@ export default function PromoRewardManager() {
               className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-2xl text-xs font-black uppercase tracking-widest active:scale-95 transition-all shadow-lg"
             >
               Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Telegram Message Preview Modal */}
+      {msgPreviewPromo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm" onClick={() => setMsgPreviewPromo(null)} />
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-left max-w-md w-full relative overflow-hidden shadow-2xl space-y-4 z-50 animate-in fade-in zoom-in-95 duration-150">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-indigo-500" />
+            
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="font-black text-white text-xs uppercase tracking-widest flex items-center gap-1.5">
+                  📱 Telegram Post Preview
+                </h3>
+                <p className="text-[10px] text-slate-400 mt-1">This is exactly how users see your campaign post on Telegram.</p>
+              </div>
+              <button onClick={() => setMsgPreviewPromo(null)} className="text-slate-500 hover:text-white text-xs">✕</button>
+            </div>
+
+            {/* Telegram Client Style Container */}
+            <div className="bg-[#182533] text-white p-4 rounded-2xl border border-slate-800 space-y-3 font-sans relative">
+              <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-sky-400 to-blue-500 flex items-center justify-center font-bold text-white text-xs">
+                  {msgPreviewPromo.name.slice(0, 2).toUpperCase()}
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-[#50a2e9]">Promo Rewards Bot</h4>
+                  <p className="text-[9px] text-[#708499]">channel post</p>
+                </div>
+              </div>
+
+              {/* Message text with pre-wrap */}
+              <div className="text-xs text-[#f5f5f5] whitespace-pre-wrap leading-relaxed">
+                {getTelegramMessagePreview(msgPreviewPromo)}
+              </div>
+
+              {/* Inline button mimicking TG WebApp Button */}
+              <div className="pt-2">
+                <button className="w-full py-2.5 bg-[#2ea6ff] hover:bg-[#209bf2] text-white rounded-xl text-center font-bold text-xs flex items-center justify-center gap-2 transition-all">
+                  <span>🎁 Claim Reward</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-[8px] text-[#708499] block text-center mt-1 uppercase tracking-wider">Mini App URL integrated</span>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const text = getTelegramMessagePreview(msgPreviewPromo);
+                  triggerCopy(text, `copied-preview-${msgPreviewPromo.id}`);
+                  alert("Post formatted text copied!");
+                }}
+                className="flex-1 py-3 bg-slate-950 hover:bg-slate-850 border border-slate-800 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+              >
+                Copy Raw Text
+              </button>
+              <button 
+                onClick={() => setMsgPreviewPromo(null)}
+                className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detailed Claim Logs Viewer */}
+      {activeLogsPromo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm" onClick={() => setActiveLogsPromo(null)} />
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-left max-w-lg w-full relative overflow-hidden shadow-2xl space-y-4 z-50 animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[80vh]">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 to-teal-500" />
+            
+            <div className="flex justify-between items-start border-b border-slate-850 pb-3">
+              <div>
+                <h3 className="font-black text-white text-xs uppercase tracking-widest flex items-center gap-1.5">
+                  📋 Claim Transactions Log
+                </h3>
+                <p className="text-[10px] text-slate-400 mt-1">Real-time claiming activity for: <span className="text-emerald-400 font-mono font-bold uppercase">{activeLogsPromo.name}</span></p>
+              </div>
+              <button onClick={() => setActiveLogsPromo(null)} className="text-slate-400 hover:text-white text-lg font-bold">✕</button>
+            </div>
+
+            {/* Scrollable logs list */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 my-2">
+              {((activeLogsPromo as any).claimLogs || []).length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-12">No claim logs recorded yet.</p>
+              ) : (
+                ((activeLogsPromo as any).claimLogs || []).map((log: any, idx: number) => (
+                  <div key={idx} className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-850/60 flex justify-between items-center text-xs">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-black text-white">{log.firstName} {log.lastName || ""}</span>
+                        {log.username && <span className="text-[10px] text-slate-500">(@{log.username})</span>}
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-1 font-mono">
+                        ID: {log.telegramId} | IP: {log.ipAddress || "Synced App"}
+                      </div>
+                      {log.errorDetails && (
+                        <p className="text-[10px] text-rose-400/80 mt-1 bg-rose-500/5 px-2 py-0.5 rounded border border-rose-500/10 italic">
+                          Reason: {log.errorDetails}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                        log.status === "success" 
+                          ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400" 
+                          : "bg-rose-500/10 border border-rose-500/20 text-rose-400"
+                      }`}>
+                        {log.status === "success" ? `+₹${log.amount}` : "FAILED"}
+                      </span>
+                      <p className="text-[9px] text-slate-500 mt-1.5">
+                        {log.timestamp ? new Date(log.timestamp).toLocaleString() : ""}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button 
+              onClick={() => setActiveLogsPromo(null)}
+              className="w-full py-3 bg-slate-950 border border-slate-850 hover:bg-slate-850 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+            >
+              Close Transactions Log
             </button>
           </div>
         </div>
