@@ -70,6 +70,11 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [showUnlockSuccess, setShowUnlockSuccess] = useState<boolean>(false);
 
+  const [promoCodeInput, setPromoCodeInput] = useState<string>("");
+  const [verifying, setVerifying] = useState<boolean>(false);
+  const [isVerified, setIsVerified] = useState<boolean>(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+
   const [redeeming, setRedeeming] = useState<boolean>(false);
   const [redeemError, setRedeemError] = useState<string | null>(null);
   const [redeemSuccess, setRedeemSuccess] = useState<boolean>(false);
@@ -87,6 +92,9 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
     if (tg) {
       tg.expand();
       tg.ready();
+      console.log("[PromoRewardsPage] Telegram initialized in page");
+      console.log("[PromoRewardsPage] promoId prop:", promoId);
+      console.log("[PromoRewardsPage] start_param:", tg.initDataUnsafe?.start_param);
       // Apply Telegram Theme Colors
       if (tg.setHeaderColor) tg.setHeaderColor('#1c1c1c');
       if (tg.setBackgroundColor) tg.setBackgroundColor('#0f0f0f');
@@ -302,11 +310,77 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
     }
   };
 
-  const handleRedeemSubmit = async () => {
+  const handleVerifyTasks = async () => {
+    if (!userId || verifying) return;
+    setVerifying(true);
+    setVerificationError(null);
+
+    try {
+      const tg = (window as any).Telegram?.WebApp;
+      const initData = tg?.initData || "";
+
+      const res = await fetch(`${API_BASE}/api/promo/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          userId, 
+          promoId, 
+          promoCode: promoCodeInput.trim(),
+          initData 
+        })
+      });
+      
+      const data = await res.json();
+      if (data.success) {
+        setIsVerified(true);
+        // Show success briefly
+        setTimeout(() => {
+          // No need to clear error here
+        }, 1000);
+      } else {
+        setVerificationError(data.error || "Verification failed. Please check requirements.");
+      }
+    } catch (err: any) {
+      console.error("Verification error:", err);
+      setVerificationError("Network error. Please try again.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleRedeemWithAd = async () => {
     if (!userId || redeeming || isExpired) return;
 
+    // 1. Show Monetag Ad
+    const zoneId = "11210088";
+    const showAdFn = (window as any)[`show_${zoneId}`];
+
+    if (typeof showAdFn === "function") {
+      try {
+        console.log("[MONETAG] Triggering Ad...");
+        // Monetag SDK usually supports passing parameters
+        await showAdFn({ 
+          ext_id: userId, 
+          request_var: `PROMO_CLAIM_${promoId}` 
+        });
+        console.log("[MONETAG] Ad closed/finished. Proceeding to redemption.");
+      } catch (adErr) {
+        console.error("[MONETAG] Ad error:", adErr);
+        // We might still proceed or show error depending on strictness
+        // User said: "Only after successful callback: Credit wallet"
+        // But the callback is handled on backend. 
+        // We just need to give the backend enough time to receive the postback.
+      }
+    } else {
+      console.warn("[MONETAG] SDK show function not found. Proceeding anyway (ad skip detection on backend).");
+    }
+
+    // 2. Call Redeem (Backend checks postback)
     setRedeeming(true);
     setRedeemError(null);
+
+    // Small delay to allow postback to reach backend
+    await new Promise(r => setTimeout(r, 2000));
 
     try {
       const tg = (window as any).Telegram?.WebApp;
@@ -328,14 +402,14 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
         setRewardAmount(data.rewardAmount);
         setRedeemSuccess(true);
         confetti({
-          particleCount: 150,
-          spread: 70,
+          particleCount: 200,
+          spread: 100,
           origin: { y: 0.6 },
-          colors: ['#22c55e', '#3b82f6', '#f59e0b']
+          colors: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#a855f7']
         });
         fetchClaimHistory();
       } else {
-        setRedeemError(data.error || "Claim failed. Please check rules.");
+        setRedeemError(data.error || "Claim failed. Please verify if you watched the full ad.");
       }
     } catch (err) {
       console.error("Redeem error:", err);
@@ -556,8 +630,22 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
                     </div>
 
                     <div className="space-y-4">
-                      <h3 className="text-xs font-bold text-zinc-500 tracking-widest uppercase">CAMPAIGN RULES</h3>
+                      <h3 className="text-xs font-bold text-zinc-500 tracking-widest uppercase">VERIFICATION TASKS</h3>
                       <div className="space-y-3">
+                        <div className="space-y-2">
+                          <label className="text-[10px] text-zinc-500 font-bold ml-1 uppercase">Promo Reward Code</label>
+                          <input
+                            type="text"
+                            placeholder="Enter Promo Code"
+                            value={promoCodeInput}
+                            onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                            disabled={isVerified}
+                            className={`w-full bg-black border rounded-2xl py-3 px-4 text-center font-bold tracking-wider transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${
+                              isVerified ? "border-green-500/50 text-green-400" : "border-zinc-800 hover:border-zinc-700"
+                            }`}
+                          />
+                        </div>
+
                         {settings?.tgChannelEnabled && (
                           <div className="flex items-center gap-4 bg-zinc-800/50 p-4 rounded-2xl border border-zinc-700/30">
                             <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20">
@@ -565,25 +653,43 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
                             </div>
                             <div className="flex-grow">
                               <div className="text-sm font-bold">Join Official Channel</div>
-                              <div className="text-[10px] text-zinc-500 font-medium">MUST BE A MEMBER</div>
+                              <div className="text-[10px] text-zinc-500 font-medium">MEMBERSHIP REQUIRED</div>
                             </div>
-                            <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div>
+                            {isVerified ? (
+                              <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div>
+                            ) : (
+                              <div className="text-zinc-700"><Clock className="w-5 h-5" /></div>
+                            )}
                           </div>
                         )}
-                        <div className="flex items-center gap-4 bg-zinc-800/50 p-4 rounded-2xl border border-zinc-700/30">
-                          <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 border border-purple-500/20">
-                            <Users className="w-5 h-5" />
+                        
+                        {settings?.tgGroupEnabled && (
+                          <div className="flex items-center gap-4 bg-zinc-800/50 p-4 rounded-2xl border border-zinc-700/30">
+                            <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 border border-purple-500/20">
+                              <Users className="w-5 h-5" />
+                            </div>
+                            <div className="flex-grow">
+                              <div className="text-sm font-bold">Join Group Chat</div>
+                              <div className="text-[10px] text-zinc-500 font-medium">ACTIVE PARTICIPATION</div>
+                            </div>
+                            {isVerified ? (
+                              <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div>
+                            ) : (
+                              <div className="text-zinc-700"><Clock className="w-5 h-5" /></div>
+                            )}
                           </div>
-                          <div className="flex-grow">
-                            <div className="text-sm font-bold">One Claim per ID</div>
-                            <div className="text-[10px] text-zinc-500 font-medium">ANTI-SPAM ACTIVE</div>
-                          </div>
-                          <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div>
-                        </div>
+                        )}
                       </div>
                     </div>
 
                     <div className="space-y-4">
+                      {verificationError && (
+                        <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3">
+                          <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
+                          <p className="text-sm text-red-400 font-medium">{verificationError}</p>
+                        </div>
+                      )}
+
                       {redeemError && (
                         <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3">
                           <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
@@ -592,27 +698,44 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
                       )}
 
                       {!redeemSuccess ? (
-                        <button
-                          onClick={handleRedeemSubmit}
-                          disabled={redeeming || isExpired}
-                          className={`w-full group relative py-5 rounded-2xl font-black text-lg transition-all overflow-hidden ${
-                            isExpired 
-                              ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" 
-                              : "bg-white text-black hover:bg-zinc-100 active:scale-[0.97]"
-                          }`}
-                        >
-                          <div className="relative z-10 flex items-center justify-center gap-3">
-                            {redeeming ? (
-                              <Loader2 className="w-6 h-6 animate-spin" />
-                            ) : (
-                              <>
-                                <Zap className={`w-6 h-6 ${isExpired ? 'text-zinc-500' : 'text-blue-600'}`} />
-                                {isExpired ? "CAMPAIGN EXPIRED" : "CLAIM REWARD NOW"}
-                                <ArrowRight className="w-5 h-5 opacity-50 group-hover:translate-x-1 transition-transform" />
-                              </>
-                            )}
-                          </div>
-                        </button>
+                        <>
+                          {!isVerified ? (
+                            <button
+                              onClick={handleVerifyTasks}
+                              disabled={verifying || !promoCodeInput.trim()}
+                              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-5 rounded-2xl shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-3"
+                            >
+                              {verifying ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+                                <>
+                                  <ShieldCheck className="w-6 h-6" />
+                                  Verify All Requirements
+                                </>
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={handleRedeemWithAd}
+                              disabled={redeeming || isExpired}
+                              className={`w-full group relative py-6 rounded-2xl font-black text-xl transition-all overflow-hidden ${
+                                isExpired 
+                                  ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" 
+                                  : "bg-white text-black hover:bg-zinc-100 active:scale-[0.97] shadow-[0_0_20px_rgba(255,255,255,0.3)]"
+                              }`}
+                            >
+                              <div className="relative z-10 flex items-center justify-center gap-3">
+                                {redeeming ? (
+                                  <Loader2 className="w-6 h-6 animate-spin" />
+                                ) : (
+                                  <>
+                                    <Smartphone className="w-6 h-6 text-blue-600" />
+                                    {isExpired ? "CAMPAIGN EXPIRED" : "WATCH AD & CLAIM"}
+                                    <ArrowRight className="w-5 h-5 opacity-50 group-hover:translate-x-1 transition-transform" />
+                                  </>
+                                )}
+                              </div>
+                            </button>
+                          )}
+                        </>
                       ) : (
                         <motion.div 
                           initial={{ scale: 0.9, opacity: 0 }}

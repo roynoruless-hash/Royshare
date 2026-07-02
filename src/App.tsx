@@ -135,6 +135,30 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const redirectParam = params.get("redirect") || params.get("url") || params.get("id") || params.get("alias") || params.get("linkId") || params.get("gpl_token");
     
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg) {
+      tg.ready();
+      console.log("[App.tsx] === TELEGRAM WEBAPP DEBUG ===");
+      console.log("[App.tsx] Full URL:", window.location.href);
+      console.log("[App.tsx] initData:", tg.initData);
+      console.log("[App.tsx] initDataUnsafe:", JSON.stringify(tg.initDataUnsafe, null, 2));
+      console.log("[App.tsx] version:", tg.version);
+      console.log("[App.tsx] platform:", tg.platform);
+      console.log("[App.tsx] colorScheme:", tg.colorScheme);
+      console.log("[App.tsx] isExpanded:", tg.isExpanded);
+      console.log("[App.tsx] start_param (from unsafe):", tg.initDataUnsafe?.start_param);
+      console.log("[App.tsx] ==============================");
+    }
+
+    const startParam = tg?.initDataUnsafe?.start_param || params.get("tgWebAppStartParam") || params.get("startapp");
+    console.log("[App.tsx] Final Resolved startParam:", startParam);
+
+    if (startParam && startParam.startsWith("promo_")) {
+      const extractedId = startParam.replace("promo_", "");
+      console.log("[App.tsx] MATCH! Routing to PromoRewardsPage with ID:", extractedId);
+      return <PromoRewardsPage promoId={extractedId} />;
+    }
+
     let detectedLinkId: string | null = null;
     let detectedType: "shortener" | "download" | null = null;
 

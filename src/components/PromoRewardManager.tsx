@@ -1580,6 +1580,23 @@ export default function PromoRewardManager() {
                                   Preview Msg
                                 </button>
                               </div>
+
+                              {(promo as any).telegramDeepLink && (
+                                <div className="space-y-1.5 pt-1">
+                                  <span className="text-[8px] font-black text-indigo-400/80 uppercase tracking-widest block">Direct Telegram Link</span>
+                                  <div className="flex gap-1.5">
+                                    <div className="flex-1 bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-[9px] text-slate-400 font-mono truncate">
+                                      {(promo as any).telegramDeepLink}
+                                    </div>
+                                    <button 
+                                      onClick={() => triggerCopy((promo as any).telegramDeepLink, `dl-${promo.id}`)}
+                                      className="p-1.5 bg-slate-900 border border-slate-800 hover:border-indigo-500 text-slate-400 hover:text-indigo-400 rounded-lg transition-all shrink-0"
+                                    >
+                                      {copiedId === `dl-${promo.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </div>
                         )}

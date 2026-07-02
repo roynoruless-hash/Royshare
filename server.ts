@@ -385,7 +385,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
            `Click below.`;
   };
 
-  const postPromoToTelegram = async (promo: any, botToken: string, tgSettings: any): Promise<{ channelPostId?: number, groupPostId?: number, error?: string }> => {
+  const postPromoToTelegram = async (promo: any, botToken: string, tgSettings: any): Promise<{ channelPostId?: number, groupPostId?: number, error?: string, deepLink?: string }> => {
     console.log("--- Telegram Request Started ---");
     console.log("Promo ID:", promo.pageId || promo.id);
     console.log("Bot Token Loaded:", botToken ? "YES (starts with " + botToken.substring(0, 5) + "...)" : "NO");
@@ -399,14 +399,87 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       }
 
       const botUsername = botMe.result.username || "";
-      const miniAppUrl = tgSettings.miniAppUrl || ("https://t.me/" + botUsername + "/app");
-      const claimUrl = miniAppUrl + "?startapp=" + (promo.pageId || promo.id);
+      const randomId = promo.randomPageId || promo.pageId || promo.id;
+      
+      const baseUrl = "https://royshare.onrender.com"; // User's production domain
+      const webAppUrl = `${baseUrl}/?tgWebAppStartParam=promo_${randomId}`;
+      
+      // Use Direct Link from settings or fall back to bot username based one if absolutely necessary
+      const storedMiniAppUrl = tgSettings.miniAppUrl || "";
+      console.log("--- Telegram Link Detection ---");
+      console.log("Stored Mini App URL in Settings:", storedMiniAppUrl || "NONE");
+      
+      let directLinkBase = storedMiniAppUrl;
+      if (!directLinkBase) {
+        console.warn("[Telegram] No Mini App Direct Link found in settings. Defaulting to /app fallback for bot:", botUsername);
+        directLinkBase = `https://t.me/${botUsername}/app`;
+      }
+      
+      const deepLink = `${directLinkBase}${directLinkBase.includes("?") ? "&" : "?"}startapp=promo_${randomId}`;
 
       const msgText = getPromoTelegramMessage(promo);
+      
+      const rewardButton: any = { 
+        text: "🎁 Claim Reward", 
+        web_app: { url: webAppUrl } 
+      };
+
+      // Safety check: throw error if "url" is used for rewardButton instead of "web_app"
+      if (rewardButton.url) {
+        throw new Error("CRITICAL SECURITY RISK: Use of 'url' instead of 'web_app' for claim button detected.");
+      }
+
       const replyMarkup = {
         inline_keyboard: [
+          [rewardButton],
           [
-            { text: "🎁 Claim Reward", url: claimUrl }
+            { 
+              text: "🌐 Open in Browser", 
+              url: `${baseUrl}/promo/${randomId}` 
+            }
+          ]
+        ]
+      };
+
+      console.log("--- Telegram Payload Summary ---");
+      console.log("Bot Username:", botUsername);
+      console.log("WebApp URL (Button):", webAppUrl);
+      console.log("Deep Link (Fallback):", deepLink);
+      console.log("Reply Markup JSON:", JSON.stringify(replyMarkup, null, 2));
+      console.log("----------------------------");
+
+      const sendTelegramMessage = async (chatId: string, text: string, markup: any): Promise<any> => {
+        const payload = {
+          chat_id: chatId,
+          text: text,
+          parse_mode: "HTML",
+          reply_markup: markup
+        };
+        console.log(`[Telegram] Request to ${chatId}:`, JSON.stringify(payload));
+        
+        const res = await fetch("https://api.telegram.org/bot" + botToken + "/sendMessage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        console.log(`[Telegram] Response from ${chatId}:`, JSON.stringify(data));
+        return data;
+      };
+
+      const fallbackReplyMarkup = {
+        inline_keyboard: [
+          [
+            { 
+              text: "🎁 Claim Reward (Mini App)", 
+              url: deepLink 
+            }
+          ],
+          [
+            { 
+              text: "🌐 Open in Browser", 
+              url: `${baseUrl}/promo/${randomId}` 
+            }
           ]
         ]
       };
@@ -417,23 +490,16 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
 
       // Send to Channel if enabled
       if (promo.autoPostChannel && tgSettings.channelUsername) {
-        console.log("Channel ID:", tgSettings.channelUsername);
-        const resCh = await fetch("https://api.telegram.org/bot" + botToken + "/sendMessage", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: tgSettings.channelUsername,
-            text: msgText,
-            parse_mode: "HTML",
-            reply_markup: replyMarkup
-          })
-        });
-        const rCh = await resCh.json();
-        console.log("Telegram API Response (Channel):", rCh.ok ? "SUCCESS" : "FAILED", rCh.description || "");
+        let rCh = await sendTelegramMessage(tgSettings.channelUsername, msgText, replyMarkup);
         
+        if (!rCh.ok && rCh.description?.toLowerCase().includes("web_app")) {
+          console.warn("[Telegram] web_app button failed in channel. Error:", rCh.description);
+          console.warn("[Telegram] Falling back to deep link URL for channel.");
+          rCh = await sendTelegramMessage(tgSettings.channelUsername, msgText, fallbackReplyMarkup);
+        }
+
         if (rCh.ok) {
           channelPostId = rCh.result.message_id;
-          console.log("Message ID Saved (Channel):", channelPostId);
           if (promo.pinMessage) {
             await fetch("https://api.telegram.org/bot" + botToken + "/pinChatMessage", {
               method: "POST",
@@ -449,23 +515,16 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       // Send to Group if enabled
       if (promo.autoPostGroup && (tgSettings.groupUsername || tgSettings.chatId)) {
         const targetGroup = tgSettings.groupUsername || tgSettings.chatId;
-        console.log("Group ID:", targetGroup);
-        const resGr = await fetch("https://api.telegram.org/bot" + botToken + "/sendMessage", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: targetGroup,
-            text: msgText,
-            parse_mode: "HTML",
-            reply_markup: replyMarkup
-          })
-        });
-        const rGr = await resGr.json();
-        console.log("Telegram API Response (Group):", rGr.ok ? "SUCCESS" : "FAILED", rGr.description || "");
+        let rGr = await sendTelegramMessage(targetGroup, msgText, replyMarkup);
+
+        if (!rGr.ok && rGr.description?.toLowerCase().includes("web_app")) {
+          console.warn("[Telegram] web_app button failed in group. Error:", rGr.description);
+          console.warn("[Telegram] Falling back to deep link URL for group.");
+          rGr = await sendTelegramMessage(targetGroup, msgText, fallbackReplyMarkup);
+        }
 
         if (rGr.ok) {
           groupPostId = rGr.result.message_id;
-          console.log("Message ID Saved (Group):", groupPostId);
           if (promo.pinMessage) {
             await fetch("https://api.telegram.org/bot" + botToken + "/pinChatMessage", {
               method: "POST",
@@ -479,7 +538,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       }
 
       console.log("--- Telegram Request Completed ---");
-      return { channelPostId, groupPostId, error: lastError };
+      return { channelPostId, groupPostId, error: lastError, deepLink };
     } catch (err: any) {
       console.error("Telegram Error:", err);
       return { error: `Network/Request Error: ${err.message}` };
@@ -4643,6 +4702,85 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   });
 
   // Redeem Promo reward
+  app.post("/api/promo/verify", async (req, res) => {
+    try {
+      const { userId, promoId, promoCode, initData } = req.body;
+      if (!userId || !promoId || !promoCode) {
+        return res.status(400).json({ error: "Missing required parameters." });
+      }
+
+      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+      const botToken = tgSettingsSnap.exists() ? tgSettingsSnap.data()?.botToken : null;
+
+      if (initData && botToken) {
+        const verified = verifyTelegramInitData(initData, botToken);
+        if (!verified.isValid && userId !== "ADMIN_PREVIEW") {
+          return res.status(401).json({ error: "Invalid Telegram signature." });
+        }
+      }
+
+      // Retrieve Promo
+      const promoCodesColl = collection(db, "promo_codes");
+      let q = query(promoCodesColl, where("randomPageId", "==", promoId));
+      let qSnap = await getDocs(q);
+      if (qSnap.empty) {
+        q = query(promoCodesColl, where("pageId", "==", promoId));
+        qSnap = await getDocs(q);
+      }
+      if (qSnap.empty) {
+        return res.status(404).json({ error: "Promo campaign not found." });
+      }
+      
+      const promoDoc = qSnap.docs[0];
+      const promoData = promoDoc.data();
+
+      // Check Status
+      if (!promoData.enabled) return res.status(400).json({ error: "This promo is currently disabled." });
+      if (!isPromoActive(promoData.startDate, promoData.startTime, promoData.expiryDate, promoData.expiryTime)) {
+        return res.status(400).json({ error: "This promo campaign has ended." });
+      }
+
+      // 1. Verify Promo Code (Entered by user)
+      const expectedCode = promoData.promoCode || promoData.code;
+      if (expectedCode && expectedCode.trim().toUpperCase() !== promoCode.trim().toUpperCase()) {
+        return res.status(400).json({ error: "Invalid Promo Reward Code. Please check the Telegram post." });
+      }
+
+      // 2. Verify Telegram Membership
+      if (tgSettingsSnap.exists() && botToken) {
+        const tgSettings = tgSettingsSnap.data();
+        
+        // Channel
+        if (promoData.autoPostChannel && tgSettings.channelUsername && userId !== "ADMIN_PREVIEW") {
+          const joined = await checkTelegramJoin(botToken, tgSettings.channelUsername, userId);
+          if (!joined) {
+            return res.status(400).json({ error: `Please join our Channel (${tgSettings.channelUsername}) first!` });
+          }
+        }
+
+        // Group
+        if (promoData.autoPostGroup && tgSettings.groupUsername && userId !== "ADMIN_PREVIEW") {
+          const joined = await checkTelegramJoin(botToken, tgSettings.groupUsername, userId);
+          if (!joined) {
+            return res.status(400).json({ error: `Please join our Group Chat (${tgSettings.groupUsername}) first!` });
+          }
+        }
+      }
+
+      // 3. Already Claimed Check
+      const claimRef = doc(db, "promo_claims", `${userId}_${promoDoc.id}`);
+      const claimSnap = await getDoc(claimRef);
+      if (claimSnap.exists() && claimSnap.data().status === "Success") {
+        return res.status(400).json({ error: "You have already claimed this promo reward!" });
+      }
+
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Error in /api/promo/verify:", e);
+      res.status(500).json({ error: "Internal server error during verification." });
+    }
+  });
+
   app.post("/api/promo/redeem", async (req, res) => {
     try {
       const { randomPageId, initData } = req.body;
@@ -4687,6 +4825,30 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const codeUpper = promoDoc.id;
       const promoData = promoDoc.data();
       const requireAccessCode = promoData.requireAccessCode === true;
+
+      // Monetag Ad Verification
+      const postbackQuery = query(
+        collection(db, "monetag_postbacks"),
+        where("identified_tg_id", "==", userId),
+        where("identified_task", "==", `PROMO_CLAIM_${randomPageId}`),
+        where("status", "==", "success")
+      );
+      
+      const postbackSnap = await getDocs(postbackQuery);
+      if (postbackSnap.empty && userId !== "ADMIN_PREVIEW") {
+        return res.status(400).json({ error: "Ad verification failed. Please watch the ad until completion." });
+      }
+
+      if (!postbackSnap.empty) {
+        // Find most recent manually if needed, but for now just take the first success
+        const pbData = postbackSnap.docs[0].data();
+        const pbTime = new Date(pbData.timestamp).getTime();
+        const now = new Date().getTime();
+        // Postback must be within last 15 minutes
+        if (now - pbTime > 15 * 60 * 1000) {
+          return res.status(400).json({ error: "Ad verification expired. Please watch the ad again." });
+        }
+      }
 
       // Fetch user profile early
       const userRef = doc(db, "users", userId);
@@ -4809,6 +4971,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
         // 8. User Wallets
         transaction.update(userRef, {
+          balance: increment(rewardAmount),
           bonusBalance: increment(rewardAmount),
           availableBalance: increment(rewardAmount),
           earnings: increment(rewardAmount)
@@ -5282,11 +5445,12 @@ Provide the response strictly in JSON format matching the schema requested.`;
               groupPostId: result.groupPostId || null,
               error: result.error || null
             };
-            // Update the doc with post IDs
+            // Update the doc with post IDs and deep link
             await updateDoc(docRef, {
               telegramChannelPostId: tgResult.channelPostId,
               telegramGroupPostId: tgResult.groupPostId,
-              telegramMessageId: tgResult.channelPostId || tgResult.groupPostId
+              telegramMessageId: tgResult.channelPostId || tgResult.groupPostId,
+              telegramDeepLink: result.deepLink || null
             });
           } else if (!botToken && (promoData.autoPostChannel || promoData.autoPostGroup)) {
             tgResult.error = "Bot token missing in Telegram settings";

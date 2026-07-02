@@ -10,6 +10,7 @@ export default function TelegramSettingsPage() {
     channelLink: localStorage.getItem("telegramChannelLink") || "",
     groupLink: localStorage.getItem("telegramGroupLink") || "",
     storageChannelId: localStorage.getItem("telegramStorageChannelId") || "",
+    miniAppUrl: localStorage.getItem("telegramMiniAppUrl") || "",
   });
   const [isPollingMode, setIsPollingMode] = useState(localStorage.getItem("isPollingMode") !== "false");
   const [feedback, setFeedback] = useState("");
@@ -190,10 +191,15 @@ export default function TelegramSettingsPage() {
           {configs.groupLink && <p className="text-xs text-blue-400">Preview: @{extractUsername(configs.groupLink)}</p>}
         </div>
       </div>
-      <div className="mt-6">
-        <label className="block text-sm font-medium text-slate-400">Storage Channel ID</label>
-        <input type="text" placeholder="-100..." value={configs.storageChannelId} onChange={e => setConfigs({...configs, storageChannelId: e.target.value})} className="w-full p-3 bg-slate-950 rounded-xl border border-white/10 text-white" />
-      </div>
+        <div className="mt-6">
+          <label className="block text-sm font-medium text-slate-400">Storage Channel ID</label>
+          <input type="text" placeholder="-100..." value={configs.storageChannelId} onChange={e => setConfigs({...configs, storageChannelId: e.target.value})} className="w-full p-3 bg-slate-950 rounded-xl border border-white/10 text-white" />
+        </div>
+        <div className="mt-6">
+          <label className="block text-sm font-medium text-slate-400">Telegram Direct Link (BotFather)</label>
+          <input type="text" placeholder="https://t.me/BotUsername/appname" value={(configs as any).miniAppUrl} onChange={e => setConfigs({...configs, miniAppUrl: e.target.value})} className="w-full p-3 bg-slate-950 rounded-xl border border-white/10 text-white" />
+          <p className="text-[10px] text-slate-500 mt-1">Example: https://t.me/Roysharearn_bot/app</p>
+        </div>
 
       {!isPollingMode && (
         <div className="mt-8 border-t border-white/10 pt-8">
