@@ -5,7 +5,7 @@ import {
   AlertCircle, Info, Users,
   Zap, Trophy, Smartphone, 
   MessageCircle, Sparkles, LayoutGrid,
-  Loader2, RefreshCw
+  Loader2, RefreshCw, Download
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import confetti from "canvas-confetti";
@@ -50,90 +50,117 @@ interface PromoRewardsPageProps {
 }
 
 const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
+  // Flow Management
+  type FlowStep = "MOBILE" | "OTP" | "VERIFIED" | "PROMO" | "CLAIM" | "SUCCESS";
+  const [currentStep, setCurrentStep] = useState<FlowStep>("MOBILE");
+
   const [userId, setUserId] = useState<string | null>(null);
-  const [username, setUsername] = useState<string>("");
-  const [telegramId, setTelegramId] = useState<string>("");
-  const [settings, setSettings] = useState<PromoSettings | null>(null);
   const [loadedPromo, setLoadedPromo] = useState<PromoDetails | null>(null);
-  const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
-  const [sessionExpiry, setSessionExpiry] = useState<string | null>(null);
-  const [timeLeftStr, setTimeLeftStr] = useState<string>("");
-  const [isExpired, setIsExpired] = useState<boolean>(false);
-  
-  const [loading, setLoading] = useState<boolean>(true);
   const [promoDetailsLoading, setPromoDetailsLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [settings, setSettings] = useState<PromoSettings | null>(null);
   const [promoErrorStatus, setPromoErrorStatus] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  const [accessCodeInput, setAccessCodeInput] = useState<string>("");
-  const [unlocking, setUnlocking] = useState<boolean>(false);
-  const [unlockError, setUnlockError] = useState<string | null>(null);
-  const [showUnlockSuccess, setShowUnlockSuccess] = useState<boolean>(false);
-
-  const [promoCodeInput, setPromoCodeInput] = useState<string>("");
-  const [verifying, setVerifying] = useState<boolean>(false);
-  const [isVerified, setIsVerified] = useState<boolean>(false);
-  const [verificationError, setVerificationError] = useState<string | null>(null);
-
-  const [redeeming, setRedeeming] = useState<boolean>(false);
-  const [redeemError, setRedeemError] = useState<string | null>(null);
-  const [redeemSuccess, setRedeemSuccess] = useState<boolean>(false);
-  const [rewardAmount, setRewardAmount] = useState<number>(0);
-
   // Verification States
-  const [isAccountVerified, setIsAccountVerified] = useState<boolean>(false);
-  const [authStep, setAuthStep] = useState<"PHONE" | "OTP">("PHONE");
   const [mobileInput, setMobileInput] = useState<string>("");
   const [otpInput, setOtpInput] = useState<string>("");
   const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [authSuccessMessage, setAuthSuccessMessage] = useState<string | null>(null);
+  const [verifiedUser, setVerifiedUser] = useState<any>(null);
+  const [sessionToken, setSessionToken] = useState<string | null>(localStorage.getItem("rs_session_token"));
+  const [resendTimer, setResendTimer] = useState<number>(0);
   
-  const [claimHistory, setClaimHistory] = useState<any[]>([]);
-  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
+  const [promoCodeInput, setPromoCodeInput] = useState<string>("");
+  const [verifyingPromo, setVerifyingPromo] = useState<boolean>(false);
+  const [promoError, setPromoError] = useState<string | null>(null);
 
-  // Initialize URL user parameters and load settings
+  const [claimLoading, setClaimLoading] = useState<boolean>(false);
+  const [rewardAmount, setRewardAmount] = useState<number>(0);
+  const [claimId, setClaimId] = useState<string>("");
+  const [claimTime, setClaimTime] = useState<string>("");
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+
+  // Device Fingerprint
+  const getFingerprint = () => {
+    const data = [
+      navigator.userAgent,
+      navigator.language,
+      screen.width,
+      screen.height,
+      screen.colorDepth,
+      new Date().getTimezoneOffset()
+    ].join("|");
+    // Simple hash
+    let hash = 0;
+    for (let i = 0; i < data.length; i++) {
+      const char = data.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(16);
+  };
+
+  const [fingerprint] = useState<string>(getFingerprint());
+
+  // ... (Initialization and Fetching)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const queryUserId = params.get("userId");
-    
     const tg = (window as any).Telegram?.WebApp;
     if (tg) {
       tg.expand();
       tg.ready();
-      console.log("[PromoRewardsPage] Telegram initialized in page");
-      console.log("[PromoRewardsPage] promoId prop:", promoId);
-      console.log("[PromoRewardsPage] start_param:", tg.initDataUnsafe?.start_param);
-      
-      if (!tg.initData) {
-        setApiError("Please open this page from Telegram Mini App");
-        setLoading(false);
-        setPromoDetailsLoading(false);
-        return;
-      }
-
-      // Apply Telegram Theme Colors
       if (tg.setHeaderColor) tg.setHeaderColor('#1c1c1c');
       if (tg.setBackgroundColor) tg.setBackgroundColor('#0f0f0f');
-    } else {
-      // If not in Telegram at all
-      setApiError("Please open this page from Telegram Mini App");
-      setLoading(false);
-      setPromoDetailsLoading(false);
-      return;
-    }
-
-    const tgUserId = tg?.initDataUnsafe?.user?.id;
-    const resolvedId = queryUserId || (tgUserId ? String(tgUserId) : null);
-
-    if (resolvedId) {
-      setUserId(resolvedId);
-    } else {
-      setLoading(false);
     }
   }, []);
 
-  // Fetch Promo Details if promoId is provided from route
+  const fetchPromoDetails = async () => {
+    setPromoDetailsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/promo/details/${promoId}`);
+      if (res.status === 404) {
+        setPromoErrorStatus("not_found");
+        return;
+      }
+      const data = await res.json();
+      if (data.success && data.promo) {
+        setLoadedPromo(data.promo);
+      } else {
+        setPromoErrorStatus("not_found");
+      }
+    } catch (err) {
+      setApiError("Failed to load promo details.");
+    } finally {
+      setPromoDetailsLoading(false);
+    }
+  };
+
+  const checkSession = async () => {
+    const token = localStorage.getItem("rs_session_token");
+    if (token) {
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/check-session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, fingerprint })
+        });
+        const data = await res.json();
+        if (data.success && data.user) {
+          setVerifiedUser(data.user);
+          setUserId(String(data.user.telegramId));
+          setCurrentStep("PROMO");
+        } else {
+          if (data.newDevice) {
+            setAuthError("⚠ New Device Detected. Please verify again.");
+          }
+          localStorage.removeItem("rs_session_token");
+        }
+      } catch (err) {
+        console.error("Session check failed", err);
+      }
+    }
+  };
+
   useEffect(() => {
     if (!promoId) {
       setPromoErrorStatus("not_found");
@@ -141,67 +168,19 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
       return;
     }
 
-    const fetchPromoDetails = async () => {
-      setPromoDetailsLoading(true);
-      setPromoErrorStatus(null);
-      setApiError(null);
-      
-      // Safety timeout to prevent infinite loading
-      const timeoutId = setTimeout(() => {
-        setPromoDetailsLoading(false);
-        setApiError("Request timed out. Please try again.");
-      }, 10000);
-
-      try {
-        const res = await fetch(`${API_BASE}/api/promo/details/${promoId}`);
-        clearTimeout(timeoutId);
-
-        if (res.status === 404) {
-          setPromoErrorStatus("not_found");
-          return;
-        }
-        
-        if (!res.ok) {
-          throw new Error(`Server returned status ${res.status}`);
-        }
-
-        const data = await res.json();
-        if (data.success && data.promo) {
-          setLoadedPromo(data.promo);
-          if (data.promo.status && data.promo.status !== "active") {
-            setPromoErrorStatus(data.promo.status);
-          }
-        } else {
-          setPromoErrorStatus("not_found");
-        }
-      } catch (err: any) {
-        console.error("Fetch Promo Details Error:", err);
-        setApiError(err.message || "Failed to load promo rewards details.");
-      } finally {
-        setPromoDetailsLoading(false);
-        clearTimeout(timeoutId);
-      }
-    };
-
+    checkSession();
     fetchPromoDetails();
   }, [promoId]);
 
   const fetchStatusAndSettings = async () => {
-    if (!userId) return;
     setLoading(true);
     setApiError(null);
-
-    const timeoutId = setTimeout(() => {
-      setLoading(false);
-      if (!loadedPromo) setApiError("Connection timed out.");
-    }, 12000);
 
     try {
       const tg = (window as any).Telegram?.WebApp;
       const initData = tg?.initData || "";
       
-      const res = await fetch(`${API_BASE}/api/promo/status?userId=${userId}&promoId=${promoId}&initData=${encodeURIComponent(initData)}`);
-      clearTimeout(timeoutId);
+      const res = await fetch(`${API_BASE}/api/promo/status?promoId=${promoId}&initData=${encodeURIComponent(initData)}`);
 
       if (!res.ok) {
         const errData = await res.json();
@@ -210,152 +189,60 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
       const data = await res.json();
       if (data.success) {
         setSettings(data.settings);
-        setUsername(data.user?.name || data.user?.username || "User");
-        setTelegramId(data.user?.telegramId || "");
-        setIsAccountVerified(data.user?.isVerified === true);
-        
-        if (data.unlocked) {
-          setIsUnlocked(true);
-          if (data.session) {
-            setSessionExpiry(data.session.expiresAt);
-          }
-        } else {
-          setIsUnlocked(false);
+        if (data.user && data.user.isVerified) {
+          setVerifiedUser(data.user);
         }
       } else {
         throw new Error(data.error || "Failed to load status");
       }
     } catch (err: any) {
       console.error("API Error (fetchStatusAndSettings):", err);
-      // Only set error if we don't have promo details yet
       if (!loadedPromo) {
         setApiError(err.message || "Failed to load promo rewards status.");
       }
     } finally {
       setLoading(false);
-      clearTimeout(timeoutId);
     }
   };
 
   useEffect(() => {
-    if (userId) {
-      fetchStatusAndSettings();
-    }
-  }, [userId]);
-
-  // Load claims history
-  const fetchClaimHistory = async () => {
-    if (!userId) return;
-    setHistoryLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/promo/claims?userId=${userId}`);
-      const data = await res.json();
-      if (data.success) {
-        setClaimHistory(data.claims || []);
-      }
-    } catch (err) {
-      console.error("Error fetching claim history:", err);
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
+    fetchStatusAndSettings();
+  }, [promoId, userId]);
 
   useEffect(() => {
-    if (isUnlocked && userId) {
-      fetchClaimHistory();
+    let interval: any;
+    if (resendTimer > 0) {
+      interval = setInterval(() => {
+        setResendTimer((prev) => prev - 1);
+      }, 1000);
     }
-  }, [isUnlocked, userId]);
-
-  // Ticking Countdown timer
-  useEffect(() => {
-    if (!isUnlocked || !sessionExpiry || !settings?.expiryEnabled) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      const targetTime = new Date(sessionExpiry).getTime();
-      const now = new Date().getTime();
-      const diff = targetTime - now;
-
-      if (diff <= 0) {
-        clearInterval(interval);
-        setTimeLeftStr("00:00:00");
-        setIsExpired(true);
-      } else {
-        const hours = Math.floor(diff / (1000 * 60 * 60));
-        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-
-        const hStr = hours.toString().padStart(2, '0');
-        const mStr = minutes.toString().padStart(2, '0');
-        const sStr = seconds.toString().padStart(2, '0');
-        setTimeLeftStr(`${hStr}:${mStr}:${sStr}`);
-      }
-    }, 1000);
-
     return () => clearInterval(interval);
-  }, [isUnlocked, sessionExpiry, settings]);
-
-  const handleUnlockSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!accessCodeInput.trim() || !userId || unlocking) return;
-
-    setUnlocking(true);
-    setUnlockError(null);
-
-    try {
-      const tg = (window as any).Telegram?.WebApp;
-      const initData = tg?.initData || "";
-
-      const res = await fetch(`${API_BASE}/api/promo/unlock`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, accessCode: accessCodeInput.trim(), promoId, initData })
-      });
-      const data = await res.json();
-
-      if (data.success) {
-        setShowUnlockSuccess(true);
-        setSessionExpiry(data.expiresAt);
-        setTimeout(() => {
-          setIsUnlocked(true);
-          setAccessCodeInput("");
-          setShowUnlockSuccess(false);
-          fetchStatusAndSettings();
-        }, 1500);
-      } else {
-        setUnlockError(data.error || "Invalid Access Code. Please try again.");
-      }
-    } catch (err) {
-      console.error("Unlock error:", err);
-      setUnlockError("Network error. Please try again later.");
-    } finally {
-      setUnlocking(false);
-    }
-  };
+  }, [resendTimer]);
 
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!mobileInput.trim() || authLoading) return;
+    if (!mobileInput.trim() || authLoading || resendTimer > 0) return;
     setAuthLoading(true);
     setAuthError(null);
     try {
-      const tg = (window as any).Telegram?.WebApp;
-      const initData = tg?.initData || "";
       const res = await fetch(`${API_BASE}/api/auth/send-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mobile: mobileInput.trim(), initData })
+        body: JSON.stringify({ mobile: mobileInput.trim(), fingerprint })
       });
       const data = await res.json();
       if (data.success) {
-        setAuthStep("OTP");
-        setAuthSuccessMessage("OTP sent to your Telegram bot!");
+        setCurrentStep("OTP");
+        setResendTimer(60);
       } else {
-        setAuthError(data.error || "Failed to send OTP.");
+        if (data.lockoutMinutes) {
+          setAuthError(`❌ Account locked. Try again in ${data.lockoutMinutes} minutes.`);
+        } else {
+          setAuthError(data.error || "Failed to send OTP.");
+        }
       }
     } catch (err) {
-      setAuthError("Network error.");
+      setAuthError("Network error. Please try again.");
     } finally {
       setAuthLoading(false);
     }
@@ -363,23 +250,32 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
 
   const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!otpInput.trim() || authLoading) return;
+    if (otpInput.length !== 4 || authLoading) return;
     setAuthLoading(true);
     setAuthError(null);
     try {
-      const tg = (window as any).Telegram?.WebApp;
-      const initData = tg?.initData || "";
       const res = await fetch(`${API_BASE}/api/auth/verify-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mobile: mobileInput.trim(), otp: otpInput.trim(), initData })
+        body: JSON.stringify({ mobile: mobileInput.trim(), otp: otpInput, fingerprint })
       });
       const data = await res.json();
       if (data.success) {
-        setIsAccountVerified(true);
-        setAuthSuccessMessage("Account verified successfully!");
+        if (data.sessionToken) {
+          localStorage.setItem("rs_session_token", data.sessionToken);
+          setSessionToken(data.sessionToken);
+        }
+        setVerifiedUser(data.user);
+        setUserId(String(data.user.telegramId));
+        setCurrentStep("VERIFIED");
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#8b5cf6', '#a78bfa', '#c4b5fd']
+        });
       } else {
-        setAuthError(data.error || "Invalid OTP.");
+        setAuthError(data.error || "Invalid verification code.");
       }
     } catch (err) {
       setAuthError("Network error.");
@@ -388,112 +284,105 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
     }
   };
 
-  const handleVerifyTasks = async () => {
-    if (!userId || verifying) return;
-    setVerifying(true);
-    setVerificationError(null);
-
+  const handleVerifyPromo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!promoCodeInput.trim() || verifyingPromo) return;
+    setVerifyingPromo(true);
+    setPromoError(null);
     try {
-      const tg = (window as any).Telegram?.WebApp;
-      const initData = tg?.initData || "";
-
       const res = await fetch(`${API_BASE}/api/promo/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          userId, 
-          promoId, 
-          promoCode: promoCodeInput.trim(),
-          initData 
+          promoCode: promoCodeInput.trim(), 
+          userId: verifiedUser?.telegramId,
+          pageId: promoId 
         })
       });
-      
       const data = await res.json();
       if (data.success) {
-        setIsVerified(true);
-        // Show success briefly
-        setTimeout(() => {
-          // No need to clear error here
-        }, 1000);
+        setCurrentStep("CLAIM");
       } else {
-        setVerificationError(data.error || "Verification failed. Please check requirements.");
+        setPromoError(data.error || "Invalid promo code or requirements not met.");
       }
-    } catch (err: any) {
-      console.error("Verification error:", err);
-      setVerificationError("Network error. Please try again.");
+    } catch (err) {
+      setPromoError("Network error.");
     } finally {
-      setVerifying(false);
+      setVerifyingPromo(false);
     }
   };
 
-  const handleRedeemWithAd = async () => {
-    if (!userId || redeeming || isExpired) return;
+  const launchAdAndClaim = async () => {
+    if (claimLoading) return;
+    setClaimLoading(true);
 
-    // 1. Show Monetag Ad
-    const zoneId = "11210088";
-    const showAdFn = (window as any)[`show_${zoneId}`];
-
-    if (typeof showAdFn === "function") {
+    const claimOnBackend = async () => {
       try {
-        console.log("[MONETAG] Triggering Ad...");
-        // Monetag SDK usually supports passing parameters
-        await showAdFn({ 
-          ext_id: userId, 
-          request_var: `PROMO_CLAIM_${promoId}` 
+        const res = await fetch(`${API_BASE}/api/promo/redeem`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            promoCode: promoCodeInput.trim(), 
+            userId: verifiedUser?.telegramId,
+            pageId: promoId,
+            fingerprint
+          })
         });
-        console.log("[MONETAG] Ad closed/finished. Proceeding to redemption.");
-      } catch (adErr) {
-        console.error("[MONETAG] Ad error:", adErr);
-        // We might still proceed or show error depending on strictness
-        // User said: "Only after successful callback: Credit wallet"
-        // But the callback is handled on backend. 
-        // We just need to give the backend enough time to receive the postback.
+        const data = await res.json();
+        if (data.success) {
+          setRewardAmount(data.rewardAmount);
+          setClaimId(data.claimId);
+          setClaimTime(data.time || new Date().toLocaleString());
+          setWalletBalance(data.newBalance || 0);
+          setCurrentStep("SUCCESS");
+          // Fireworks
+          const duration = 3 * 1000;
+          const end = Date.now() + duration;
+          const frame = () => {
+            confetti({
+              particleCount: 2,
+              angle: 60,
+              spread: 55,
+              origin: { x: 0 },
+              colors: ['#8b5cf6', '#a78bfa']
+            });
+            confetti({
+              particleCount: 2,
+              angle: 120,
+              spread: 55,
+              origin: { x: 1 },
+              colors: ['#8b5cf6', '#a78bfa']
+            });
+            if (Date.now() < end) requestAnimationFrame(frame);
+          };
+          frame();
+        } else {
+          setPromoError(data.error || "Claim failed.");
+        }
+      } catch (err) {
+        setPromoError("Server error during claim.");
+      } finally {
+        setClaimLoading(false);
       }
-    } else {
-      console.warn("[MONETAG] SDK show function not found. Proceeding anyway (ad skip detection on backend).");
-    }
+    };
 
-    // 2. Call Redeem (Backend checks postback)
-    setRedeeming(true);
-    setRedeemError(null);
-
-    // Small delay to allow postback to reach backend
-    await new Promise(r => setTimeout(r, 2000));
-
-    try {
-      const tg = (window as any).Telegram?.WebApp;
-      const initData = tg?.initData || "";
-
-      const res = await fetch(`${API_BASE}/api/promo/redeem`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          userId, 
-          randomPageId: promoId,
-          initData,
-          accessCode: "session" 
+    // Monetag Integration
+    const zoneId = "11210088";
+    const showAd = (window as any)[`show_${zoneId}`];
+    if (showAd) {
+      showAd()
+        .then(() => {
+          console.log("[MONETAG] Ad finished successfully");
+          claimOnBackend();
         })
-      });
-      const data = await res.json();
-
-      if (data.success) {
-        setRewardAmount(data.rewardAmount);
-        setRedeemSuccess(true);
-        confetti({
-          particleCount: 200,
-          spread: 100,
-          origin: { y: 0.6 },
-          colors: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#a855f7']
+        .catch((e: any) => {
+          console.error("[MONETAG] Ad error/skipped:", e);
+          setPromoError("Ad verification failed. Please watch the full ad to claim.");
+          setClaimLoading(false);
         });
-        fetchClaimHistory();
-      } else {
-        setRedeemError(data.error || "Claim failed. Please verify if you watched the full ad.");
-      }
-    } catch (err) {
-      console.error("Redeem error:", err);
-      setRedeemError("Network error. Please try again.");
-    } finally {
-      setRedeeming(false);
+    } else {
+      console.warn("[MONETAG] Ad script not found, proceeding (DEV MODE)");
+      claimOnBackend();
     }
   };
 
@@ -503,7 +392,7 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
         animate={{ rotate: 360 }}
         transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
       >
-        <Loader2 className="w-12 h-12 text-blue-500" />
+        <Loader2 className="w-12 h-12 text-indigo-500" />
       </motion.div>
       <p className="text-gray-400 font-medium animate-pulse">Initializing campaign...</p>
     </div>
@@ -552,31 +441,6 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
     );
   }
 
-  if (promoErrorStatus === "expired" || promoErrorStatus === "budget_finished" || promoErrorStatus === "claim_limit_reached") {
-    return (
-      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
-        <ErrorView 
-          type="expired" 
-          message={
-            promoErrorStatus === "expired" 
-              ? "Sorry, this promo campaign has officially ended." 
-              : promoErrorStatus === "budget_finished" 
-                ? "Campaign concluded: The allocated reward budget has been fully claimed."
-                : "Campaign concluded: All available reward slots have been filled."
-          } 
-        />
-      </div>
-    );
-  }
-
-  if (promoErrorStatus === "disabled") {
-    return (
-      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
-        <ErrorView message="This promo is currently disabled by the administrator." />
-      </div>
-    );
-  }
-
   if (apiError) {
     return (
       <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
@@ -597,444 +461,430 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
     <div className="min-h-screen bg-[#0f0f0f] text-white font-sans selection:bg-blue-500/30">
       <div className="max-w-md mx-auto min-h-screen flex flex-col p-4 md:p-6">
         
-        <header className="flex items-center justify-between py-4 mb-4">
+        <header className="flex items-center justify-between py-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Gift className="w-6 h-6 text-white" />
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/20">
+              <Trophy className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold leading-none">Promo Rewards</h1>
-              <span className="text-xs text-gray-500">Official Mini App</span>
+              <h1 className="text-xl font-black tracking-tight leading-none">ROYSHARE</h1>
+              <span className="text-[10px] font-bold text-indigo-400 tracking-[0.2em] uppercase">REWARDS</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 bg-zinc-900 px-3 py-1.5 rounded-full border border-zinc-800">
-            <ShieldCheck className="w-4 h-4 text-green-500" />
-            <span className="text-xs font-medium text-gray-300">Secure</span>
-          </div>
+          {currentStep !== "MOBILE" && currentStep !== "SUCCESS" && (
+            <button 
+              onClick={() => setCurrentStep("MOBILE")}
+              className="text-zinc-500 hover:text-white transition-colors text-xs font-bold"
+            >
+              RESET
+            </button>
+          )}
         </header>
 
-        <main className="flex-grow space-y-6">
-          
+        <main className="flex-grow flex flex-col justify-center py-8">
           <AnimatePresence mode="wait">
-            {!isUnlocked ? (
+            {currentStep === "MOBILE" && (
               <motion.div
-                key="locked"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.05 }}
-                className="space-y-6"
-              >
-                <div className="bg-zinc-900 rounded-[32px] p-8 border border-zinc-800 relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 blur-[60px] -mr-16 -mt-16 rounded-full" />
-                  
-                  <div className="relative text-center space-y-6">
-                    <div className="w-20 h-20 mx-auto bg-zinc-800 rounded-[24px] flex items-center justify-center border border-zinc-700 shadow-inner">
-                      <Lock className="w-10 h-10 text-blue-400" />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <h2 className="text-2xl font-bold">Access Protected</h2>
-                      <p className="text-gray-400 text-sm">Enter the code from the Telegram post to unlock this reward.</p>
-                    </div>
-
-                    <form onSubmit={handleUnlockSubmit} className="space-y-4">
-                      <div className="relative group">
-                        <input
-                          type="text"
-                          placeholder="Enter Access Code"
-                          value={accessCodeInput}
-                          onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
-                          className="w-full bg-black border border-zinc-800 rounded-2xl py-4 px-6 text-center text-xl font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all group-hover:border-zinc-700"
-                        />
-                      </div>
-                      
-                      {unlockError && (
-                        <motion.p 
-                          initial={{ opacity: 0, y: -10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="text-red-400 text-sm font-medium bg-red-400/10 py-2 rounded-lg"
-                        >
-                          {unlockError}
-                        </motion.p>
-                      )}
-
-                      <button
-                        type="submit"
-                        disabled={unlocking || !accessCodeInput.trim()}
-                        className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-                      >
-                        {unlocking ? <Loader2 className="w-5 h-5 animate-spin" /> : "Unlock Now"}
-                      </button>
-                    </form>
-                  </div>
-                </div>
-
-                <div className="bg-zinc-900/40 rounded-2xl p-4 border border-zinc-800 flex items-start gap-3">
-                  <Info className="w-5 h-5 text-zinc-500 shrink-0 mt-0.5" />
-                  <p className="text-xs text-zinc-400 leading-relaxed">
-                    Access codes are unique to each campaign and can be found in the description of our official Telegram posts.
-                  </p>
-                </div>
-              </motion.div>
-            ) : !isAccountVerified ? (
-              <motion.div
-                key="verification"
+                key="mobile"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
-                className="space-y-6"
+                className="space-y-8"
               >
-                <div className="bg-zinc-900 rounded-[32px] p-8 border border-zinc-800 relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 blur-[60px] -mr-16 -mt-16 rounded-full" />
-                  
-                  <div className="relative space-y-6">
-                    <div className="w-16 h-16 bg-zinc-800 rounded-2xl flex items-center justify-center border border-zinc-700 mx-auto">
-                      <ShieldCheck className="w-8 h-8 text-purple-400" />
-                    </div>
-                    
-                    <div className="text-center space-y-2">
-                      <h2 className="text-2xl font-bold">Account Verification</h2>
-                      <p className="text-gray-400 text-sm">
-                        {authStep === "PHONE" 
-                          ? "Enter your mobile number to receive a secure verification code." 
-                          : "Enter the 6-digit code sent to your Telegram bot."}
-                      </p>
-                    </div>
+                <div className="space-y-2">
+                  <h2 className="text-4xl font-black text-white leading-tight">Mobile Verification</h2>
+                  <p className="text-zinc-400 text-lg">Enter your number to continue to rewards.</p>
+                </div>
 
-                    {authStep === "PHONE" ? (
-                      <form onSubmit={handleSendOTP} className="space-y-4">
-                        <div className="space-y-2">
-                          <label className="text-xs font-semibold text-gray-500 ml-2">MOBILE NUMBER</label>
-                          <div className="relative">
-                            <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-                            <input
-                              type="tel"
-                              placeholder="+91 00000 00000"
-                              value={mobileInput}
-                              onChange={(e) => setMobileInput(e.target.value)}
-                              className="w-full bg-black border border-zinc-800 rounded-2xl py-4 pl-12 pr-6 text-lg focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-                            />
-                          </div>
-                        </div>
-                        
-                        {authError && <p className="text-red-400 text-sm text-center bg-red-400/5 py-2 rounded-xl">{authError}</p>}
-                        
-                        <button
-                          type="submit"
-                          disabled={authLoading || mobileInput.length < 10}
-                          className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-4 rounded-2xl shadow-lg shadow-purple-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-                        >
-                          {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Send Code via Bot"}
-                        </button>
-                      </form>
+                <form onSubmit={handleSendOTP} className="space-y-6">
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-bold text-zinc-500 tracking-widest uppercase ml-1">Phone Number</label>
+                    <div className="relative group">
+                      <Smartphone className="absolute left-5 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-500 group-focus-within:text-indigo-400 transition-colors" />
+                      <input
+                        type="tel"
+                        placeholder="e.g. 9876543210"
+                        value={mobileInput}
+                        onChange={(e) => setMobileInput(e.target.value.replace(/\D/g, ''))}
+                        className="w-full bg-zinc-900 border-2 border-zinc-800 rounded-[24px] py-5 pl-14 pr-6 text-xl font-bold focus:outline-none focus:border-indigo-500/50 transition-all placeholder:text-zinc-700"
+                      />
+                    </div>
+                  </div>
+
+                  {authError && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3">
+                      <AlertCircle className="w-5 h-5 text-red-500" />
+                      <p className="text-sm text-red-400 font-medium">{authError}</p>
+                    </motion.div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={authLoading || mobileInput.length < 10 || resendTimer > 0}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:hover:bg-indigo-600 text-white font-black py-5 rounded-[24px] shadow-xl shadow-indigo-600/20 transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
+                  >
+                    {authLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+                      <>
+                        {resendTimer > 0 ? `RESEND IN ${resendTimer}s` : "SEND OTP CODE"}
+                        <ArrowRight className="w-5 h-5" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              </motion.div>
+            )}
+
+            {currentStep === "OTP" && (
+              <motion.div
+                key="otp"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-8"
+              >
+                <div className="space-y-2">
+                  <h2 className="text-4xl font-black text-white leading-tight">Enter Code</h2>
+                  <p className="text-zinc-400 text-lg">We sent a 4-digit code to your Telegram bot.</p>
+                </div>
+
+                <form onSubmit={handleVerifyOTP} className="space-y-6">
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-bold text-zinc-500 tracking-widest uppercase ml-1">4-Digit OTP</label>
+                    <input
+                      type="text"
+                      placeholder="0000"
+                      maxLength={4}
+                      value={otpInput}
+                      onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
+                      className="w-full bg-zinc-900 border-2 border-zinc-800 rounded-[24px] py-6 text-center text-5xl font-black tracking-[0.4em] focus:outline-none focus:border-indigo-500/50 transition-all placeholder:text-zinc-700"
+                    />
+                  </div>
+
+                  {authError && (
+                    <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3">
+                      <AlertCircle className="w-5 h-5 text-red-500" />
+                      <p className="text-sm text-red-400 font-medium">{authError}</p>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={authLoading || otpInput.length !== 4}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 text-white font-black py-5 rounded-[24px] transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
+                  >
+                    {authLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : "VERIFY CODE"}
+                  </button>
+
+                  <div className="flex flex-col gap-3">
+                    <button
+                      type="button"
+                      disabled={resendTimer > 0}
+                      onClick={handleSendOTP}
+                      className="w-full text-white font-bold text-sm hover:text-indigo-400 transition-colors disabled:text-zinc-600"
+                    >
+                      {resendTimer > 0 ? `Resend code in ${resendTimer}s` : "Resend OTP Code"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep("MOBILE")}
+                      className="w-full text-zinc-500 font-bold text-xs hover:text-white transition-colors"
+                    >
+                      Change Mobile Number
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            )}
+
+            {currentStep === "VERIFIED" && (
+              <motion.div
+                key="verified"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.1 }}
+                className="space-y-8 text-center"
+              >
+                <div className="relative inline-block">
+                  <div className="w-24 h-24 bg-green-500 rounded-full mx-auto flex items-center justify-center shadow-2xl shadow-green-500/20">
+                    {verifiedUser?.photoUrl ? (
+                      <img src={verifiedUser.photoUrl} alt="Profile" className="w-full h-full rounded-full object-cover border-4 border-green-500/50" referrerPolicy="no-referrer" />
                     ) : (
-                      <form onSubmit={handleVerifyOTP} className="space-y-4">
-                        <div className="space-y-2">
-                          <label className="text-xs font-semibold text-gray-500 ml-2">VERIFICATION CODE</label>
-                          <input
-                            type="text"
-                            placeholder="000 000"
-                            maxLength={6}
-                            value={otpInput}
-                            onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
-                            className="w-full bg-black border border-zinc-800 rounded-2xl py-4 px-6 text-center text-2xl font-bold tracking-[0.5em] focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-                          />
-                        </div>
-                        
-                        {authError && <p className="text-red-400 text-sm text-center bg-red-400/5 py-2 rounded-xl">{authError}</p>}
-                        {authSuccessMessage && <p className="text-green-400 text-sm text-center bg-green-400/5 py-2 rounded-xl">{authSuccessMessage}</p>}
-                        
-                        <button
-                          type="submit"
-                          disabled={authLoading || otpInput.length !== 6}
-                          className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-4 rounded-2xl shadow-lg shadow-purple-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-                        >
-                          {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Verify & Continue"}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => { setAuthStep("PHONE"); setAuthError(null); }}
-                          className="w-full text-zinc-500 text-sm font-medium hover:text-zinc-300 transition-colors"
-                        >
-                          Change Number
-                        </button>
-                      </form>
+                      <CheckCircle className="w-12 h-12 text-white" />
                     )}
                   </div>
-                </div>
-
-                <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-4 flex items-start gap-3">
-                  <MessageCircle className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold text-white">How it works?</p>
-                    <p className="text-[10px] text-zinc-400 leading-relaxed">
-                      We will send a 6-digit code to your Telegram chat. Please make sure you have started our official bot before requesting the code.
-                    </p>
+                  <div className="absolute -bottom-2 -right-2 bg-green-500 text-white p-1.5 rounded-full border-4 border-[#0f0f0f]">
+                    <ShieldCheck className="w-4 h-4" />
                   </div>
                 </div>
+                
+                <div className="space-y-2">
+                  <h2 className="text-4xl font-black text-white">✅ Verified Successfully</h2>
+                  <p className="text-zinc-400 text-lg">Account identity confirmed.</p>
+                </div>
+
+                <div className="bg-zinc-900/50 border border-zinc-800 rounded-[32px] p-6 space-y-4">
+                  <div className="flex items-center justify-between p-4 bg-black/40 rounded-2xl">
+                    <span className="text-zinc-500 font-bold text-xs">NAME</span>
+                    <span className="text-white font-bold">{verifiedUser?.firstName || verifiedUser?.username}</span>
+                  </div>
+                  <div className="flex items-center justify-between p-4 bg-black/40 rounded-2xl">
+                    <span className="text-zinc-500 font-bold text-xs">USERNAME</span>
+                    <span className="text-indigo-400 font-bold">@{verifiedUser?.username || "no_username"}</span>
+                  </div>
+                  <div className="flex items-center justify-between p-4 bg-black/40 rounded-2xl">
+                    <span className="text-zinc-500 font-bold text-xs">TELEGRAM ID</span>
+                    <span className="font-mono text-indigo-400 font-bold">{verifiedUser?.telegramId}</span>
+                  </div>
+                  <div className="flex items-center justify-between p-4 bg-black/40 rounded-2xl">
+                    <span className="text-zinc-500 font-bold text-xs">MOBILE</span>
+                    <span className="font-bold text-white">{verifiedUser?.mobile}</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setCurrentStep("PROMO")}
+                  className="w-full bg-white text-black font-black py-5 rounded-[24px] shadow-xl hover:bg-zinc-200 transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
+                >
+                  CONTINUE
+                  <ArrowRight className="w-5 h-5" />
+                </button>
               </motion.div>
-            ) : (
+            )}
+
+            {currentStep === "PROMO" && (
               <motion.div
-                key="unlocked"
+                key="promo"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="space-y-6 pb-20"
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-8"
               >
-                <div className="bg-zinc-900 rounded-[32px] overflow-hidden border border-zinc-800 shadow-2xl relative">
-                  <div className="bg-gradient-to-br from-blue-600/20 via-blue-900/20 to-zinc-900 p-8 border-b border-zinc-800">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="bg-blue-500/20 text-blue-400 text-xs font-bold px-3 py-1 rounded-full border border-blue-500/30 flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5" />
-                        LIVE CAMPAIGN
-                      </div>
-                      {settings?.expiryEnabled && (
-                        <div className="flex items-center gap-2 text-orange-400 font-mono text-sm bg-orange-400/10 px-3 py-1 rounded-full border border-orange-400/20">
-                          <Clock className="w-4 h-4" />
-                          {timeLeftStr}
-                        </div>
-                      )}
+                <div className="space-y-4 text-center">
+                  <div className="bg-indigo-500/10 text-indigo-400 text-[10px] font-black px-4 py-1.5 rounded-full border border-indigo-500/20 inline-block tracking-widest uppercase mb-2">
+                    {loadedPromo?.name || "CLAIM REWARD"}
+                  </div>
+                  
+                  {/* Live Counter Display */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-3xl">
+                      <div className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Available Budget</div>
+                      <div className="text-xl font-black text-white">₹{Math.max(0, (loadedPromo?.totalBudget || 0) - (loadedPromo?.budgetUsed || 0)).toLocaleString()}</div>
                     </div>
-                    <h2 className="text-3xl font-extrabold text-white mb-2">{loadedPromo?.name || "Active Reward"}</h2>
-                    <p className="text-gray-400 text-sm">Follow the rules below to claim your reward instantly.</p>
+                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-3xl">
+                      <div className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Remaining Slots</div>
+                      <div className="text-xl font-black text-white">{Math.max(0, (loadedPromo?.maxUsers || 0) - (loadedPromo?.usedCount || 0)).toLocaleString()}</div>
+                    </div>
                   </div>
 
-                  <div className="p-8 space-y-8">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-black/40 p-4 rounded-2xl border border-zinc-800/50 space-y-1">
-                        <span className="text-[10px] text-zinc-500 font-bold tracking-widest uppercase">REWARD AMOUNT</span>
-                        <div className="text-2xl font-black text-green-500">₹{loadedPromo?.rewardAmount}</div>
-                      </div>
-                      <div className="bg-black/40 p-4 rounded-2xl border border-zinc-800/50 space-y-1">
-                        <span className="text-[10px] text-zinc-500 font-bold tracking-widest uppercase">AVAILABLE SLOTS</span>
-                        <div className="text-2xl font-black text-white">
-                          {loadedPromo?.maxUsers ? `${Math.max(0, loadedPromo.maxUsers - loadedPromo.usedCount)}` : "∞"}
-                        </div>
-                      </div>
+                  <h2 className="text-4xl font-black text-white">Enter Promo Code</h2>
+                  <p className="text-zinc-400 text-lg">Please enter the valid promo code to unlock the claim button.</p>
+                </div>
+
+                <form onSubmit={handleVerifyPromo} className="space-y-6">
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      placeholder="PROMO_CODE"
+                      value={promoCodeInput}
+                      onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                      className="w-full bg-zinc-900 border-2 border-zinc-800 rounded-[24px] py-6 text-center text-2xl font-black tracking-[0.2em] focus:outline-none focus:border-indigo-500/50 transition-all placeholder:text-zinc-800"
+                    />
+                  </div>
+
+                  {promoError && (
+                    <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3">
+                      <AlertCircle className="w-5 h-5 text-red-500" />
+                      <p className="text-sm text-red-400 font-medium">{promoError}</p>
                     </div>
+                  )}
 
-                    <div className="space-y-4">
-                      <h3 className="text-xs font-bold text-zinc-500 tracking-widest uppercase">VERIFICATION TASKS</h3>
-                      <div className="space-y-3">
-                        <div className="space-y-2">
-                          <label className="text-[10px] text-zinc-500 font-bold ml-1 uppercase">Promo Reward Code</label>
-                          <input
-                            type="text"
-                            placeholder="Enter Promo Code"
-                            value={promoCodeInput}
-                            onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
-                            disabled={isVerified}
-                            className={`w-full bg-black border rounded-2xl py-3 px-4 text-center font-bold tracking-wider transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${
-                              isVerified ? "border-green-500/50 text-green-400" : "border-zinc-800 hover:border-zinc-700"
-                            }`}
-                          />
-                        </div>
+                  <button
+                    type="submit"
+                    disabled={verifyingPromo || !promoCodeInput.trim()}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 text-white font-black py-5 rounded-[24px] transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
+                  >
+                    {verifyingPromo ? <Loader2 className="w-6 h-6 animate-spin" /> : "VERIFY CODE"}
+                  </button>
+                </form>
+              </motion.div>
+            )}
 
-                        {settings?.tgChannelEnabled && (
-                          <div className="flex items-center gap-4 bg-zinc-800/50 p-4 rounded-2xl border border-zinc-700/30">
-                            <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20">
-                              <MessageCircle className="w-5 h-5" />
-                            </div>
-                            <div className="flex-grow">
-                              <div className="text-sm font-bold">Join Official Channel</div>
-                              <div className="text-[10px] text-zinc-500 font-medium">MEMBERSHIP REQUIRED</div>
-                            </div>
-                            {isVerified ? (
-                              <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div>
-                            ) : (
-                              <div className="text-zinc-700"><Clock className="w-5 h-5" /></div>
-                            )}
-                          </div>
-                        )}
-                        
-                        {settings?.tgGroupEnabled && (
-                          <div className="flex items-center gap-4 bg-zinc-800/50 p-4 rounded-2xl border border-zinc-700/30">
-                            <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 border border-purple-500/20">
-                              <Users className="w-5 h-5" />
-                            </div>
-                            <div className="flex-grow">
-                              <div className="text-sm font-bold">Join Group Chat</div>
-                              <div className="text-[10px] text-zinc-500 font-medium">ACTIVE PARTICIPATION</div>
-                            </div>
-                            {isVerified ? (
-                              <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div>
-                            ) : (
-                              <div className="text-zinc-700"><Clock className="w-5 h-5" /></div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+            {currentStep === "CLAIM" && (
+              <motion.div
+                key="claim"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="space-y-10 text-center"
+              >
+                <div className="space-y-4">
+                  <div className="w-20 h-20 bg-indigo-500/10 rounded-3xl mx-auto flex items-center justify-center border border-indigo-500/20">
+                    <Zap className="w-10 h-10 text-indigo-400" />
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-4xl font-black text-white leading-tight">Ready to Claim!</h2>
+                    <p className="text-zinc-400">Watch a short ad to receive your reward instantly.</p>
+                  </div>
+                </div>
 
-                    <div className="space-y-4">
-                      {verificationError && (
-                        <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3">
-                          <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
-                          <p className="text-sm text-red-400 font-medium">{verificationError}</p>
-                        </div>
-                      )}
+                <div className="bg-gradient-to-br from-indigo-900/40 to-transparent border border-indigo-500/20 rounded-[40px] p-8 space-y-6 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-6 opacity-10">
+                    <Sparkles className="w-20 h-20 text-white" />
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black text-indigo-400 tracking-[0.2em] uppercase">GUARANTEED REWARD</span>
+                    <div className="text-6xl font-black text-white">₹{loadedPromo?.rewardAmount}</div>
+                  </div>
 
-                      {redeemError && (
-                        <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3">
-                          <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
-                          <p className="text-sm text-red-400 font-medium">{redeemError}</p>
-                        </div>
-                      )}
+                  <div className="h-[1px] bg-indigo-500/20 w-1/2 mx-auto" />
 
-                      {!redeemSuccess ? (
-                        <>
-                          {!isVerified ? (
-                            <button
-                              onClick={handleVerifyTasks}
-                              disabled={verifying || !promoCodeInput.trim()}
-                              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-5 rounded-2xl shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-3"
-                            >
-                              {verifying ? <Loader2 className="w-6 h-6 animate-spin" /> : (
-                                <>
-                                  <ShieldCheck className="w-6 h-6" />
-                                  Verify All Requirements
-                                </>
-                              )}
-                            </button>
-                          ) : (
-                            <button
-                              onClick={handleRedeemWithAd}
-                              disabled={redeeming || isExpired}
-                              className={`w-full group relative py-6 rounded-2xl font-black text-xl transition-all overflow-hidden ${
-                                isExpired 
-                                  ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" 
-                                  : "bg-white text-black hover:bg-zinc-100 active:scale-[0.97] shadow-[0_0_20px_rgba(255,255,255,0.3)]"
-                              }`}
-                            >
-                              <div className="relative z-10 flex items-center justify-center gap-3">
-                                {redeeming ? (
-                                  <Loader2 className="w-6 h-6 animate-spin" />
-                                ) : (
-                                  <>
-                                    <Smartphone className="w-6 h-6 text-blue-600" />
-                                    {isExpired ? "CAMPAIGN EXPIRED" : "WATCH AD & CLAIM"}
-                                    <ArrowRight className="w-5 h-5 opacity-50 group-hover:translate-x-1 transition-transform" />
-                                  </>
-                                )}
-                              </div>
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <motion.div 
-                          initial={{ scale: 0.9, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          className="bg-green-500/10 border border-green-500/20 p-6 rounded-[24px] text-center space-y-4"
-                        >
-                          <div className="w-16 h-16 mx-auto bg-green-500 rounded-full flex items-center justify-center shadow-lg shadow-green-500/30">
-                            <CheckCircle className="w-10 h-10 text-white" />
-                          </div>
-                          <div className="space-y-1">
-                            <h3 className="text-xl font-bold text-white">Reward Claimed!</h3>
-                            <p className="text-green-400 font-medium">₹{rewardAmount} has been added to your balance.</p>
-                          </div>
-                        </motion.div>
-                      )}
-                    </div>
+                  <div className="flex items-center justify-center gap-6 text-zinc-500 font-bold text-xs">
+                    <div className="flex items-center gap-1.5"><ShieldCheck className="w-4 h-4" /> VERIFIED</div>
+                    <div className="flex items-center gap-1.5"><Zap className="w-4 h-4" /> INSTANT</div>
                   </div>
                 </div>
 
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-bold text-zinc-500 tracking-widest uppercase">YOUR RECENT CLAIMS</h3>
-                    <button 
-                      onClick={fetchClaimHistory}
-                      className="text-blue-500 text-xs font-bold hover:underline"
-                    >
-                      Refresh
-                    </button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {historyLoading ? (
-                      <div className="flex justify-center py-8">
-                        <Loader2 className="w-6 h-6 text-zinc-700 animate-spin" />
-                      </div>
-                    ) : claimHistory.length > 0 ? (
-                      claimHistory.map((claim, idx) => (
-                        <motion.div 
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: idx * 0.05 }}
-                          key={idx}
-                          className="bg-zinc-900/60 p-4 rounded-2xl border border-zinc-800/50 flex items-center justify-between"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-500">
-                              <Trophy className="w-5 h-5" />
-                            </div>
-                            <div>
-                              <div className="text-sm font-bold">{claim.promoName}</div>
-                              <div className="text-[10px] text-zinc-500">{claim.date} at {claim.time}</div>
-                            </div>
-                          </div>
-                          <div className="text-green-500 font-black text-sm">+₹{claim.rewardAmount}</div>
-                        </motion.div>
-                      ))
-                    ) : (
-                      <div className="text-center py-12 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800">
-                        <p className="text-zinc-600 text-sm">No recent claims found.</p>
-                      </div>
+                  {promoError && (
+                    <p className="text-red-400 text-sm font-medium">{promoError}</p>
+                  )}
+                  <button
+                    onClick={launchAdAndClaim}
+                    disabled={claimLoading}
+                    className="w-full bg-white text-black font-black py-6 rounded-[28px] shadow-[0_0_40px_rgba(255,255,255,0.15)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-4 text-xl"
+                  >
+                    {claimLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+                      <>
+                        <Smartphone className="w-7 h-7 text-indigo-600" />
+                        WATCH AD & CLAIM
+                      </>
                     )}
-                  </div>
+                  </button>
                 </div>
               </motion.div>
             )}
-          </AnimatePresence>
 
+            {currentStep === "SUCCESS" && (
+              <motion.div
+                key="success"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="space-y-8 text-center"
+              >
+                <div className="space-y-4">
+                  <div className="w-20 h-20 bg-green-500 rounded-full mx-auto flex items-center justify-center shadow-2xl shadow-green-500/20">
+                    <CheckCircle className="w-10 h-10 text-white" />
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-4xl font-black text-white">Claimed!</h2>
+                    <p className="text-zinc-400 text-lg">Reward credited to your wallet.</p>
+                  </div>
+                </div>
+
+                {/* Digital Receipt Card */}
+                <div id="reward-receipt" className="bg-zinc-900 border border-zinc-800 rounded-[32px] p-8 space-y-6 text-left relative overflow-hidden">
+                  <div className="absolute -top-10 -right-10 w-40 h-40 bg-indigo-600/5 rounded-full blur-3xl" />
+                  
+                  <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+                    <span className="text-[10px] font-black text-zinc-500 tracking-widest uppercase">Transaction Receipt</span>
+                    <span className="text-[10px] font-black text-green-500 tracking-widest uppercase">Status: Success</span>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-zinc-500 text-xs font-bold uppercase tracking-tighter">Claim ID</span>
+                      <span className="text-white font-mono text-xs">{claimId}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-zinc-500 text-xs font-bold uppercase tracking-tighter">Promo Name</span>
+                      <span className="text-white font-bold text-sm">{loadedPromo?.name}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-zinc-500 text-xs font-bold uppercase tracking-tighter">Reward Amount</span>
+                      <span className="text-green-500 font-black text-lg">+ ₹{rewardAmount}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-zinc-500 text-xs font-bold uppercase tracking-tighter">Wallet Balance</span>
+                      <span className="text-white font-black text-lg">₹{walletBalance}</span>
+                    </div>
+                    <div className="flex justify-between items-center border-t border-zinc-800 pt-4">
+                      <span className="text-zinc-500 text-xs font-bold uppercase tracking-tighter">Date & Time</span>
+                      <span className="text-white font-bold text-xs">{claimTime}</span>
+                    </div>
+                  </div>
+
+                  <div className="text-[9px] text-center text-zinc-600 font-medium italic mt-4">
+                    Verified via RoyShare Secure OTP Verification
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  <button
+                    onClick={() => {
+                      const tg = (window as any).Telegram?.WebApp;
+                      if (tg) tg.close();
+                      else window.location.href = "https://t.me/RoyShare_Bot";
+                    }}
+                    className="w-full bg-white text-black font-black py-5 rounded-[24px] shadow-xl hover:bg-zinc-200 transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
+                  >
+                    GO TO BOT
+                    <ArrowRight className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      // Basic Download logic (as text for simplicity in this env)
+                      const receipt = `
+ROYSHARE REWARD RECEIPT
+-----------------------
+Claim ID: ${claimId}
+Promo: ${loadedPromo?.name}
+Reward: ₹${rewardAmount}
+Wallet Balance: ₹${walletBalance}
+Date: ${claimTime}
+Status: VERIFIED
+-----------------------
+Thank you for using RoyShare!
+                      `;
+                      const blob = new Blob([receipt], { type: "text/plain" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `receipt_${claimId}.txt`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="w-full bg-zinc-900 border border-zinc-800 text-white font-black py-4 rounded-[24px] hover:bg-zinc-800 transition-all flex items-center justify-center gap-3"
+                  >
+                    <Download className="w-5 h-5" />
+                    DOWNLOAD RECEIPT
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+          </AnimatePresence>
         </main>
 
-        <footer className="py-8 text-center space-y-4">
-          <div className="flex items-center justify-center gap-6">
-            <div className="flex flex-col items-center gap-1 opacity-40">
-              <ShieldCheck className="w-5 h-5" />
-              <span className="text-[8px] font-bold uppercase tracking-tighter">Verified</span>
+        <footer className="py-10 text-center space-y-6">
+          <div className="flex items-center justify-center gap-8 opacity-20">
+            <div className="flex flex-col items-center gap-1">
+              <ShieldCheck className="w-6 h-6" />
+              <span className="text-[8px] font-bold uppercase tracking-widest">Secure</span>
             </div>
-            <div className="flex flex-col items-center gap-1 opacity-40">
-              <Smartphone className="w-5 h-5" />
-              <span className="text-[8px] font-bold uppercase tracking-tighter">Mini App</span>
+            <div className="flex flex-col items-center gap-1">
+              <Zap className="w-6 h-6" />
+              <span className="text-[8px] font-bold uppercase tracking-widest">Speed</span>
             </div>
-            <div className="flex flex-col items-center gap-1 opacity-40">
-              <Zap className="w-5 h-5" />
-              <span className="text-[8px] font-bold uppercase tracking-tighter">Instant</span>
+            <div className="flex flex-col items-center gap-1">
+              <Smartphone className="w-6 h-6" />
+              <span className="text-[8px] font-bold uppercase tracking-widest">Mini App</span>
             </div>
           </div>
-          <p className="text-[10px] text-zinc-600 font-medium">
-            Powered by Telegram Reward Engine v3.0 • Secure claim verified by Telegram Identity
+          <p className="text-[10px] text-zinc-600 font-bold tracking-tight px-8 leading-relaxed">
+            POWERED BY ROYSHARE REWARD ENGINE • SECURE END-TO-END VERIFICATION • BOT OTP PROTECTED
           </p>
         </footer>
-
       </div>
-
-      <AnimatePresence>
-        {showUnlockSuccess && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm"
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="bg-zinc-900 border border-zinc-800 p-10 rounded-[40px] text-center space-y-6 shadow-2xl"
-            >
-              <div className="w-24 h-24 mx-auto bg-green-500 rounded-full flex items-center justify-center shadow-lg shadow-green-500/40">
-                <ShieldCheck className="w-12 h-12 text-white" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-3xl font-black text-white">Unlocked!</h3>
-                <p className="text-gray-400 font-medium">Access granted. Redirecting to reward...</p>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

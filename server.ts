@@ -4435,7 +4435,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   }
 
-  // --- NEW: OTP Authentication Flow ---
+  // --- NEW: OTP Authentication Flow (Redesigned) ---
 
   const hashOTP = (otp: string) => {
     return crypto.createHash("sha256").update(otp).digest("hex");
@@ -4443,26 +4443,49 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
-      const { mobile, initData } = req.body;
-      if (!mobile || !initData) {
-        return res.status(400).json({ error: "Please open this page from Telegram Mini App" });
+      const { mobile, fingerprint } = req.body;
+      if (!mobile) {
+        return res.status(400).json({ error: "Mobile number is required" });
       }
 
-      const botToken = await getBotToken();
-      if (!botToken) {
-        return res.status(500).json({ error: "Telegram bot not configured" });
+      // Check for lockout
+      const failuresRef = doc(db, "otp_failures", mobile.trim());
+      const failureSnap = await getDoc(failuresRef);
+      if (failureSnap.exists()) {
+        const fdata = failureSnap.data();
+        if (fdata.attempts >= 3) {
+          const lastFail = new Date(fdata.lastAttempt).getTime();
+          const waitTime = 15 * 60 * 1000;
+          const remaining = (lastFail + waitTime) - Date.now();
+          if (remaining > 0) {
+            return res.status(429).json({ 
+              error: "Account locked due to too many failed attempts. Try again later.",
+              lockoutMinutes: Math.ceil(remaining / 60000)
+            });
+          } else {
+            // Reset after lockout period passed
+            await deleteDoc(failuresRef);
+          }
+        }
       }
 
-      const verified = verifyTelegramInitData(initData, botToken);
-      if (!verified.isValid || !verified.user) {
-        return res.status(401).json({ error: "Invalid Telegram authentication" });
+      // 1. Check if mobile is registered in RoyShare
+      const usersRef = collection(db, "users");
+      const qMobile = query(usersRef, where("mobile", "==", mobile.trim()));
+      const mobileSnap = await getDocs(qMobile);
+      
+      if (mobileSnap.empty) {
+        return res.status(404).json({ error: "❌ Mobile Number Not Registered in RoyShare." });
       }
 
-      const telegramId = String(verified.user.id);
+      const userData = mobileSnap.docs[0].data();
+      const telegramId = String(userData.telegramId);
+      const username = userData.firstName || userData.username || "User";
+
       const now = new Date();
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
-      // 1. Rate Limiting: Max 5 OTPs per hour per TG ID
+      // 2. Rate Limiting: Max 5 OTPs per hour per TG ID
       const otpRequestsRef = collection(db, "otpRequests");
       const qRate = query(
         otpRequestsRef,
@@ -4474,23 +4497,20 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(429).json({ error: "Maximum OTP requests (5/hour) exceeded. Please try again later." });
       }
 
-      // 2. Security: Check if mobile is already used by another TG ID
-      const usersRef = collection(db, "users");
-      const qMobile = query(usersRef, where("mobile", "==", mobile));
-      const mobileSnap = await getDocs(qMobile);
-      if (!mobileSnap.empty) {
-        const existingUser = mobileSnap.docs[0].data();
-        if (String(existingUser.telegramId) !== telegramId) {
-          return res.status(400).json({ error: "This mobile number is already linked to another Telegram account." });
-        }
-      }
-
-      // 3. Generate 6-digit OTP
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      // 3. Generate 4-digit OTP
+      const otpCode = Math.floor(1000 + Math.random() * 9000).toString();
       const hashedOtp = hashOTP(otpCode);
       const expiresAt = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
 
-      // 4. Store OTP attempt
+      // 4. Invalidate previous OTPs for this user
+      const otpsRef = collection(db, "otps");
+      const qOld = query(otpsRef, where("telegramId", "==", telegramId), where("used", "==", false));
+      const oldSnap = await getDocs(qOld);
+      for (const oldDoc of oldSnap.docs) {
+        await updateDoc(oldDoc.ref, { used: true });
+      }
+
+      // 5. Store new OTP attempt
       await addDoc(collection(db, "otps"), {
         telegramId,
         mobile,
@@ -4500,40 +4520,59 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         used: false
       });
 
-      // 5. Log Request
+      // 6. Log Request
       await addDoc(collection(db, "otpRequests"), {
         telegramId,
         mobile,
         createdAt: now.toISOString()
       });
 
-      // 6. Send OTP via Bot
-      const msg = `🔐 <b>RoyShare Verification Code</b>\n\nYour 6-digit OTP is: <code>${otpCode}</code>\n\nThis code expires in 5 minutes. Do not share it with anyone.`;
-      await sendTgMessage(telegramId, msg);
+      // 7. Send OTP via Bot ONLY
+      const botToken = await getBotToken();
+      if (!botToken) throw new Error("Bot token missing");
 
-      console.log(`[OTP] Sent to ${telegramId} for mobile ${mobile}`);
-      res.json({ success: true, message: "OTP sent successfully to your Telegram bot." });
+      const msg = `🔐 <b>RoyShare Verification</b>\n\nHello <b>${username}</b> 👋\n\nYour Verification Code\n\n<code>${otpCode}</code>\n\n⏳ Valid for 5 Minutes\n\nNever share this code with anyone.\n\nTap or long press the code above to copy it.`;
+      
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: telegramId,
+          text: msg,
+          parse_mode: "HTML"
+        })
+      });
+
+      console.log(`[OTP] 4-digit code sent to ${telegramId} (${username})`);
+      res.json({ success: true, message: "OTP sent to your Telegram bot." });
 
     } catch (e: any) {
       console.error("Error in /api/auth/send-otp:", e);
-      res.status(500).json({ error: "Failed to send OTP" });
+      res.status(500).json({ error: "Failed to send OTP. Check if you have started the bot." });
     }
   });
 
   app.post("/api/auth/verify-otp", async (req, res) => {
     try {
-      const { mobile, otp, initData } = req.body;
-      if (!mobile || !otp || !initData) {
-        return res.status(400).json({ error: "Please open this page from Telegram Mini App" });
+      const { mobile, otp, fingerprint } = req.body;
+      if (!mobile || !otp) {
+        return res.status(400).json({ error: "Mobile and OTP required" });
       }
 
-      const botToken = await getBotToken();
-      const verified = verifyTelegramInitData(initData, botToken!);
-      if (!verified.isValid || !verified.user) {
-        return res.status(401).json({ error: "Invalid Telegram authentication" });
+      // Check lockout first
+      const failuresRef = doc(db, "otp_failures", mobile.trim());
+      const failureSnap = await getDoc(failuresRef);
+      if (failureSnap.exists()) {
+        const fdata = failureSnap.data();
+        if (fdata.attempts >= 3) {
+          const lastFail = new Date(fdata.lastAttempt).getTime();
+          const waitTime = 15 * 60 * 1000;
+          if (Date.now() < lastFail + waitTime) {
+            return res.status(429).json({ error: "Account locked for 15 minutes." });
+          }
+        }
       }
 
-      const telegramId = String(verified.user.id);
       const hashedInput = hashOTP(otp);
       const now = new Date().toISOString();
 
@@ -4541,7 +4580,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const otpsRef = collection(db, "otps");
       const qOtp = query(
         otpsRef,
-        where("telegramId", "==", telegramId),
+        where("mobile", "==", mobile.trim()),
         where("hashedOtp", "==", hashedInput),
         where("used", "==", false),
         where("expiresAt", ">=", now)
@@ -4549,61 +4588,167 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       
       const otpSnap = await getDocs(qOtp);
       if (otpSnap.empty) {
-        // Log failed attempt
-        await addDoc(collection(db, "authLogs"), {
-          telegramId,
-          mobile,
-          action: "VERIFY_FAILED",
-          reason: "Invalid or expired OTP",
-          createdAt: now
-        });
+        // Increment failures
+        if (failureSnap.exists()) {
+          await updateDoc(failuresRef, {
+            attempts: increment(1),
+            lastAttempt: now
+          });
+        } else {
+          await setDoc(failuresRef, {
+            attempts: 1,
+            lastAttempt: now
+          });
+        }
         return res.status(400).json({ error: "Invalid or expired OTP code." });
       }
 
+      // Success - reset failures
+      await deleteDoc(failuresRef);
+
       // Mark OTP as used
       const otpDoc = otpSnap.docs[0];
+      const telegramId = otpDoc.data().telegramId;
       await updateDoc(otpDoc.ref, { used: true });
 
-      // Link and Verify User
+      // Generate 30-day session token
+      const sessionToken = crypto.randomBytes(32).toString("hex");
+      const sessionExpiresAt = new Date();
+      sessionExpiresAt.setDate(sessionExpiresAt.getDate() + 30);
+
+      await addDoc(collection(db, "sessions"), {
+        userId: telegramId,
+        token: sessionToken,
+        fingerprint: fingerprint || "legacy",
+        createdAt: now,
+        expiresAt: sessionExpiresAt.toISOString(),
+        userAgent: req.headers["user-agent"] || "unknown",
+        ip: req.ip || "unknown"
+      });
+
+      // Get User Data
       const userDocRef = doc(db, "users", telegramId);
       const userSnap = await getDoc(userDocRef);
       
-      const updateData = {
-        mobile,
-        isVerified: true,
-        verifiedAt: now,
-        lastLogin: now,
-        telegramId: Number(telegramId),
-        username: verified.user.username || "",
-        firstName: verified.user.first_name || "",
-        status: "active"
-      };
-
-      if (userSnap.exists()) {
-        await updateDoc(userDocRef, updateData);
-      } else {
-        await setDoc(userDocRef, {
-          ...updateData,
-          createdAt: now,
-          balance: 0,
-          rewards: 0,
-          referrals: 0
-        });
+      if (!userSnap.exists()) {
+        return res.status(404).json({ error: "User profile lost. Please register again." });
       }
 
-      // Log Success
-      await addDoc(collection(db, "authLogs"), {
-        telegramId,
-        mobile,
-        action: "VERIFY_SUCCESS",
-        createdAt: now
+      const userData = userSnap.data();
+      await updateDoc(userDocRef, { 
+        lastLogin: now,
+        isVerified: true,
+        verifiedAt: now 
       });
 
-      res.json({ success: true, message: "Account verified successfully!" });
+      res.json({ 
+        success: true, 
+        message: "Verification successful!",
+        sessionToken,
+        user: {
+          telegramId: userData.telegramId,
+          username: userData.username || "no_username",
+          firstName: userData.firstName || "User",
+          mobile: userData.mobile,
+          isVerified: true,
+          status: userData.status || "active",
+          photoUrl: userData.photoUrl || ""
+        }
+      });
 
     } catch (e: any) {
       console.error("Error in /api/auth/verify-otp:", e);
       res.status(500).json({ error: "Verification failed" });
+    }
+  });
+
+  app.post("/api/auth/check-session", async (req, res) => {
+    try {
+      const { token, fingerprint } = req.body;
+      if (!token) return res.status(400).json({ error: "Session token required" });
+
+      const now = new Date().toISOString();
+      const sessionsRef = collection(db, "sessions");
+      const q = query(sessionsRef, where("token", "==", token), where("expiresAt", ">", now));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        return res.status(401).json({ error: "Session expired" });
+      }
+
+      const sessionDoc = snap.docs[0];
+      const sessionData = sessionDoc.data();
+
+      // Check fingerprint
+      if (fingerprint && sessionData.fingerprint && sessionData.fingerprint !== fingerprint) {
+        return res.status(401).json({ 
+          error: "New Device Detected. Please verify again.",
+          newDevice: true 
+        });
+      }
+      const userRef = doc(db, "users", sessionData.userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (!userSnap.exists()) {
+        return res.status(404).json({ error: "User profile not found" });
+      }
+
+      const userData = userSnap.data();
+      res.json({ 
+        success: true, 
+        user: {
+          telegramId: userData.telegramId,
+          username: userData.username || "no_username",
+          firstName: userData.firstName || "User",
+          mobile: userData.mobile,
+          isVerified: true,
+          status: userData.status || "active",
+          photoUrl: userData.photoUrl || ""
+        } 
+      });
+    } catch (e: any) {
+      console.error("Error in /api/auth/check-session:", e);
+      res.status(500).json({ error: "Session check failed" });
+    }
+  });
+
+  app.get("/api/admin/promo/stats", async (req, res) => {
+    try {
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+
+      const [
+        verifiedUsersSnap,
+        pendingOtpSnap,
+        failedOtpSnap,
+        otpSentTodaySnap,
+        successfulClaimsSnap,
+        failedClaimsSnap,
+        blockedDevicesSnap
+      ] = await Promise.all([
+        getCountFromServer(query(collection(db, "users"), where("isVerified", "==", true))),
+        getCountFromServer(query(collection(db, "otps"), where("used", "==", false))),
+        getCountFromServer(query(collection(db, "otps"), where("used", "==", true))), // Simple proxy for failed/expired
+        getCountFromServer(query(collection(db, "otpRequests"), where("createdAt", ">=", todayStart))),
+        getCountFromServer(query(collection(db, "claims"), where("status", "==", "success"))),
+        getCountFromServer(query(collection(db, "claims"), where("status", "==", "failed"))),
+        getCountFromServer(collection(db, "blocked_devices"))
+      ]);
+
+      res.json({
+        success: true,
+        stats: {
+          verifiedUsers: verifiedUsersSnap.data().count,
+          pendingOtp: pendingOtpSnap.data().count,
+          failedOtp: failedOtpSnap.data().count,
+          otpSentToday: otpSentTodaySnap.data().count,
+          successfulClaims: successfulClaimsSnap.data().count,
+          failedClaims: failedClaimsSnap.data().count,
+          blockedDevices: blockedDevicesSnap.data().count
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to fetch stats" });
     }
   });
 
@@ -5076,6 +5221,31 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       }
 
+      // --- ABUSE PROTECTION ---
+      const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "0.0.0.0";
+      const fingerprint = req.body.fingerprint || "unknown";
+
+      // 1. Multi-Account Check (Same Device)
+      const multiAccountQuery = query(
+        collection(db, "promo_claims"),
+        where("fingerprint", "==", fingerprint),
+        where("promoCode", "==", codeUpper),
+        where("status", "==", "Success")
+      );
+      const multiSnap = await getDocs(multiAccountQuery);
+      if (!multiSnap.empty && userId !== "ADMIN_PREVIEW") {
+        const alreadyClaimedByOther = multiSnap.docs.some(d => d.data().userId !== userId);
+        if (alreadyClaimedByOther) {
+          return res.status(400).json({ error: "Device already used to claim this reward with another account." });
+        }
+      }
+
+      // 2. Simple Proxy Check (Optional/Basic)
+      const userAgent = req.headers["user-agent"] || "";
+      if (userAgent.includes("curl") || userAgent.includes("Postman") || userAgent.includes("insomnia")) {
+        return res.status(403).json({ error: "API tools not allowed." });
+      }
+
       const tgUserId = userData.telegramId || userId;
 
       const userName = verifiedUser ? (verifiedUser.first_name + (verifiedUser.last_name ? " " + verifiedUser.last_name : "")) : (userData?.firstName || "User");
@@ -5095,6 +5265,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           return res.status(400).json({ error: "Your access session has expired. Please unlock again." });
         }
       }
+
+      // --- END ABUSE PROTECTION ---
 
       // 5. Already Claimed Check
       const claimRef = doc(db, "promo_claims", `${userId}_${codeUpper}`);
@@ -5133,6 +5305,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       let rewardAmount = 0;
       const today = new Date().toISOString().split("T")[0];
       const todayTime = new Date().toLocaleTimeString();
+      let claimData: any = null;
 
       // Start transaction to verify limits and credit reward
       await runTransaction(db, async (transaction) => {
@@ -5149,6 +5322,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           throw new Error("Invalid or inactive promo reward.");
         }
         const pData = promoSnap.data();
+
+        if (pData.status === "paused") {
+          throw new Error("This promo is currently paused by the administrator.");
+        }
 
         // 2. Date ranges
         if (!isPromoActive(pData.startDate, pData.startTime, pData.expiryDate, pData.expiryTime)) {
@@ -5172,27 +5349,39 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         
         // 7. Promo Code counts
         transaction.update(promoRef, {
-
           usedCount: increment(1),
           budgetUsed: increment(rewardAmount),
           claimsCount: increment(1),
-          // Store claimLogs in doc
           claimLogs: arrayUnion({
             userId,
             username: userName,
             telegramId: tgUserId,
             status: "Success",
             amount: rewardAmount,
-            time: `${today} ${todayTime}`
+            time: `${today} ${todayTime}`,
+            ip,
+            fingerprint
           })
         });
 
         // 8. User Wallets
+        const currentBalance = Number(userData.balance || 0);
+        const newBalance = currentBalance + rewardAmount;
+
         transaction.update(userRef, {
-          balance: increment(rewardAmount),
+          balance: newBalance,
           bonusBalance: increment(rewardAmount),
           availableBalance: increment(rewardAmount),
-          earnings: increment(rewardAmount)
+          earnings: increment(rewardAmount),
+          // Record history in doc
+          walletHistory: arrayUnion({
+            type: "promo_claim",
+            promoName: pData.name || "Promo Reward",
+            amount: rewardAmount,
+            balanceBefore: currentBalance,
+            balanceAfter: newBalance,
+            timestamp: new Date().toISOString()
+          })
         });
 
         // 9. Analytics in settings
@@ -5219,6 +5408,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
 
         // 11. Write Success Claim
+        const claimId = "RS-" + crypto.randomBytes(4).toString("hex").toUpperCase();
         transaction.set(claimRef, {
           userId,
           username: userName,
@@ -5226,12 +5416,22 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           promoCode: codeUpper,
           promoName: pData.name || "Promo Reward",
           rewardAmount,
+          balanceBefore: currentBalance,
+          balanceAfter: newBalance,
           status: "Success",
           date: today,
           time: todayTime,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          claimId,
+          ip,
+          fingerprint
         });
+
+        // Store for notification
+        claimData = { claimId, newBalance, balanceBefore: currentBalance };
       });
+
+      const { claimId, newBalance, balanceBefore } = claimData || {};
 
       // Send Telegram notification
       try {
@@ -5239,11 +5439,15 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           const { botToken, rewardChannelId, adminChatId, chatId } = tgSettingsSnap.data();
           if (botToken) {
             const finalAdminChat = adminChatId || chatId;
-            const eventMsg = `✅ <b>Reward Claimed</b>\n\n` +
+            const eventMsg = `🎉 <b>Promo Reward Claimed</b>\n\n` +
                              `👤 <b>User:</b> ${userName}\n` +
-                             `🆔 <b>Telegram ID:</b> <code>${tgUserId}</code>\n` +
-                             `💰 <b>Reward:</b> ₹${rewardAmount}\n` +
+                             `📱 <b>Mobile:</b> <code>${userData.mobile}</code>\n` +
+                             `🆔 <b>Telegram ID:</b> <code>${tgUserId}</code>\n\n` +
                              `🎁 <b>Promo:</b> ${promoData.name || "Promo"}\n` +
+                             `💰 <b>Reward:</b> ₹${rewardAmount}\n` +
+                             `💳 <b>Balance Before:</b> ₹${balanceBefore}\n` +
+                             `💳 <b>Balance After:</b> ₹${newBalance}\n\n` +
+                             `🧾 <b>Claim ID:</b> <code>${claimId}</code>\n` +
                              `🕒 <b>Time:</b> ${today} ${todayTime}`;
             
             if (rewardChannelId) {
@@ -5269,7 +5473,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       res.json({
         success: true,
         promoName: promoData.name || "Promo Reward",
-        rewardAmount
+        rewardAmount,
+        claimId,
+        time: todayTime
       });
 
       // Post-redemption: check if finished
@@ -5704,6 +5910,7 @@ Provide the response strictly in JSON format matching the schema requested.`;
       const ref = doc(db, "promo_codes", req.params.id);
       const updateData: any = {};
       if (req.body.enabled !== undefined) updateData.enabled = req.body.enabled;
+      if (req.body.status !== undefined) updateData.status = req.body.status; // active, paused, stopped
       if (req.body.requireAccessCode !== undefined) updateData.requireAccessCode = req.body.requireAccessCode;
       if (req.body.accessCode !== undefined) updateData.accessCode = req.body.accessCode;
       
@@ -5712,6 +5919,78 @@ Provide the response strictly in JSON format matching the schema requested.`;
     } catch (e: any) {
       console.error("Error in PUT /api/admin/promo/promos/:id:", e);
       res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Export Claims History CSV
+  app.get("/api/admin/promo/promos/export/:id", async (req, res) => {
+    try {
+      const promoId = req.params.id.toUpperCase();
+      const claimsRef = collection(db, "promo_claims");
+      const q = query(claimsRef, where("promoCode", "==", promoId), orderBy("createdAt", "desc"));
+      const snap = await getDocs(q);
+      
+      let csv = "Claim ID,User ID,Username,Telegram ID,Amount,Status,Date,Time,IP,Fingerprint\n";
+      snap.forEach(d => {
+        const data = d.data();
+        csv += `${data.claimId},${data.userId},"${data.username}",${data.telegramId},${data.rewardAmount},${data.status},${data.date},${data.time},${data.ip},${data.fingerprint}\n`;
+      });
+
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename=claims_${promoId}.csv`);
+      res.send(csv);
+    } catch (e: any) {
+      res.status(500).json({ error: "Export failed" });
+    }
+  });
+
+  // Refund Last Claim (Undo reward)
+  app.post("/api/admin/promo/promos/refund/:claimId", async (req, res) => {
+    try {
+      const claimId = req.params.claimId;
+      const claimsRef = collection(db, "promo_claims");
+      const q = query(claimsRef, where("claimId", "==", claimId));
+      const snap = await getDocs(q);
+      
+      if (snap.empty) return res.status(404).json({ error: "Claim not found" });
+      const claimDoc = snap.docs[0];
+      const claimData = claimDoc.data();
+      
+      if (claimData.status !== "Success") return res.status(400).json({ error: "Claim already refunded or failed" });
+
+      await runTransaction(db, async (transaction) => {
+        const userRef = doc(db, "users", claimData.userId);
+        const promoRef = doc(db, "promo_codes", claimData.promoCode);
+        
+        const userSnap = await transaction.get(userRef);
+        if (!userSnap.exists()) throw new Error("User not found");
+        
+        const refundAmount = claimData.rewardAmount;
+        transaction.update(userRef, {
+          balance: increment(-refundAmount),
+          bonusBalance: increment(-refundAmount),
+          availableBalance: increment(-refundAmount),
+          earnings: increment(-refundAmount),
+          walletHistory: arrayUnion({
+            type: "refund",
+            promoName: claimData.promoName,
+            amount: -refundAmount,
+            timestamp: new Date().toISOString(),
+            claimId
+          })
+        });
+
+        transaction.update(promoRef, {
+          usedCount: increment(-1),
+          budgetUsed: increment(-refundAmount)
+        });
+
+        transaction.update(claimDoc.ref, { status: "Refunded" });
+      });
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Refund failed" });
     }
   });
 
