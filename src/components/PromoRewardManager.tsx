@@ -86,7 +86,7 @@ const getTelegramMessagePreview = (promo: any): string => {
 };
 
 export default function PromoRewardManager() {
-  const [activeSubTab, setActiveSubTab] = useState<"settings" | "promos" | "analytics">("promos");
+  const [activeSubTab, setActiveSubTab] = useState<"settings" | "promos" | "analytics" | "users">("promos");
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,6 +95,8 @@ export default function PromoRewardManager() {
   const [accessCodes, setAccessCodes] = useState<AccessCode[]>([]);
   const [promos, setPromos] = useState<Promo[]>([]);
   const [analytics, setAnalytics] = useState<PromoAnalytics | null>(null);
+  const [verifiedUsers, setVerifiedUsers] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
 
   // Card-level navigation state: Record<promoId, "rules" | "analytics" | "telegram" | "logs">
   const [cardTabs, setCardTabs] = useState<Record<string, "rules" | "analytics" | "telegram" | "logs">>({});
@@ -260,17 +262,19 @@ export default function PromoRewardManager() {
     setLoading(true);
     setError(null);
     try {
-      const [settingsRes, codesRes, promosRes, analyticsRes] = await Promise.all([
+      const [settingsRes, codesRes, promosRes, analyticsRes, usersRes] = await Promise.all([
         fetch(`${API_BASE}/api/admin/promo/settings`),
         fetch(`${API_BASE}/api/admin/promo/access-codes`),
         fetch(`${API_BASE}/api/admin/promo/promos`),
-        fetch(`${API_BASE}/api/admin/promo/analytics`)
+        fetch(`${API_BASE}/api/admin/promo/analytics`),
+        fetch(`${API_BASE}/api/admin/users/verified`)
       ]);
 
       const settingsData = await settingsRes.json();
       const codesData = await codesRes.json();
       const promosData = await promosRes.json();
       const analyticsData = await analyticsRes.json();
+      const usersData = await usersRes.json();
 
       if (settingsData.success) setSettings(settingsData.settings);
       if (codesData.success) {
@@ -279,11 +283,28 @@ export default function PromoRewardManager() {
       }
       if (promosData.success) setPromos(promosData.promos || []);
       if (analyticsData.success) setAnalytics(analyticsData.analytics);
+      if (usersData.success) setVerifiedUsers(usersData.users || []);
     } catch (err) {
       console.error("Error loading admin promo rewards:", err);
       setError("Failed to fetch administrative data from the server.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleUpdateUserStatus = async (telegramId: string, status: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/update-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ telegramId, status })
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchData();
+      }
+    } catch (err) {
+      console.error("Failed to update user status:", err);
     }
   };
 
@@ -578,7 +599,8 @@ export default function PromoRewardManager() {
           {[
             { id: "analytics", name: "📈 Analytics", icon: BarChart3 },
             { id: "settings", name: "⚙️ Settings", icon: Settings },
-            { id: "promos", name: "🎁 Promos Manager", icon: Gift }
+            { id: "promos", name: "🎁 Promos Manager", icon: Gift },
+            { id: "users", name: "👥 Users", icon: Users }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -768,6 +790,118 @@ export default function PromoRewardManager() {
             </button>
           </div>
         </form>
+      )}
+
+      {/* 4. USERS MANAGEMENT VIEW */}
+      {activeSubTab === "users" && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-slate-850 flex flex-col md:flex-row justify-between gap-4 bg-slate-950/40">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Users className="w-6 h-6 text-indigo-400" />
+                  Account Verification & User Management
+                </h3>
+                <p className="text-slate-400 text-xs mt-1 uppercase tracking-wider font-semibold">Total Verified Users: <span className="text-indigo-400">{verifiedUsers.length}</span></p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    placeholder="Search Telegram ID or Number..."
+                    className="bg-slate-950 border border-slate-850 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 w-64"
+                  />
+                </div>
+                <button onClick={fetchData} className="p-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-all">
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-850">
+                    <th className="px-6 py-4">User Identity</th>
+                    <th className="px-6 py-4 text-center">Mobile</th>
+                    <th className="px-6 py-4 text-center">Verified At</th>
+                    <th className="px-6 py-4 text-center">Wallet Status</th>
+                    <th className="px-6 py-4 text-center">Activity</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-850">
+                  {verifiedUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-20 text-center text-slate-500 italic">No verified users found in the system.</td>
+                    </tr>
+                  ) : (
+                    verifiedUsers.map((user: any) => (
+                      <tr key={user.id} className="hover:bg-slate-850/30 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-950 border border-slate-850 flex items-center justify-center font-black text-xs text-indigo-400">
+                              {(user.firstName || "U").charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="font-bold text-white text-sm flex items-center gap-1.5">
+                                {user.firstName} {user.lastName || ""}
+                                {user.status === "blocked" && <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />}
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                @{user.username || "no_username"} | ID: {user.telegramId}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className="bg-slate-950 border border-slate-850 text-slate-300 px-2.5 py-1 rounded-lg text-xs font-mono">
+                            {user.mobile || "NOT_SET"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <div className="text-[10px] text-slate-400">
+                            {user.verifiedAt ? new Date(user.verifiedAt).toLocaleDateString() : "Pending"}
+                          </div>
+                          <div className="text-[9px] text-slate-500 mt-0.5 font-mono">
+                            {user.verifiedAt ? new Date(user.verifiedAt).toLocaleTimeString() : ""}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <div className="text-xs font-bold text-white">₹{user.balance || 0}</div>
+                          <div className="text-[9px] text-emerald-400 uppercase tracking-widest font-black mt-1">Total Rewards</div>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <div className="text-xs font-bold text-white">{user.claims || 0}</div>
+                          <div className="text-[9px] text-indigo-400 uppercase tracking-widest font-black mt-1">Successful Claims</div>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex justify-end gap-2">
+                            {user.status === "blocked" ? (
+                              <button 
+                                onClick={() => handleUpdateUserStatus(user.telegramId, "active")}
+                                className="px-3 py-1.5 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                              >
+                                Unblock
+                              </button>
+                            ) : (
+                              <button 
+                                onClick={() => handleUpdateUserStatus(user.telegramId, "blocked")}
+                                className="px-3 py-1.5 bg-rose-600/10 hover:bg-rose-600/20 border border-rose-500/20 text-rose-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                              >
+                                Block
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 4. PROMOS MANAGER VIEW */}

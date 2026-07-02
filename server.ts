@@ -195,7 +195,40 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
   }
 }
 
-// Admin Dashboard route
+  // --- Admin: Account Verification Management ---
+  app.get("/api/admin/users/verified", async (req, res) => {
+    try {
+      const usersRef = collection(db, "users");
+      const snapshot = await getDocs(usersRef);
+      const users = snapshot.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      }));
+      res.json({ success: true, users });
+    } catch (e: any) {
+      console.error("Admin verified users fetch error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  app.post("/api/admin/users/update-status", async (req, res) => {
+    try {
+      const { telegramId, status, adminId, ip } = req.body;
+      if (!telegramId || !status) return res.status(400).json({ error: "Missing parameters" });
+
+      const userRef = doc(db, "users", String(telegramId));
+      await updateDoc(userRef, { status });
+
+      await logAdminActivity(adminId || "Admin", String(telegramId), `USER_STATUS_${status.toUpperCase()}`, ip || "unknown");
+
+      res.json({ success: true, message: `User status updated to ${status}` });
+    } catch (e: any) {
+      console.error("Admin user status update error:", e);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // Admin Dashboard route
   app.get("/api/admin/dashboard", async (req, res) => {
     try {
       const getCount = async (coll: any) => {
@@ -4412,6 +4445,180 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   }
 
+  // --- NEW: OTP Authentication Flow ---
+
+  const hashOTP = (otp: string) => {
+    return crypto.createHash("sha256").update(otp).digest("hex");
+  };
+
+  app.post("/api/auth/send-otp", async (req, res) => {
+    try {
+      const { mobile, initData } = req.body;
+      if (!mobile || !initData) {
+        return res.status(400).json({ error: "Mobile number and Telegram data required" });
+      }
+
+      const botToken = await getBotToken();
+      if (!botToken) {
+        return res.status(500).json({ error: "Telegram bot not configured" });
+      }
+
+      const verified = verifyTelegramInitData(initData, botToken);
+      if (!verified.isValid || !verified.user) {
+        return res.status(401).json({ error: "Invalid Telegram authentication" });
+      }
+
+      const telegramId = String(verified.user.id);
+      const now = new Date();
+      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+
+      // 1. Rate Limiting: Max 5 OTPs per hour per TG ID
+      const otpRequestsRef = collection(db, "otpRequests");
+      const qRate = query(
+        otpRequestsRef,
+        where("telegramId", "==", telegramId),
+        where("createdAt", ">=", oneHourAgo.toISOString())
+      );
+      const rateSnap = await getDocs(qRate);
+      if (rateSnap.size >= 5) {
+        return res.status(429).json({ error: "Maximum OTP requests (5/hour) exceeded. Please try again later." });
+      }
+
+      // 2. Security: Check if mobile is already used by another TG ID
+      const usersRef = collection(db, "users");
+      const qMobile = query(usersRef, where("mobile", "==", mobile));
+      const mobileSnap = await getDocs(qMobile);
+      if (!mobileSnap.empty) {
+        const existingUser = mobileSnap.docs[0].data();
+        if (String(existingUser.telegramId) !== telegramId) {
+          return res.status(400).json({ error: "This mobile number is already linked to another Telegram account." });
+        }
+      }
+
+      // 3. Generate 6-digit OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const hashedOtp = hashOTP(otpCode);
+      const expiresAt = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
+
+      // 4. Store OTP attempt
+      await addDoc(collection(db, "otps"), {
+        telegramId,
+        mobile,
+        hashedOtp,
+        expiresAt: expiresAt.toISOString(),
+        createdAt: now.toISOString(),
+        used: false
+      });
+
+      // 5. Log Request
+      await addDoc(collection(db, "otpRequests"), {
+        telegramId,
+        mobile,
+        createdAt: now.toISOString()
+      });
+
+      // 6. Send OTP via Bot
+      const msg = `🔐 <b>RoyShare Verification Code</b>\n\nYour 6-digit OTP is: <code>${otpCode}</code>\n\nThis code expires in 5 minutes. Do not share it with anyone.`;
+      await sendTgMessage(telegramId, msg);
+
+      console.log(`[OTP] Sent to ${telegramId} for mobile ${mobile}`);
+      res.json({ success: true, message: "OTP sent successfully to your Telegram bot." });
+
+    } catch (e: any) {
+      console.error("Error in /api/auth/send-otp:", e);
+      res.status(500).json({ error: "Failed to send OTP" });
+    }
+  });
+
+  app.post("/api/auth/verify-otp", async (req, res) => {
+    try {
+      const { mobile, otp, initData } = req.body;
+      if (!mobile || !otp || !initData) {
+        return res.status(400).json({ error: "Mobile, OTP, and Telegram data required" });
+      }
+
+      const botToken = await getBotToken();
+      const verified = verifyTelegramInitData(initData, botToken!);
+      if (!verified.isValid || !verified.user) {
+        return res.status(401).json({ error: "Invalid Telegram authentication" });
+      }
+
+      const telegramId = String(verified.user.id);
+      const hashedInput = hashOTP(otp);
+      const now = new Date().toISOString();
+
+      // Find valid OTP
+      const otpsRef = collection(db, "otps");
+      const qOtp = query(
+        otpsRef,
+        where("telegramId", "==", telegramId),
+        where("hashedOtp", "==", hashedInput),
+        where("used", "==", false),
+        where("expiresAt", ">=", now)
+      );
+      
+      const otpSnap = await getDocs(qOtp);
+      if (otpSnap.empty) {
+        // Log failed attempt
+        await addDoc(collection(db, "authLogs"), {
+          telegramId,
+          mobile,
+          action: "VERIFY_FAILED",
+          reason: "Invalid or expired OTP",
+          createdAt: now
+        });
+        return res.status(400).json({ error: "Invalid or expired OTP code." });
+      }
+
+      // Mark OTP as used
+      const otpDoc = otpSnap.docs[0];
+      await updateDoc(otpDoc.ref, { used: true });
+
+      // Link and Verify User
+      const userDocRef = doc(db, "users", telegramId);
+      const userSnap = await getDoc(userDocRef);
+      
+      const updateData = {
+        mobile,
+        isVerified: true,
+        verifiedAt: now,
+        lastLogin: now,
+        telegramId: Number(telegramId),
+        username: verified.user.username || "",
+        firstName: verified.user.first_name || "",
+        status: "active"
+      };
+
+      if (userSnap.exists()) {
+        await updateDoc(userDocRef, updateData);
+      } else {
+        await setDoc(userDocRef, {
+          ...updateData,
+          createdAt: now,
+          balance: 0,
+          rewards: 0,
+          referrals: 0
+        });
+      }
+
+      // Log Success
+      await addDoc(collection(db, "authLogs"), {
+        telegramId,
+        mobile,
+        action: "VERIFY_SUCCESS",
+        createdAt: now
+      });
+
+      res.json({ success: true, message: "Account verified successfully!" });
+
+    } catch (e: any) {
+      console.error("Error in /api/auth/verify-otp:", e);
+      res.status(500).json({ error: "Verification failed" });
+    }
+  });
+
+  // --- END NEW OTP FLOW ---
+
   // Get Status and settings
   app.get("/api/promo/status", async (req, res) => {
     try {
@@ -4556,7 +4763,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       res.json({
         success: true,
         settings: settingsData,
-        user: userData,
+        user: {
+          ...userData,
+          isVerified: userData?.isVerified === true
+        },
         unlocked,
         session,
         promo: promoData ? {
@@ -4734,6 +4944,19 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const promoDoc = qSnap.docs[0];
       const promoData = promoDoc.data();
 
+      // Check User Verification Status
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.data();
+      if (userId !== "ADMIN_PREVIEW") {
+        if (!userData || !userData.isVerified) {
+          return res.status(403).json({ error: "Verification Required: Please verify your account via OTP first." });
+        }
+        if (userData.status === "blocked") {
+          return res.status(403).json({ error: "Access Denied: Your account has been suspended by the administrator." });
+        }
+      }
+
       // Check Status
       if (!promoData.enabled) return res.status(400).json({ error: "This promo is currently disabled." });
       if (!isPromoActive(promoData.startDate, promoData.startTime, promoData.expiryDate, promoData.expiryTime)) {
@@ -4820,6 +5043,19 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       if (qSnap.empty) {
         return res.status(400).json({ error: "This promo reward page does not exist or is invalid." });
       }
+
+      // Check User Verification Status
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.data();
+      if (userId !== "ADMIN_PREVIEW") {
+        if (!userData || !userData.isVerified) {
+          return res.status(403).json({ error: "Verification Required: Please verify your account via OTP first." });
+        }
+        if (userData.status === "blocked") {
+          return res.status(403).json({ error: "Access Denied: Your account has been suspended by the administrator." });
+        }
+      }
       
       const promoDoc = qSnap.docs[0];
       const codeUpper = promoDoc.id;
@@ -4850,14 +5086,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       }
 
-      // Fetch user profile early
-      const userRef = doc(db, "users", userId);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
-        await updateDoc(promoDoc.ref, { failedClaims: increment(1) }).catch(() => {});
-        return res.status(400).json({ error: "User profile not found. Please activate via bot first." });
-      }
-      const userData = userSnap.data();
       const tgUserId = userData.telegramId || userId;
 
       const userName = verifiedUser ? (verifiedUser.first_name + (verifiedUser.last_name ? " " + verifiedUser.last_name : "")) : (userData?.firstName || "User");

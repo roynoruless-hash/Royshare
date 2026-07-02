@@ -79,6 +79,15 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
   const [redeemError, setRedeemError] = useState<string | null>(null);
   const [redeemSuccess, setRedeemSuccess] = useState<boolean>(false);
   const [rewardAmount, setRewardAmount] = useState<number>(0);
+
+  // Verification States
+  const [isAccountVerified, setIsAccountVerified] = useState<boolean>(false);
+  const [authStep, setAuthStep] = useState<"PHONE" | "OTP">("PHONE");
+  const [mobileInput, setMobileInput] = useState<string>("");
+  const [otpInput, setOtpInput] = useState<string>("");
+  const [authLoading, setAuthLoading] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccessMessage, setAuthSuccessMessage] = useState<string | null>(null);
   
   const [claimHistory, setClaimHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
@@ -189,6 +198,7 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
         setSettings(data.settings);
         setUsername(data.user?.name || data.user?.username || "User");
         setTelegramId(data.user?.telegramId || "");
+        setIsAccountVerified(data.user?.isVerified === true);
         
         if (data.unlocked) {
           setIsUnlocked(true);
@@ -307,6 +317,60 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
       setUnlockError("Network error. Please try again later.");
     } finally {
       setUnlocking(false);
+    }
+  };
+
+  const handleSendOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mobileInput.trim() || authLoading) return;
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const tg = (window as any).Telegram?.WebApp;
+      const initData = tg?.initData || "";
+      const res = await fetch(`${API_BASE}/api/auth/send-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mobile: mobileInput.trim(), initData })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAuthStep("OTP");
+        setAuthSuccessMessage("OTP sent to your Telegram bot!");
+      } else {
+        setAuthError(data.error || "Failed to send OTP.");
+      }
+    } catch (err) {
+      setAuthError("Network error.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpInput.trim() || authLoading) return;
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const tg = (window as any).Telegram?.WebApp;
+      const initData = tg?.initData || "";
+      const res = await fetch(`${API_BASE}/api/auth/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mobile: mobileInput.trim(), otp: otpInput.trim(), initData })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsAccountVerified(true);
+        setAuthSuccessMessage("Account verified successfully!");
+      } else {
+        setAuthError(data.error || "Invalid OTP.");
+      }
+    } catch (err) {
+      setAuthError("Network error.");
+    } finally {
+      setAuthLoading(false);
     }
   };
 
@@ -588,6 +652,104 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
                   <p className="text-xs text-zinc-400 leading-relaxed">
                     Access codes are unique to each campaign and can be found in the description of our official Telegram posts.
                   </p>
+                </div>
+              </motion.div>
+            ) : !isAccountVerified ? (
+              <motion.div
+                key="verification"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-6"
+              >
+                <div className="bg-zinc-900 rounded-[32px] p-8 border border-zinc-800 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 blur-[60px] -mr-16 -mt-16 rounded-full" />
+                  
+                  <div className="relative space-y-6">
+                    <div className="w-16 h-16 bg-zinc-800 rounded-2xl flex items-center justify-center border border-zinc-700 mx-auto">
+                      <ShieldCheck className="w-8 h-8 text-purple-400" />
+                    </div>
+                    
+                    <div className="text-center space-y-2">
+                      <h2 className="text-2xl font-bold">Account Verification</h2>
+                      <p className="text-gray-400 text-sm">
+                        {authStep === "PHONE" 
+                          ? "Enter your mobile number to receive a secure verification code." 
+                          : "Enter the 6-digit code sent to your Telegram bot."}
+                      </p>
+                    </div>
+
+                    {authStep === "PHONE" ? (
+                      <form onSubmit={handleSendOTP} className="space-y-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-semibold text-gray-500 ml-2">MOBILE NUMBER</label>
+                          <div className="relative">
+                            <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+                            <input
+                              type="tel"
+                              placeholder="+91 00000 00000"
+                              value={mobileInput}
+                              onChange={(e) => setMobileInput(e.target.value)}
+                              className="w-full bg-black border border-zinc-800 rounded-2xl py-4 pl-12 pr-6 text-lg focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                            />
+                          </div>
+                        </div>
+                        
+                        {authError && <p className="text-red-400 text-sm text-center bg-red-400/5 py-2 rounded-xl">{authError}</p>}
+                        
+                        <button
+                          type="submit"
+                          disabled={authLoading || mobileInput.length < 10}
+                          className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-4 rounded-2xl shadow-lg shadow-purple-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                        >
+                          {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Send Code via Bot"}
+                        </button>
+                      </form>
+                    ) : (
+                      <form onSubmit={handleVerifyOTP} className="space-y-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-semibold text-gray-500 ml-2">VERIFICATION CODE</label>
+                          <input
+                            type="text"
+                            placeholder="000 000"
+                            maxLength={6}
+                            value={otpInput}
+                            onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
+                            className="w-full bg-black border border-zinc-800 rounded-2xl py-4 px-6 text-center text-2xl font-bold tracking-[0.5em] focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                          />
+                        </div>
+                        
+                        {authError && <p className="text-red-400 text-sm text-center bg-red-400/5 py-2 rounded-xl">{authError}</p>}
+                        {authSuccessMessage && <p className="text-green-400 text-sm text-center bg-green-400/5 py-2 rounded-xl">{authSuccessMessage}</p>}
+                        
+                        <button
+                          type="submit"
+                          disabled={authLoading || otpInput.length !== 6}
+                          className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-4 rounded-2xl shadow-lg shadow-purple-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                        >
+                          {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Verify & Continue"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setAuthStep("PHONE"); setAuthError(null); }}
+                          className="w-full text-zinc-500 text-sm font-medium hover:text-zinc-300 transition-colors"
+                        >
+                          Change Number
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-4 flex items-start gap-3">
+                  <MessageCircle className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-white">How it works?</p>
+                    <p className="text-[10px] text-zinc-400 leading-relaxed">
+                      We will send a 6-digit code to your Telegram chat. Please make sure you have started our official bot before requesting the code.
+                    </p>
+                  </div>
                 </div>
               </motion.div>
             ) : (
