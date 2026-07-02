@@ -150,11 +150,14 @@ export default function App() {
       console.log("[App.tsx] ==============================");
     }
 
-    const startParam = tg?.initDataUnsafe?.start_param || params.get("tgWebAppStartParam") || params.get("startapp");
+    const startParam = tg?.initDataUnsafe?.start_param || params.get("tgWebAppStartParam") || params.get("startapp") || params.get("start_param");
     console.log("[App.tsx] Final Resolved startParam:", startParam);
 
-    if (startParam && startParam.startsWith("promo_")) {
-      const extractedId = startParam.replace("promo_", "");
+    // Also check for direct promo ID in URL as fallback for external browser (though we prefer Mini App)
+    const directPromoId = params.get("promoId") || (window.location.pathname.startsWith("/promo/") ? window.location.pathname.replace("/promo/", "") : null);
+    
+    if ((startParam && startParam.startsWith("promo_")) || directPromoId) {
+      const extractedId = directPromoId || (startParam ? startParam.replace("promo_", "") : "");
       console.log("[App.tsx] MATCH! Routing to PromoRewardsPage with ID:", extractedId);
       return <PromoRewardsPage promoId={extractedId} />;
     }

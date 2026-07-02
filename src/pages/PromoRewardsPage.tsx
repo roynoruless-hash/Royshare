@@ -104,9 +104,23 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
       console.log("[PromoRewardsPage] Telegram initialized in page");
       console.log("[PromoRewardsPage] promoId prop:", promoId);
       console.log("[PromoRewardsPage] start_param:", tg.initDataUnsafe?.start_param);
+      
+      if (!tg.initData) {
+        setApiError("Please open this page from Telegram Mini App");
+        setLoading(false);
+        setPromoDetailsLoading(false);
+        return;
+      }
+
       // Apply Telegram Theme Colors
       if (tg.setHeaderColor) tg.setHeaderColor('#1c1c1c');
       if (tg.setBackgroundColor) tg.setBackgroundColor('#0f0f0f');
+    } else {
+      // If not in Telegram at all
+      setApiError("Please open this page from Telegram Mini App");
+      setLoading(false);
+      setPromoDetailsLoading(false);
+      return;
     }
 
     const tgUserId = tg?.initDataUnsafe?.user?.id;
@@ -508,7 +522,7 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
       </div>
       <div className="space-y-2">
         <h2 className="text-2xl font-bold text-white">
-          {type === "not_found" ? "Promo Not Found" : "Something Went Wrong"}
+          {type === "not_found" ? "Promo Not Found" : message === "Please open this page from Telegram Mini App" ? "Access Denied" : "Something Went Wrong"}
         </h2>
         <p className="text-gray-400 leading-relaxed">{message}</p>
       </div>
@@ -563,10 +577,18 @@ const PromoRewardsPage: React.FC<PromoRewardsPageProps> = ({ promoId }) => {
     );
   }
 
+  if (apiError) {
+    return (
+      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
+        <ErrorView message={apiError} />
+      </div>
+    );
+  }
+
   if (!userId) {
     return (
       <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-6">
-        <ErrorView message="Telegram authentication failed. Please open this app inside Telegram." />
+        <ErrorView message="Please open this page from Telegram Mini App" />
       </div>
     );
   }

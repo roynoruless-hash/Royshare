@@ -448,7 +448,9 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
         directLinkBase = `https://t.me/${botUsername}/app`;
       }
       
-      const deepLink = `${directLinkBase}${directLinkBase.includes("?") ? "&" : "?"}startapp=promo_${randomId}`;
+      const deepLink = storedMiniAppUrl 
+        ? `${storedMiniAppUrl}${storedMiniAppUrl.includes("?") ? "&" : "?"}startapp=promo_${randomId}`
+        : `https://t.me/${botUsername}?startapp=promo_${randomId}`;
 
       const msgText = getPromoTelegramMessage(promo);
       
@@ -464,13 +466,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
 
       const replyMarkup = {
         inline_keyboard: [
-          [rewardButton],
-          [
-            { 
-              text: "🌐 Open in Browser", 
-              url: `${baseUrl}/promo/${randomId}` 
-            }
-          ]
+          [rewardButton]
         ]
       };
 
@@ -506,12 +502,6 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
             { 
               text: "🎁 Claim Reward (Mini App)", 
               url: deepLink 
-            }
-          ],
-          [
-            { 
-              text: "🌐 Open in Browser", 
-              url: `${baseUrl}/promo/${randomId}` 
             }
           ]
         ]
@@ -4455,7 +4445,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     try {
       const { mobile, initData } = req.body;
       if (!mobile || !initData) {
-        return res.status(400).json({ error: "Mobile number and Telegram data required" });
+        return res.status(400).json({ error: "Please open this page from Telegram Mini App" });
       }
 
       const botToken = await getBotToken();
@@ -4534,7 +4524,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     try {
       const { mobile, otp, initData } = req.body;
       if (!mobile || !otp || !initData) {
-        return res.status(400).json({ error: "Mobile, OTP, and Telegram data required" });
+        return res.status(400).json({ error: "Please open this page from Telegram Mini App" });
       }
 
       const botToken = await getBotToken();
@@ -4660,7 +4650,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       // Allow admin testing, but otherwise enforce Telegram auth or valid query param
       if (!userId && userId !== "ADMIN_PREVIEW") {
-        return res.status(401).json({ error: "Telegram Authentication is required. Please access this page inside the Telegram Mini App." });
+        return res.status(401).json({ error: "Please open this page from Telegram Mini App" });
       }
 
       if (tgAuthError && userId !== "ADMIN_PREVIEW") {
