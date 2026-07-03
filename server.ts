@@ -1,16 +1,20 @@
+import fs from "fs";
+import path from "path";
+fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] TOP OF server.ts reached (pre-imports)\n`);
+
 import dotenv from "dotenv";
 dotenv.config();
 import crypto from "crypto";
 
 import { handleUpdate, submitWithdrawalRequest } from "./src/bot";
 import express from "express";
-import path from "path";
-import fs from "fs";
+// import path from "path"; // Already imported
+// import fs from "fs"; // Already imported
 import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
-import { createServer as createViteServer } from "vite";
+fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] Vite import removed\n`);
 import { getDb } from "./src/lib/firebase";
-import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch } from "firebase/firestore";
 import { REWARD_TASKS } from "./src/lib/tasks";
 import { GoogleGenAI, Type } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./src/lib/gemini";
@@ -19,28 +23,46 @@ import { google } from "googleapis";
 // ...
 const db = getDb();
 
+import { getFirestore as getAdminFirestore, FieldValue } from "firebase-admin/firestore";
+let adminDb: any;
+
+// Helper to log to a file we can read
+const debugLog = (msg: string) => {
+  const timestamp = new Date().toISOString();
+  const logLine = `[${timestamp}] ${msg}\n`;
+  console.log(msg); // Still log to console
+  try {
+    fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), logLine);
+  } catch (e) {
+    // Ignore logging errors
+  }
+};
+
+debugLog("Server starting/restarting...");
+
 const configPath = path.join(process.cwd(), "firebase-applet-config.json");
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 
 if (getApps().length === 0) {
+  debugLog("Initializing Firebase Admin SDK...");
   let credential;
   const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
   const serviceAccountFilePath = path.join(process.cwd(), "firebase-service-account.json");
 
   if (serviceAccountEnv) {
     try {
-      console.log("[FIREBASE ADMIN] Initializing using FIREBASE_SERVICE_ACCOUNT env variable.");
+      debugLog("[FIREBASE ADMIN] Initializing using FIREBASE_SERVICE_ACCOUNT env variable.");
       credential = cert(JSON.parse(serviceAccountEnv));
     } catch (e: any) {
-      console.error("[FIREBASE ADMIN] Failed to parse FIREBASE_SERVICE_ACCOUNT env string:", e.message || e);
+      debugLog(`[FIREBASE ADMIN] Failed to parse FIREBASE_SERVICE_ACCOUNT env string: ${e.message || e}`);
     }
   } else if (fs.existsSync(serviceAccountFilePath)) {
     try {
-      console.log("[FIREBASE ADMIN] Initializing using firebase-service-account.json file.");
+      debugLog("[FIREBASE ADMIN] Initializing using firebase-service-account.json file.");
       const keyData = JSON.parse(fs.readFileSync(serviceAccountFilePath, "utf8"));
       credential = cert(keyData);
     } catch (e: any) {
-      console.error("[FIREBASE ADMIN] Failed to parse firebase-service-account.json file:", e.message || e);
+      debugLog(`[FIREBASE ADMIN] Failed to parse firebase-service-account.json file: ${e.message || e}`);
     }
   }
 
@@ -53,10 +75,21 @@ if (getApps().length === 0) {
     appOptions.credential = credential;
   }
 
-  initializeApp(appOptions);
+  try {
+    const adminApp = initializeApp(appOptions);
+    adminDb = getAdminFirestore(adminApp);
+    debugLog("Firebase Admin initialized successfully.");
+  } catch (e: any) {
+    debugLog(`Firebase Admin initialization FAILED: ${e.message || e}`);
+  }
+} else {
+  const adminApp = getApps()[0];
+  adminDb = getAdminFirestore(adminApp);
+  debugLog("Firebase Admin already initialized.");
 }
 
 async function cleanupDemoTasks() {
+  debugLog("Inside cleanupDemoTasks...");
   try {
     const tasksToCleanup = [
       { id: "task_1" },
@@ -73,9 +106,14 @@ async function cleanupDemoTasks() {
       { title: "Quick Video Ad Session" }
     ];
 
+    debugLog("Fetching tasks from Firestore using Client SDK (workaround for Admin permissions)...");
     const tasksRef = collection(db, "tasks");
     const snapshot = await getDocs(tasksRef);
+    debugLog(`Found ${snapshot.docs.length} tasks in Firestore.`);
     
+    const batch = writeBatch(db);
+    let deleteCount = 0;
+
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
       const id = docSnap.id;
@@ -88,12 +126,21 @@ async function cleanupDemoTasks() {
       });
 
       if (shouldDelete) {
-        console.log(`Cleaning up demo task: ${title} (${id})`);
-        await deleteDoc(docSnap.ref);
+        debugLog(`Queueing demo task for cleanup: ${title} (${id})`);
+        batch.delete(doc(db, "tasks", id));
+        deleteCount++;
       }
     }
-  } catch (e) {
-    console.error("Error cleaning up demo tasks:", e);
+    
+    if (deleteCount > 0) {
+      await batch.commit();
+      debugLog(`Successfully cleaned up ${deleteCount} tasks.`);
+    } else {
+      debugLog("No demo tasks to clean up.");
+    }
+    debugLog("Finished cleanupDemoTasks.");
+  } catch (e: any) {
+    debugLog(`Error in cleanupDemoTasks: ${e.message || e}`);
   }
 }
 
@@ -106,77 +153,31 @@ process.on('uncaughtException', (err) => {
 });
 
 async function startServer() {
-  // Run cleanup on startup
-  await cleanupDemoTasks();
+  debugLog("startServer: Beginning startup sequence...");
+  // Run cleanup on startup (non-blocking)
+  debugLog("startServer: Launching cleanupDemoTasks (non-blocking)...");
+  cleanupDemoTasks();
   
+  debugLog("startServer: Initializing Express app...");
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
+  // Global Request Logger
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      debugLog(`[RESPONSE] ${req.method} ${req.url} ${res.statusCode} - ${duration}ms`);
+    });
+    debugLog(`[REQUEST] ${req.method} ${req.url}`);
+    console.log(`[SERVER] ${req.method} ${req.url} - ${new Date().toISOString()}`);
+    next();
+  });
+
   const PORT = 3000;
 
-  app.get("/api/health", async (req, res) => {
-    let firebaseStatus = "Offline";
-    let firestoreStatus = "Offline";
-    let telegramStatus = "Offline";
-    let webhookStatus = "Offline";
-    let storageStatus = "Offline";
-
-    try {
-      if (db) {
-        firebaseStatus = "Online";
-        try {
-          const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
-          firestoreStatus = "Online";
-          const data = settingsDoc.data();
-          if (data && data.botToken) {
-            // Check Telegram Bot
-            try {
-              const botRes = await fetch(`https://api.telegram.org/bot${data.botToken}/getMe`);
-              const botData = await botRes.json();
-              if (botData.ok) {
-                telegramStatus = "Online";
-              }
-            } catch (e) {}
-
-            // Check Webhook
-            try {
-              const whRes = await fetch(`https://api.telegram.org/bot${data.botToken}/getWebhookInfo`);
-              const whData = await whRes.json();
-              if (whData.ok && whData.result && whData.result.url) {
-                webhookStatus = "Online";
-              }
-            } catch (e) {}
-
-            // Check Storage
-            try {
-              if (data.storageChannelId) {
-                const chRes = await fetch(`https://api.telegram.org/bot${data.botToken}/getChat?chat_id=${data.storageChannelId}`);
-                const chData = await chRes.json();
-                if (chData.ok) {
-                  storageStatus = "Online";
-                }
-              }
-            } catch (e) {}
-          }
-        } catch (e) {
-          firestoreStatus = "Offline";
-        }
-      }
-    } catch (e) {
-      console.error("Health check error:", e);
-    }
-
-    res.json({
-      "Website Running": true,
-      "Backend Running": true,
-      "Firebase": firebaseStatus,
-      "Firestore": firestoreStatus,
-      "Telegram": telegramStatus,
-      "Webhook": webhookStatus,
-      "Storage": storageStatus,
-      "Server Time": new Date().toISOString(),
-      "Version": "1.0.0"
-    });
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", uptime: process.uptime() });
   });
 
 // Admin Logging Helper
@@ -367,32 +368,28 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
 
   const ensureTelegramUserSynced = async (userObj: any) => {
     if (!userObj || !userObj.id) return;
-    const userDocRef = doc(db, "users", String(userObj.id));
-    const userSnap = await getDoc(userDocRef);
+    const userId = String(userObj.id);
+    const userDocRef = adminDb.collection("users").doc(userId);
+    const userSnap = await userDocRef.get();
     const nowIso = new Date().toISOString();
     
-    if (userSnap.exists()) {
-      const existingData = userSnap.data();
-      const uData: any = { lastActive: nowIso };
-      
-      if (userObj.username) uData.username = userObj.username;
-      if (userObj.first_name) uData.firstName = userObj.first_name;
-      if (userObj.last_name) uData.lastName = userObj.last_name;
-      if (userObj.language_code) uData.languageCode = userObj.language_code;
-      if (userObj.photo_url) uData.photoUrl = userObj.photo_url;
-      
-      await setDoc(userDocRef, uData, { merge: true });
+    const uData: any = {
+      lastActive: nowIso,
+      username: userObj.username || "",
+      firstName: userObj.first_name || "",
+      lastName: userObj.last_name || "",
+      languageCode: userObj.language_code || "",
+      photoUrl: userObj.photo_url || ""
+    };
+
+    if (userSnap.exists) {
+      await userDocRef.set(uData, { merge: true });
     } else {
-      await setDoc(userDocRef, {
+      await userDocRef.set({
+        ...uData,
         telegramId: userObj.id,
-        username: userObj.username || "",
-        firstName: userObj.first_name || "",
-        lastName: userObj.last_name || "",
-        languageCode: userObj.language_code || "",
-        photoUrl: userObj.photo_url || "",
         chatId: 0,
         createdAt: nowIso,
-        lastActive: nowIso,
         joinDate: nowIso,
         balance: 0,
         rewards: 0,
@@ -418,7 +415,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
            `Click below.`;
   };
 
-  const postPromoToTelegram = async (promo: any, botToken: string, tgSettings: any): Promise<{ channelPostId?: number, groupPostId?: number, error?: string, deepLink?: string }> => {
+  const postPromoToTelegram = async (promo: any, botToken: string, tgSettings: any, requestHost?: string): Promise<{ channelPostId?: number, groupPostId?: number, error?: string, deepLink?: string }> => {
     console.log("--- Telegram Request Started ---");
     console.log("Promo ID:", promo.pageId || promo.id);
     console.log("Bot Token Loaded:", botToken ? "YES (starts with " + botToken.substring(0, 5) + "...)" : "NO");
@@ -434,7 +431,10 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       const botUsername = botMe.result.username || "";
       const randomId = promo.randomPageId || promo.pageId || promo.id;
       
-      const baseUrl = "https://royshare.onrender.com"; // User's production domain
+      // Dynamic Base URL to prevent redirection issues and context loss
+      const baseUrl = requestHost ? `https://${requestHost}` : "https://royshare.onrender.com"; 
+      console.log(`[DEBUG] Using Base URL for Telegram Buttons: ${baseUrl}`);
+      
       const webAppUrl = `${baseUrl}/?tgWebAppStartParam=promo_${randomId}`;
       
       // Use Direct Link from settings or fall back to bot username based one if absolutely necessary
@@ -570,13 +570,12 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
 
   const updatePromoTelegramPost = async (promoId: string, status: string) => {
     try {
-      const promoRef = doc(db, "promo_codes", promoId);
-      const promoSnap = await getDoc(promoRef);
-      if (!promoSnap.exists()) return;
+      const promoSnap = await adminDb.collection("promo_codes").doc(promoId).get();
+      if (!promoSnap.exists) return;
       const promo = promoSnap.data();
 
-      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-      if (!tgSettingsSnap.exists()) return;
+      const tgSettingsSnap = await adminDb.collection("settings").doc("telegram").get();
+      if (!tgSettingsSnap.exists) return;
       const { botToken, channelUsername, groupUsername, chatId } = tgSettingsSnap.data();
       if (!botToken) return;
 
@@ -637,7 +636,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       }
 
       // Update flag
-      await updateDoc(promoRef, { telegramStatusUpdated: true });
+      await adminDb.collection("promo_codes").doc(promoId).update({ telegramStatusUpdated: true });
     } catch (err) {
       console.error("Error updating Telegram post status:", err);
     }
@@ -4308,15 +4307,15 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       let tgUserId = "";
 
       // Start Firestore Transaction
-      await runTransaction(db, async (transaction) => {
-        const userSnap = await transaction.get(userDocRef);
-        if (!userSnap.exists()) throw new Error("User not found");
+      await adminDb.runTransaction(async (transaction: any) => {
+        const userSnap = await transaction.get(adminDb.collection("users").doc(userId));
+        if (!userSnap.exists) throw new Error("User not found");
         const uData = userSnap.data();
         userName = uData.name || uData.firstName || uData.username || "User";
         tgUserId = uData.telegramId || "";
 
-        const stateSnap = await transaction.get(stateDocRef);
-        if (!stateSnap.exists()) throw new Error("State not found");
+        const stateSnap = await transaction.get(adminDb.collection("user_daily_states").doc(userId));
+        if (!stateSnap.exists) throw new Error("State not found");
         const stateData = stateSnap.data();
 
         const pending = stateData.pendingRewards?.[type];
@@ -4325,31 +4324,31 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         rewardAmount = Number(pending.amount);
 
         // Update User Balances
-        transaction.update(userDocRef, {
-          bonusBalance: increment(rewardAmount),
-          availableBalance: increment(rewardAmount),
-          earnings: increment(rewardAmount)
+        transaction.update(adminDb.collection("users").doc(userId), {
+          bonusBalance: FieldValue.increment(rewardAmount),
+          availableBalance: FieldValue.increment(rewardAmount),
+          earnings: FieldValue.increment(rewardAmount)
         });
 
         // Mark as Claimed
-        transaction.update(stateDocRef, {
+        transaction.update(adminDb.collection("user_daily_states").doc(userId), {
           [`pendingRewards.${type}.claimed`]: true
         });
 
         // Update Statistics
         const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : "scratchRewards";
-        transaction.set(statsRef, { 
-          [rewardField]: increment(rewardAmount),
-          totalClaims: increment(1),
-          totalRewards: increment(rewardAmount)
+        transaction.set(adminDb.collection("user_statistics").doc(userId), { 
+          [rewardField]: FieldValue.increment(rewardAmount),
+          totalClaims: FieldValue.increment(1),
+          totalRewards: FieldValue.increment(rewardAmount)
         }, { merge: true });
 
         // Update Global Distributed Rewards
-        transaction.set(globalSettingsRef, { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
+        transaction.set(adminDb.collection("settings").doc("global"), { totalRewardsDistributed: FieldValue.increment(rewardAmount) }, { merge: true });
       });
 
-      // After transaction success, Add to history (non-critical, separate write or can be in transaction too but it's okay)
-      await addDoc(collection(db, "claimHistory"), {
+      // After transaction success, Add to history
+      await adminDb.collection("claimHistory").add({
         userId,
         userName,
         amount: rewardAmount,
@@ -4360,8 +4359,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       // Send Telegram Notification
       try {
-        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-        if (telegramSettingsSnap.exists()) {
+        const telegramSettingsSnap = await adminDb.collection("settings").doc("telegram").get();
+        if (telegramSettingsSnap.exists) {
           const { botToken, rewardChannelId } = telegramSettingsSnap.data();
           if (botToken && (rewardChannelId || tgUserId)) {
             const emoji = type === "wheel" ? "🎡" : type === "box" ? "📦" : type === "scratch" ? "🎫" : "🪙";
@@ -4449,9 +4448,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       // Check for lockout
-      const failuresRef = doc(db, "otp_failures", mobile.trim());
-      const failureSnap = await getDoc(failuresRef);
-      if (failureSnap.exists()) {
+      const failuresRef = adminDb.collection("otp_failures").doc(mobile.trim());
+      const failureSnap = await failuresRef.get();
+      if (failureSnap.exists) {
         const fdata = failureSnap.data();
         if (fdata.attempts >= 3) {
           const lastFail = new Date(fdata.lastAttempt).getTime();
@@ -4464,21 +4463,19 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
             });
           } else {
             // Reset after lockout period passed
-            await deleteDoc(failuresRef);
+            await failuresRef.delete();
           }
         }
       }
 
       // 1. Check if mobile is registered in RoyShare
-      const usersRef = collection(db, "users");
-      const qMobile = query(usersRef, where("mobile", "==", mobile.trim()));
-      const mobileSnap = await getDocs(qMobile);
+      const qMobile = await adminDb.collection("users").where("mobile", "==", mobile.trim()).get();
       
-      if (mobileSnap.empty) {
+      if (qMobile.empty) {
         return res.status(404).json({ error: "❌ Mobile Number Not Registered in RoyShare." });
       }
 
-      const userData = mobileSnap.docs[0].data();
+      const userData = qMobile.docs[0].data();
       const telegramId = String(userData.telegramId);
       const username = userData.firstName || userData.username || "User";
 
@@ -4486,13 +4483,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
       // 2. Rate Limiting: Max 5 OTPs per hour per TG ID
-      const otpRequestsRef = collection(db, "otpRequests");
-      const qRate = query(
-        otpRequestsRef,
-        where("telegramId", "==", telegramId),
-        where("createdAt", ">=", oneHourAgo.toISOString())
-      );
-      const rateSnap = await getDocs(qRate);
+      const rateSnap = await adminDb.collection("otpRequests")
+        .where("telegramId", "==", telegramId)
+        .where("createdAt", ">=", oneHourAgo.toISOString())
+        .get();
       if (rateSnap.size >= 5) {
         return res.status(429).json({ error: "Maximum OTP requests (5/hour) exceeded. Please try again later." });
       }
@@ -4503,15 +4497,16 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const expiresAt = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
 
       // 4. Invalidate previous OTPs for this user
-      const otpsRef = collection(db, "otps");
-      const qOld = query(otpsRef, where("telegramId", "==", telegramId), where("used", "==", false));
-      const oldSnap = await getDocs(qOld);
+      const oldSnap = await adminDb.collection("otps")
+        .where("telegramId", "==", telegramId)
+        .where("used", "==", false)
+        .get();
       for (const oldDoc of oldSnap.docs) {
-        await updateDoc(oldDoc.ref, { used: true });
+        await oldDoc.ref.update({ used: true });
       }
 
       // 5. Store new OTP attempt
-      await addDoc(collection(db, "otps"), {
+      await adminDb.collection("otps").add({
         telegramId,
         mobile,
         hashedOtp,
@@ -4521,7 +4516,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       });
 
       // 6. Log Request
-      await addDoc(collection(db, "otpRequests"), {
+      await adminDb.collection("otpRequests").add({
         telegramId,
         mobile,
         createdAt: now.toISOString()
@@ -4560,9 +4555,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       // Check lockout first
-      const failuresRef = doc(db, "otp_failures", mobile.trim());
-      const failureSnap = await getDoc(failuresRef);
-      if (failureSnap.exists()) {
+      const failuresRef = adminDb.collection("otp_failures").doc(mobile.trim());
+      const failureSnap = await failuresRef.get();
+      if (failureSnap.exists) {
         const fdata = failureSnap.data();
         if (fdata.attempts >= 3) {
           const lastFail = new Date(fdata.lastAttempt).getTime();
@@ -4577,25 +4572,22 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const now = new Date().toISOString();
 
       // Find valid OTP
-      const otpsRef = collection(db, "otps");
-      const qOtp = query(
-        otpsRef,
-        where("mobile", "==", mobile.trim()),
-        where("hashedOtp", "==", hashedInput),
-        where("used", "==", false),
-        where("expiresAt", ">=", now)
-      );
+      const otpSnap = await adminDb.collection("otps")
+        .where("mobile", "==", mobile.trim())
+        .where("hashedOtp", "==", hashedInput)
+        .where("used", "==", false)
+        .where("expiresAt", ">=", now)
+        .get();
       
-      const otpSnap = await getDocs(qOtp);
       if (otpSnap.empty) {
         // Increment failures
-        if (failureSnap.exists()) {
-          await updateDoc(failuresRef, {
-            attempts: increment(1),
+        if (failureSnap.exists) {
+          await failuresRef.update({
+            attempts: FieldValue.increment(1),
             lastAttempt: now
           });
         } else {
-          await setDoc(failuresRef, {
+          await failuresRef.set({
             attempts: 1,
             lastAttempt: now
           });
@@ -4604,19 +4596,19 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       // Success - reset failures
-      await deleteDoc(failuresRef);
+      await failuresRef.delete();
 
       // Mark OTP as used
       const otpDoc = otpSnap.docs[0];
       const telegramId = otpDoc.data().telegramId;
-      await updateDoc(otpDoc.ref, { used: true });
+      await otpDoc.ref.update({ used: true });
 
       // Generate 30-day session token
       const sessionToken = crypto.randomBytes(32).toString("hex");
       const sessionExpiresAt = new Date();
       sessionExpiresAt.setDate(sessionExpiresAt.getDate() + 30);
 
-      await addDoc(collection(db, "sessions"), {
+      await adminDb.collection("sessions").add({
         userId: telegramId,
         token: sessionToken,
         fingerprint: fingerprint || "legacy",
@@ -4627,15 +4619,14 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       });
 
       // Get User Data
-      const userDocRef = doc(db, "users", telegramId);
-      const userSnap = await getDoc(userDocRef);
+      const userSnap = await adminDb.collection("users").doc(telegramId).get();
       
-      if (!userSnap.exists()) {
+      if (!userSnap.exists) {
         return res.status(404).json({ error: "User profile lost. Please register again." });
       }
 
       const userData = userSnap.data();
-      await updateDoc(userDocRef, { 
+      await adminDb.collection("users").doc(telegramId).update({ 
         lastLogin: now,
         isVerified: true,
         verifiedAt: now 
@@ -4663,39 +4654,68 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   });
 
   app.post("/api/auth/check-session", async (req, res) => {
+    const requestId = Math.random().toString(36).substring(7);
     try {
       const { token, fingerprint } = req.body;
-      if (!token) return res.status(400).json({ error: "Session token required" });
+      debugLog(`[${requestId}] check-session START | token: ${token ? token.substring(0, 5) + "..." : "missing"}`);
 
-      const now = new Date().toISOString();
-      const sessionsRef = collection(db, "sessions");
-      const q = query(sessionsRef, where("token", "==", token), where("expiresAt", ">", now));
-      const snap = await getDocs(q);
+      if (!token) {
+        return res.status(200).json({ success: false, authenticated: false, error: "No token provided" });
+      }
+
+      if (!adminDb) {
+        debugLog(`[${requestId}] adminDb NOT INITIALIZED`);
+        return res.status(500).json({ error: "Server database not ready" });
+      }
+
+      const sessionsColl = adminDb.collection("sessions");
+      // Use Date object for Firestore Admin SDK comparison
+      const now = new Date();
+      
+      debugLog(`[${requestId}] Querying session...`);
+      const snap = await sessionsColl
+        .where("token", "==", token)
+        .where("expiresAt", ">", now)
+        .get();
 
       if (snap.empty) {
-        return res.status(401).json({ error: "Session expired" });
+        debugLog(`[${requestId}] Session not found or expired`);
+        return res.status(200).json({ success: false, authenticated: false });
       }
 
       const sessionDoc = snap.docs[0];
       const sessionData = sessionDoc.data();
+      debugLog(`[${requestId}] Session found for user: ${sessionData.userId}`);
 
       // Check fingerprint
       if (fingerprint && sessionData.fingerprint && sessionData.fingerprint !== fingerprint) {
-        return res.status(401).json({ 
+        debugLog(`[${requestId}] Fingerprint mismatch`);
+        return res.status(200).json({ 
+          success: false,
+          authenticated: false,
           error: "New Device Detected. Please verify again.",
           newDevice: true 
         });
       }
-      const userRef = doc(db, "users", sessionData.userId);
-      const userSnap = await getDoc(userRef);
       
-      if (!userSnap.exists()) {
-        return res.status(404).json({ error: "User profile not found" });
+      if (!sessionData.userId) {
+        debugLog(`[${requestId}] Session has no userId`);
+        return res.status(200).json({ success: false, authenticated: false });
+      }
+
+      debugLog(`[${requestId}] Fetching user doc: ${sessionData.userId}`);
+      const userSnap = await adminDb.collection("users").doc(String(sessionData.userId)).get();
+      
+      if (!userSnap.exists) {
+        debugLog(`[${requestId}] User doc NOT FOUND`);
+        return res.status(200).json({ success: false, authenticated: false, error: "User profile not found" });
       }
 
       const userData = userSnap.data();
+      debugLog(`[${requestId}] SUCCESS: Returning user data`);
       res.json({ 
         success: true, 
+        authenticated: true,
         user: {
           telegramId: userData.telegramId,
           username: userData.username || "no_username",
@@ -4708,7 +4728,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       });
     } catch (e: any) {
       console.error("Error in /api/auth/check-session:", e);
-      res.status(500).json({ error: "Session check failed" });
+      debugLog(`[${requestId}] ERROR in /api/auth/check-session: ${e.message || e}`);
+      if (e.stack) debugLog(`STACK: ${e.stack}`);
+      // Even on error, return a non-500 response if it's a logical failure
+      res.status(200).json({ success: false, authenticated: false, error: "Internal session check error" });
     }
   });
 
@@ -4726,13 +4749,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         failedClaimsSnap,
         blockedDevicesSnap
       ] = await Promise.all([
-        getCountFromServer(query(collection(db, "users"), where("isVerified", "==", true))),
-        getCountFromServer(query(collection(db, "otps"), where("used", "==", false))),
-        getCountFromServer(query(collection(db, "otps"), where("used", "==", true))), // Simple proxy for failed/expired
-        getCountFromServer(query(collection(db, "otpRequests"), where("createdAt", ">=", todayStart))),
-        getCountFromServer(query(collection(db, "claims"), where("status", "==", "success"))),
-        getCountFromServer(query(collection(db, "claims"), where("status", "==", "failed"))),
-        getCountFromServer(collection(db, "blocked_devices"))
+        adminDb.collection("users").where("isVerified", "==", true).count().get(),
+        adminDb.collection("otps").where("used", "==", false).count().get(),
+        adminDb.collection("otps").where("used", "==", true).count().get(),
+        adminDb.collection("otpRequests").where("createdAt", ">=", todayStart).count().get(),
+        adminDb.collection("claims").where("status", "==", "success").count().get(),
+        adminDb.collection("claims").where("status", "==", "failed").count().get(),
+        adminDb.collection("blocked_devices").count().get()
       ]);
 
       res.json({
@@ -4748,6 +4771,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       });
     } catch (e: any) {
+      console.error("Stats Error:", e);
       res.status(500).json({ error: "Failed to fetch stats" });
     }
   });
@@ -4756,176 +4780,119 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
   // Get Status and settings
   app.get("/api/promo/status", async (req, res) => {
+    const requestId = Math.random().toString(36).substring(7);
+    debugLog(`[${requestId}] START /api/promo/status | promoId: ${req.query.promoId}`);
+    console.log(`[DEBUG] GET /api/promo/status | promoId: ${req.query.promoId} | hasInitData: ${!!req.query.initData}`);
     try {
       const promoId = req.query.promoId as string; // Accept promoId (pageId) from query params
       const initData = req.query.initData as string;
       let userId = req.query.userId as string;
 
       if (!promoId) {
+        console.warn("[DEBUG] Missing promoId in /api/promo/status");
         return res.status(400).json({ error: "Missing promoId" });
       }
 
-      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-      const botToken = tgSettingsSnap.exists() ? tgSettingsSnap.data()?.botToken : null;
+      debugLog(`[${requestId}] Fetching bot settings...`);
+      const botSettingsSnap = await adminDb.collection("settings").doc("telegram").get();
+      debugLog(`[${requestId}] Bot settings fetched: ${botSettingsSnap.exists}`);
+      const botToken = botSettingsSnap.exists ? botSettingsSnap.data()?.botToken : null;
+      debugLog(`[${requestId}] botToken found: ${!!botToken}`);
 
       let verifiedUser: any = null;
       let tgAuthError: string | null = null;
 
       if (initData && botToken) {
+        debugLog(`[${requestId}] Validating Telegram initData...`);
         const verified = verifyTelegramInitData(initData, botToken);
         if (verified.isValid && verified.user) {
           verifiedUser = verified.user;
           userId = String(verified.user.id);
-          // Auto sync/create user in Firestore!
+          debugLog(`[${requestId}] Telegram User Verified: ${userId}`);
           await ensureTelegramUserSynced(verifiedUser);
         } else {
-          tgAuthError = "Invalid Telegram signature. Browser bypass rejected.";
+          debugLog(`[${requestId}] Telegram signature validation failed.`);
+          tgAuthError = "Invalid Telegram signature.";
         }
       }
 
       // Track Mini App Open
       if (userId && promoId) {
-        const promoCodesColl = collection(db, "promo_codes");
-        const q = query(promoCodesColl, where("pageId", "==", promoId));
-        const qSnap = await getDocs(q);
-        if (!qSnap.empty) {
-          await updateDoc(qSnap.docs[0].ref, { miniAppOpens: increment(1) }).catch(() => {});
-        }
-      }
-
-      // Allow admin testing, but otherwise enforce Telegram auth or valid query param
-      if (!userId && userId !== "ADMIN_PREVIEW") {
-        return res.status(401).json({ error: "Please open this page from Telegram Mini App" });
-      }
-
-      if (tgAuthError && userId !== "ADMIN_PREVIEW") {
-        return res.status(401).json({ error: tgAuthError });
-      }
-
-      const settingsDocRef = doc(db, "settings", "promo_rewards");
-      let settingsSnap = await getDoc(settingsDocRef);
-      
-      const defaultSettings = {
-        enabled: true,
-        adsterraBannerCode: "",
-        monetagAdCode: "",
-        expiryMinutes: 120,
-        expiryEnabled: false,
-        pageOpenedCount: 0,
-        pageUnlockedCount: 0,
-        wrongAccessCount: 0,
-        successClaimCount: 0,
-        failedClaimCount: 0,
-        budgetUsed: 0,
-        uniqueUsersCount: 0,
-        tgChannelUrl: "https://t.me/royshare_official",
-        tgChannelEnabled: true,
-        tgGroupUrl: "https://t.me/royshare_chat",
-        tgGroupEnabled: true,
-        instagramUrl: "https://www.instagram.com/royshare_official",
-        instagramEnabled: true,
-        facebookUrl: "https://www.facebook.com/profile.php?id=61591256922373",
-        facebookEnabled: true,
-        youtubeUrl: "https://youtube.com/@royshare",
-        youtubeEnabled: true,
-        discordUrl: "https://discord.gg/2Q2CSmFk",
-        discordEnabled: true,
-        twitterUrl: "https://x.com/RoyShare_0",
-        twitterEnabled: true
-      };
-
-      if (!settingsSnap.exists()) {
-        await setDoc(settingsDocRef, defaultSettings);
-        settingsSnap = await getDoc(settingsDocRef);
-      }
-
-      const settingsData = { ...defaultSettings, ...settingsSnap.data() };
-
-      // Increment Page Opened Count
-      await updateDoc(settingsDocRef, {
-        pageOpenedCount: increment(1)
-      });
-
-      // Fetch user profile
-      const userRef = doc(db, "users", userId);
-      const userSnap = await getDoc(userRef);
-      const userData = userSnap.exists() ? userSnap.data() : null;
-
-      let requireAccessCode = false;
-      let unlocked = true;
-      let session = null;
-      let promoData: any = null;
-
-      if (promoId) {
-        // Query the specific promo to get its requireAccessCode setting
-        const promoCodesColl = collection(db, "promo_codes");
-        let q = query(promoCodesColl, where("pageId", "==", promoId));
-        let qSnap = await getDocs(q);
-        if (qSnap.empty) {
-          q = query(promoCodesColl, where("randomPageId", "==", promoId));
-          qSnap = await getDocs(q);
-        }
-        if (!qSnap.empty) {
-          const promoDoc = qSnap.docs[0];
-          promoData = promoDoc.data();
-          requireAccessCode = promoData.requireAccessCode === true;
-
-          // Track miniAppOpens and clicks directly inside the Promo document
-          await updateDoc(promoDoc.ref, {
-            miniAppOpens: increment(1),
-            miniAppClicks: increment(1)
+        debugLog(`[${requestId}] Tracking Mini App Open...`);
+        const promoCodesColl = adminDb.collection("promo_codes");
+        const qSnapOpen = await promoCodesColl.where("pageId", "==", promoId).get();
+        if (!qSnapOpen.empty) {
+          const promoRef = qSnapOpen.docs[0].ref;
+          await promoRef.update({
+            miniAppOpens: FieldValue.increment(1)
           }).catch(() => {});
         }
       }
 
-      if (requireAccessCode) {
-        unlocked = false;
-        console.log("Promo Locked - Checking session");
-        const sessionRef = doc(db, "promo_sessions", `${userId}_${promoId}`);
-        const sessionSnap = await getDoc(sessionRef);
-        if (sessionSnap.exists()) {
-          const sData = sessionSnap.data();
-          const expiresAt = new Date(sData.expiresAt);
-          if (expiresAt > new Date()) {
-            unlocked = true;
-            session = sData;
-          }
-        }
-      } else {
-        console.log("Promo Unlocked (No Access Code Required)");
+      debugLog(`[${requestId}] Querying promo_codes for ${promoId}...`);
+      const promoCodesColl = adminDb.collection("promo_codes");
+      debugLog(`[${requestId}] Query 1 starting...`);
+      let qSnap = await promoCodesColl.where("pageId", "==", promoId).get();
+      debugLog(`[${requestId}] Query 1 done`);
+      if (qSnap.empty) {
+        debugLog(`[${requestId}] Query 2 starting...`);
+        qSnap = await promoCodesColl.where("randomPageId", "==", promoId).get();
+        debugLog(`[${requestId}] Query 2 done`);
       }
 
+      if (qSnap.empty) {
+        debugLog(`[${requestId}] ERROR: Promo not found`);
+        return res.status(404).json({ success: false, error: "Promo not found" });
+      }
+
+      const promoDoc = qSnap.docs[0];
+      const promoData = promoDoc.data();
+      const promoDocId = promoDoc.id;
+
+      debugLog(`[${requestId}] Promo found: ${promoDocId}. Fetching settings...`);
+      const promoSettingsSnap = await adminDb.collection("promo_settings").doc(promoDocId).get();
+      debugLog(`[${requestId}] Settings fetched`);
+      const promoSettings = promoSettingsSnap.exists ? promoSettingsSnap.data() : {};
+
+      let unlocked = false;
+      let session = null;
+      let user = null;
+
+      if (userId && userId !== "ADMIN_PREVIEW") {
+        debugLog(`[${requestId}] Checking user doc for ${userId}...`);
+        const userSnap = await adminDb.collection("users").doc(userId).get();
+        debugLog(`[${requestId}] User doc fetched`);
+        user = userSnap.exists ? userSnap.data() : null;
+
+        debugLog(`[${requestId}] Checking claims...`);
+        const claimSnap = await adminDb.collection("claims")
+          .where("userId", "==", userId)
+          .where("promoId", "==", promoDocId)
+          .get();
+        debugLog(`[${requestId}] Claims fetched`);
+        unlocked = !claimSnap.empty;
+
+        debugLog(`[${requestId}] Checking promo sessions...`);
+        const sessionSnap = await adminDb.collection("promo_sessions")
+          .where("userId", "==", userId)
+          .where("promoId", "==", promoDocId)
+          .where("status", "==", "active")
+          .get();
+        debugLog(`[${requestId}] Sessions fetched`);
+        session = !sessionSnap.empty ? { id: sessionSnap.docs[0].id, ...sessionSnap.docs[0].data() } : null;
+      }
+
+      debugLog(`[${requestId}] SUCCESS: Sending response`);
       res.json({
         success: true,
-        settings: settingsData,
-        user: {
-          ...userData,
-          isVerified: userData?.isVerified === true
-        },
+        settings: promoSettings,
+        user,
         unlocked,
         session,
-        promo: promoData ? {
-          name: promoData.name,
-          rewardAmount: promoData.rewardAmount,
-          enabled: promoData.enabled,
-          requireAccessCode: promoData.requireAccessCode,
-          accessCode: promoData.accessCode,
-          startDate: promoData.startDate,
-          startTime: promoData.startTime,
-          expiryDate: promoData.expiryDate,
-          expiryTime: promoData.expiryTime,
-          maxUsers: promoData.maxUsers,
-          usedCount: promoData.usedCount,
-          totalBudget: promoData.totalBudget,
-          budgetUsed: promoData.budgetUsed,
-          // include stats to show on the preview
-          telegramViews: promoData.telegramViews || 0,
-          miniAppOpens: promoData.miniAppOpens || 0,
-          claimsCount: promoData.claimsCount || 0
-        } : null
+        tgAuthError
       });
-
     } catch (e: any) {
+      debugLog(`[${requestId}] EXCEPTION: ${e.message}`);
       console.error("Error in GET /api/promo/status:", e);
       res.status(500).json({ error: e.message || "Server error" });
     }
@@ -4939,8 +4906,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       if (!promoId) return res.status(400).json({ error: "Missing promoId" });
       const safeAccessCode = accessCode || "";
 
-      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-      const botToken = tgSettingsSnap.exists() ? tgSettingsSnap.data()?.botToken : null;
+      const tgSettingsSnap = await adminDb.collection("settings").doc("telegram").get();
+      const botToken = tgSettingsSnap.exists ? tgSettingsSnap.data()?.botToken : null;
 
       if (initData && botToken) {
         const verified = verifyTelegramInitData(initData, botToken);
@@ -4956,17 +4923,14 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(400).json({ error: "Missing userId" });
       }
 
-      const settingsDocRef = doc(db, "settings", "promo_rewards");
-      const settingsSnap = await getDoc(settingsDocRef);
-      const expiryMinutes = settingsSnap.exists() ? (settingsSnap.data()?.expiryMinutes ?? 120) : 120;
+      const settingsSnap = await adminDb.collection("settings").doc("promo_rewards").get();
+      const expiryMinutes = settingsSnap.exists ? (settingsSnap.data()?.expiryMinutes ?? 120) : 120;
 
       // Query the specific promo
-      const promoCodesColl = collection(db, "promo_codes");
-      let q = query(promoCodesColl, where("pageId", "==", promoId));
-      let qSnap = await getDocs(q);
+      const promoCodesColl = adminDb.collection("promo_codes");
+      let qSnap = await promoCodesColl.where("pageId", "==", promoId).get();
       if (qSnap.empty) {
-        q = query(promoCodesColl, where("randomPageId", "==", promoId));
-        qSnap = await getDocs(q);
+        qSnap = await promoCodesColl.where("randomPageId", "==", promoId).get();
       }
 
       if (qSnap.empty) {
@@ -4975,6 +4939,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       const promoDoc = qSnap.docs[0];
       const promoData = promoDoc.data();
+      const promoRef = promoDoc.ref;
 
       // Check if access code is required
       if (!promoData.requireAccessCode) {
@@ -4983,8 +4948,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       // Check if access code matches (case insensitive)
       if (!promoData.accessCode || promoData.accessCode.trim().toUpperCase() !== safeAccessCode.trim().toUpperCase()) {
-        await updateDoc(settingsDocRef, { wrongAccessCount: increment(1) });
-        await updateDoc(promoDoc.ref, { wrongAccessCount: increment(1) }).catch(() => {});
+        await adminDb.collection("settings").doc("promo_rewards").update({ wrongAccessCount: FieldValue.increment(1) }).catch(() => {});
+        await promoRef.update({ wrongAccessCount: FieldValue.increment(1) }).catch(() => {});
         console.log("Promo Locked: Invalid Access Code");
         return res.status(400).json({ success: false, error: "Invalid Access Code. Please try again." });
       }
@@ -5015,24 +4980,24 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(400).json({ success: false, error: "This promo has not started yet." });
       }
       if (!isNaN(expiry.getTime()) && now > expiry) {
-        await updateDoc(promoDoc.ref, { expiredAttempts: increment(1) }).catch(() => {});
+        await promoRef.update({ expiredAttempts: FieldValue.increment(1) }).catch(() => {});
         return res.status(400).json({ success: false, error: "This promo has expired." });
       }
 
       // Create Session
       const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
-      const sessionRef = doc(db, "promo_sessions", `${userId}_${promoId}`);
-      await setDoc(sessionRef, {
+      await adminDb.collection("promo_sessions").doc(`${userId}_${promoId}`).set({
         userId,
         promoId,
         accessCode: accessCode.toUpperCase(),
         unlockedAt: new Date().toISOString(),
-        expiresAt
+        expiresAt,
+        status: "active"
       });
 
       // Update analytics
-      await updateDoc(settingsDocRef, { pageUnlockedCount: increment(1) });
-      await updateDoc(promoDoc.ref, { successfulUnlocks: increment(1) }).catch(() => {});
+      await adminDb.collection("settings").doc("promo_rewards").update({ pageUnlockedCount: FieldValue.increment(1) }).catch(() => {});
+      await promoRef.update({ successfulUnlocks: FieldValue.increment(1) }).catch(() => {});
 
       console.log("Promo Unlocked successfully");
       res.json({
@@ -5049,28 +5014,31 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // Redeem Promo reward
   app.post("/api/promo/verify", async (req, res) => {
     try {
-      const { userId, promoId, promoCode, initData } = req.body;
-      if (!userId || !promoId || !promoCode) {
+      const { userId: reqUserId, promoId, promoCode, initData } = req.body;
+      let userId = reqUserId;
+      if (!promoId || !promoCode) {
         return res.status(400).json({ error: "Missing required parameters." });
       }
 
-      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-      const botToken = tgSettingsSnap.exists() ? tgSettingsSnap.data()?.botToken : null;
+      const tgSettingsSnap = await adminDb.collection("settings").doc("telegram").get();
+      const botToken = tgSettingsSnap.exists ? tgSettingsSnap.data()?.botToken : null;
 
       if (initData && botToken) {
         const verified = verifyTelegramInitData(initData, botToken);
-        if (!verified.isValid && userId !== "ADMIN_PREVIEW") {
+        if (verified.isValid && verified.user) {
+          userId = String(verified.user.id);
+        } else if (userId !== "ADMIN_PREVIEW") {
           return res.status(401).json({ error: "Invalid Telegram signature." });
         }
       }
 
+      if (!userId) return res.status(400).json({ error: "Missing userId" });
+
       // Retrieve Promo
-      const promoCodesColl = collection(db, "promo_codes");
-      let q = query(promoCodesColl, where("randomPageId", "==", promoId));
-      let qSnap = await getDocs(q);
+      const promoCodesColl = adminDb.collection("promo_codes");
+      let qSnap = await promoCodesColl.where("randomPageId", "==", promoId).get();
       if (qSnap.empty) {
-        q = query(promoCodesColl, where("pageId", "==", promoId));
-        qSnap = await getDocs(q);
+        qSnap = await promoCodesColl.where("pageId", "==", promoId).get();
       }
       if (qSnap.empty) {
         return res.status(404).json({ error: "Promo campaign not found." });
@@ -5080,9 +5048,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const promoData = promoDoc.data();
 
       // Check User Verification Status
-      const userRef = doc(db, "users", userId);
-      const userSnap = await getDoc(userRef);
-      const userData = userSnap.data();
+      const userSnap = await adminDb.collection("users").doc(userId).get();
+      const userData = userSnap.exists ? userSnap.data() : null;
       if (userId !== "ADMIN_PREVIEW") {
         if (!userData || !userData.isVerified) {
           return res.status(403).json({ error: "Verification Required: Please verify your account via OTP first." });
@@ -5105,7 +5072,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       // 2. Verify Telegram Membership
-      if (tgSettingsSnap.exists() && botToken) {
+      if (tgSettingsSnap.exists && botToken) {
         const tgSettings = tgSettingsSnap.data();
         
         // Channel
@@ -5126,9 +5093,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       // 3. Already Claimed Check
-      const claimRef = doc(db, "promo_claims", `${userId}_${promoDoc.id}`);
-      const claimSnap = await getDoc(claimRef);
-      if (claimSnap.exists() && claimSnap.data().status === "Success") {
+      const claimSnap = await adminDb.collection("promo_claims").doc(`${userId}_${promoDoc.id}`).get();
+      if (claimSnap.exists && claimSnap.data()?.status === "Success") {
         return res.status(400).json({ error: "You have already claimed this promo reward!" });
       }
 
@@ -5145,8 +5111,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       let userId = req.body.userId;
       if (!randomPageId) return res.status(400).json({ error: "Missing parameters" });
 
-      const tgSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-      const botToken = tgSettingsSnap.exists() ? tgSettingsSnap.data()?.botToken : null;
+      const tgSettingsSnap = await adminDb.collection("settings").doc("telegram").get();
+      const botToken = tgSettingsSnap.exists ? tgSettingsSnap.data()?.botToken : null;
 
       let verifiedUser: any = null;
       if (initData && botToken) {
@@ -5164,25 +5130,21 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(400).json({ error: "Missing userId" });
       }
 
-      const settingsDocRef = doc(db, "settings", "promo_rewards");
-      const settingsSnap = await getDoc(settingsDocRef);
+      const settingsSnap = await adminDb.collection("settings").doc("promo_rewards").get();
 
       // Retrieve Promo via randomPageId query
-      const promoCodesColl = collection(db, "promo_codes");
-      let q = query(promoCodesColl, where("randomPageId", "==", randomPageId));
-      let qSnap = await getDocs(q);
+      const promoCodesColl = adminDb.collection("promo_codes");
+      let qSnap = await promoCodesColl.where("randomPageId", "==", randomPageId).get();
       if (qSnap.empty) {
-        q = query(promoCodesColl, where("pageId", "==", randomPageId));
-        qSnap = await getDocs(q);
+        qSnap = await promoCodesColl.where("pageId", "==", randomPageId).get();
       }
       if (qSnap.empty) {
         return res.status(400).json({ error: "This promo reward page does not exist or is invalid." });
       }
 
       // Check User Verification Status
-      const userRef = doc(db, "users", userId);
-      const userSnap = await getDoc(userRef);
-      const userData = userSnap.data();
+      const userSnap = await adminDb.collection("users").doc(userId).get();
+      const userData = userSnap.exists ? userSnap.data() : null;
       if (userId !== "ADMIN_PREVIEW") {
         if (!userData || !userData.isVerified) {
           return res.status(403).json({ error: "Verification Required: Please verify your account via OTP first." });
@@ -5198,20 +5160,17 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const requireAccessCode = promoData.requireAccessCode === true;
 
       // Monetag Ad Verification
-      const postbackQuery = query(
-        collection(db, "monetag_postbacks"),
-        where("identified_tg_id", "==", userId),
-        where("identified_task", "==", `PROMO_CLAIM_${randomPageId}`),
-        where("status", "==", "success")
-      );
+      const postbackSnap = await adminDb.collection("monetag_postbacks")
+        .where("identified_tg_id", "==", userId)
+        .where("identified_task", "==", `PROMO_CLAIM_${randomPageId}`)
+        .where("status", "==", "success")
+        .get();
       
-      const postbackSnap = await getDocs(postbackQuery);
       if (postbackSnap.empty && userId !== "ADMIN_PREVIEW") {
         return res.status(400).json({ error: "Ad verification failed. Please watch the ad until completion." });
       }
 
       if (!postbackSnap.empty) {
-        // Find most recent manually if needed, but for now just take the first success
         const pbData = postbackSnap.docs[0].data();
         const pbTime = new Date(pbData.timestamp).getTime();
         const now = new Date().getTime();
@@ -5226,15 +5185,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const fingerprint = req.body.fingerprint || "unknown";
 
       // 1. Multi-Account Check (Same Device)
-      const multiAccountQuery = query(
-        collection(db, "promo_claims"),
-        where("fingerprint", "==", fingerprint),
-        where("promoCode", "==", codeUpper),
-        where("status", "==", "Success")
-      );
-      const multiSnap = await getDocs(multiAccountQuery);
+      const multiSnap = await adminDb.collection("promo_claims")
+        .where("fingerprint", "==", fingerprint)
+        .where("promoCode", "==", codeUpper)
+        .where("status", "==", "Success")
+        .get();
       if (!multiSnap.empty && userId !== "ADMIN_PREVIEW") {
-        const alreadyClaimedByOther = multiSnap.docs.some(d => d.data().userId !== userId);
+        const alreadyClaimedByOther = multiSnap.docs.some((d: any) => d.data().userId !== userId);
         if (alreadyClaimedByOther) {
           return res.status(400).json({ error: "Device already used to claim this reward with another account." });
         }
@@ -5253,15 +5210,14 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       if (requireAccessCode) {
         // Verify Session exists and is active for this user & this specific promo page!
-        const sessionRef = doc(db, "promo_sessions", `${userId}_${randomPageId}`);
-        const sessionSnap = await getDoc(sessionRef);
-        if (!sessionSnap.exists()) {
-          await updateDoc(promoDoc.ref, { failedClaims: increment(1) }).catch(() => {});
+        const sessionSnap = await adminDb.collection("promo_sessions").doc(`${userId}_${randomPageId}`).get();
+        if (!sessionSnap.exists) {
+          await promoDoc.ref.update({ failedClaims: FieldValue.increment(1) }).catch(() => {});
           return res.status(400).json({ error: "Your access session has expired or is not active." });
         }
         const sData = sessionSnap.data();
         if (new Date(sData.expiresAt) < new Date()) {
-          await updateDoc(promoDoc.ref, { expiredAttempts: increment(1) }).catch(() => {});
+          await promoDoc.ref.update({ expiredAttempts: FieldValue.increment(1) }).catch(() => {});
           return res.status(400).json({ error: "Your access session has expired. Please unlock again." });
         }
       }
@@ -5269,35 +5225,28 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       // --- END ABUSE PROTECTION ---
 
       // 5. Already Claimed Check
-      const claimRef = doc(db, "promo_claims", `${userId}_${codeUpper}`);
-      const claimSnap = await getDoc(claimRef);
-      if (claimSnap.exists() && claimSnap.data().status === "Success") {
-        await updateDoc(promoDoc.ref, { duplicateAttempts: increment(1) }).catch(() => {});
+      const claimSnap = await adminDb.collection("promo_claims").doc(`${userId}_${codeUpper}`).get();
+      if (claimSnap.exists && claimSnap.data()?.status === "Success") {
+        await promoDoc.ref.update({ duplicateAttempts: FieldValue.increment(1) }).catch(() => {});
         return res.status(400).json({ error: "You have already claimed this promo reward!" });
       }
 
       // Validate Telegram Group & Channel joins if bot token and configurations are active
-      if (tgSettingsSnap.exists() && botToken) {
-        const promoSettingsSnap = await getDoc(settingsDocRef);
-        if (promoSettingsSnap.exists()) {
-          const ps = promoSettingsSnap.data();
-          
-          // Check Channel Join
-          if (ps.tgChannelEnabled && tgSettingsSnap.data().channelUsername) {
-            const joined = await checkTelegramJoin(botToken, tgSettingsSnap.data().channelUsername, tgUserId);
-            if (!joined) {
-              await updateDoc(promoDoc.ref, { failedClaims: increment(1) }).catch(() => {});
-              return res.status(400).json({ error: `Please join our Telegram Channel (${tgSettingsSnap.data().channelUsername}) first!` });
-            }
+      if (tgSettingsSnap.exists && botToken) {
+        const promoSettings = settingsSnap.exists ? settingsSnap.data() : {};
+        
+        // Check Channel Join
+        if (promoSettings.tgChannelEnabled && tgSettingsSnap.data().channelUsername) {
+          const joined = await checkTelegramJoin(botToken, tgSettingsSnap.data().channelUsername, tgUserId);
+          if (!joined) {
+            return res.status(400).json({ error: `Please join our Channel (${tgSettingsSnap.data().channelUsername}) first!` });
           }
-
-          // Check Group Join
-          if (ps.tgGroupEnabled && tgSettingsSnap.data().groupUsername) {
-            const joined = await checkTelegramJoin(botToken, tgSettingsSnap.data().groupUsername, tgUserId);
-            if (!joined) {
-              await updateDoc(promoDoc.ref, { failedClaims: increment(1) }).catch(() => {});
-              return res.status(400).json({ error: `Please join our Telegram Chat Group (${tgSettingsSnap.data().groupUsername}) first!` });
-            }
+        }
+        // Check Group Join
+        if (promoSettings.tgGroupEnabled && tgSettingsSnap.data().groupUsername) {
+          const joined = await checkTelegramJoin(botToken, tgSettingsSnap.data().groupUsername, tgUserId);
+          if (!joined) {
+            return res.status(400).json({ error: `Please join our Group (${tgSettingsSnap.data().groupUsername}) first!` });
           }
         }
       }
@@ -5308,20 +5257,25 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       let claimData: any = null;
 
       // Start transaction to verify limits and credit reward
-      await runTransaction(db, async (transaction) => {
+      await adminDb.runTransaction(async (transaction: any) => {
         // 1. Re-get inside transaction for locking (ALL READS FIRST)
-        const promoRef = doc(db, "promo_codes", codeUpper);
-        const userStatsRef = doc(db, "promo_user_stats", userId);
+        const promoRef = adminDb.collection("promo_codes").doc(codeUpper);
+        const userStatsRef = adminDb.collection("promo_user_stats").doc(userId);
+        const userRef = adminDb.collection("users").doc(userId);
+        const settingsDocRef = adminDb.collection("settings").doc("promo_rewards");
+        const claimRef = adminDb.collection("promo_claims").doc(`${userId}_${codeUpper}`);
         
-        const [promoSnap, userStatsSnap] = await Promise.all([
+        const [promoSnap, userStatsSnap, userSnap] = await Promise.all([
           transaction.get(promoRef),
-          transaction.get(userStatsRef)
+          transaction.get(userStatsRef),
+          transaction.get(userRef)
         ]);
 
-        if (!promoSnap.exists() || !promoSnap.data().enabled) {
+        if (!promoSnap.exists || !promoSnap.data().enabled) {
           throw new Error("Invalid or inactive promo reward.");
         }
         const pData = promoSnap.data();
+        const userData = userSnap.exists ? userSnap.data() : { balance: 0 };
 
         if (pData.status === "paused") {
           throw new Error("This promo is currently paused by the administrator.");
@@ -5349,10 +5303,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         
         // 7. Promo Code counts
         transaction.update(promoRef, {
-          usedCount: increment(1),
-          budgetUsed: increment(rewardAmount),
-          claimsCount: increment(1),
-          claimLogs: arrayUnion({
+          usedCount: FieldValue.increment(1),
+          budgetUsed: FieldValue.increment(rewardAmount),
+          claimsCount: FieldValue.increment(1),
+          claimLogs: FieldValue.arrayUnion({
             userId,
             username: userName,
             telegramId: tgUserId,
@@ -5370,11 +5324,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
         transaction.update(userRef, {
           balance: newBalance,
-          bonusBalance: increment(rewardAmount),
-          availableBalance: increment(rewardAmount),
-          earnings: increment(rewardAmount),
+          bonusBalance: FieldValue.increment(rewardAmount),
+          availableBalance: FieldValue.increment(rewardAmount),
+          earnings: FieldValue.increment(rewardAmount),
           // Record history in doc
-          walletHistory: arrayUnion({
+          walletHistory: FieldValue.arrayUnion({
             type: "promo_claim",
             promoName: pData.name || "Promo Reward",
             amount: rewardAmount,
@@ -5386,29 +5340,28 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
         // 9. Analytics in settings
         transaction.update(settingsDocRef, {
-          successClaimCount: increment(1),
-          budgetUsed: increment(rewardAmount)
+          successClaimCount: FieldValue.increment(1),
+          budgetUsed: FieldValue.increment(rewardAmount)
         });
 
         // 10. Unique User Tracking
         let isNewUnique = false;
-        if (!userStatsSnap.exists()) {
+        if (!userStatsSnap.exists) {
           isNewUnique = true;
           transaction.set(userStatsRef, {
             claimedCount: 1,
             firstClaimAt: new Date().toISOString()
           });
         } else {
-          transaction.update(userStatsRef, { claimedCount: increment(1) });
+          transaction.update(userStatsRef, { claimedCount: FieldValue.increment(1) });
         }
 
-
         if (isNewUnique) {
-          transaction.update(settingsDocRef, { uniqueUsersCount: increment(1) });
+          transaction.update(settingsDocRef, { uniqueUsersCount: FieldValue.increment(1) });
         }
 
         // 11. Write Success Claim
-        const claimId = "RS-" + crypto.randomBytes(4).toString("hex").toUpperCase();
+        const claimId = "RS-" + require("crypto").randomBytes(4).toString("hex").toUpperCase();
         transaction.set(claimRef, {
           userId,
           username: userName,
@@ -5480,9 +5433,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       // Post-redemption: check if finished
       try {
-        const finalSnap = await getDoc(promoDoc.ref);
-        if (finalSnap.exists()) {
-          const fData = finalSnap.data();
+        const finalSnap = await adminDb.collection("promo_codes").doc(promoDoc.id).get();
+        if (finalSnap.exists) {
+          const fData = finalSnap.data() as any;
           const max = Number(fData.maxUsers || 0);
           const used = Number(fData.usedCount || 0);
           const budget = Number(fData.totalBudget || 0);
@@ -5501,8 +5454,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
     } catch (e: any) {
       console.error("Error in POST /api/promo/redeem:", e);
-      const settingsDocRef = doc(db, "settings", "promo_rewards");
-      await updateDoc(settingsDocRef, { failedClaimCount: increment(1) }).catch(() => {});
+      await adminDb.collection("settings").doc("promo_rewards").update({ failedClaimCount: FieldValue.increment(1) }).catch(() => {});
       res.status(400).json({ error: e.message || "Server error" });
     }
   });
@@ -5863,7 +5815,7 @@ Provide the response strictly in JSON format matching the schema requested.`;
           const tgSettings = tgSettingsSnap.data();
           const botToken = tgSettings.botToken;
           if (botToken && (promoData.autoPostChannel || promoData.autoPostGroup)) {
-            const result = await postPromoToTelegram(promoData, botToken, tgSettings);
+            const result = await postPromoToTelegram(promoData, botToken, tgSettings, req.get("host"));
             tgResult = { 
               channelPostId: result.channelPostId || null, 
               groupPostId: result.groupPostId || null,
@@ -5958,20 +5910,21 @@ Provide the response strictly in JSON format matching the schema requested.`;
       
       if (claimData.status !== "Success") return res.status(400).json({ error: "Claim already refunded or failed" });
 
-      await runTransaction(db, async (transaction) => {
-        const userRef = doc(db, "users", claimData.userId);
-        const promoRef = doc(db, "promo_codes", claimData.promoCode);
+      await adminDb.runTransaction(async (transaction: any) => {
+        const userRef = adminDb.collection("users").doc(claimData.userId);
+        const promoRef = adminDb.collection("promo_codes").doc(claimData.promoCode);
+        const claimRef = adminDb.collection("promo_claims").doc(claimId);
         
         const userSnap = await transaction.get(userRef);
-        if (!userSnap.exists()) throw new Error("User not found");
+        if (!userSnap.exists) throw new Error("User not found");
         
         const refundAmount = claimData.rewardAmount;
         transaction.update(userRef, {
-          balance: increment(-refundAmount),
-          bonusBalance: increment(-refundAmount),
-          availableBalance: increment(-refundAmount),
-          earnings: increment(-refundAmount),
-          walletHistory: arrayUnion({
+          balance: FieldValue.increment(-refundAmount),
+          bonusBalance: FieldValue.increment(-refundAmount),
+          availableBalance: FieldValue.increment(-refundAmount),
+          earnings: FieldValue.increment(-refundAmount),
+          walletHistory: FieldValue.arrayUnion({
             type: "refund",
             promoName: claimData.promoName,
             amount: -refundAmount,
@@ -5981,11 +5934,11 @@ Provide the response strictly in JSON format matching the schema requested.`;
         });
 
         transaction.update(promoRef, {
-          usedCount: increment(-1),
-          budgetUsed: increment(-refundAmount)
+          usedCount: FieldValue.increment(-1),
+          budgetUsed: FieldValue.increment(-refundAmount)
         });
 
-        transaction.update(claimDoc.ref, { status: "Refunded" });
+        transaction.update(claimRef, { status: "Refunded" });
       });
 
       res.json({ success: true });
@@ -6047,7 +6000,7 @@ Provide the response strictly in JSON format matching the schema requested.`;
         return res.status(400).json({ error: "Telegram bot token missing in settings" });
       }
 
-      const result = await postPromoToTelegram(promo, botToken, tgSettings);
+      const result = await postPromoToTelegram(promo, botToken, tgSettings, req.get("host"));
       
       // Update Firestore document with new post IDs
       await updateDoc(ref, {
@@ -6138,7 +6091,7 @@ Provide the response strictly in JSON format matching the schema requested.`;
       }
 
       // Re-trigger the post helper to Channel & Group, updating the Firestore record
-      const result = await postPromoToTelegram(promo, botToken, tgSettings);
+      const result = await postPromoToTelegram(promo, botToken, tgSettings, req.get("host"));
       
       await updateDoc(ref, {
         telegramChannelPostId: result.channelPostId || null,
@@ -6290,8 +6243,9 @@ Provide the response strictly in JSON format matching the schema requested.`;
 
   // Get Promo details by pageId (unauthenticated / with status check)
   app.get("/api/promo/details/:id", async (req, res) => {
+    const routeParam = req.params.id;
+    console.log(`[DEBUG] GET /api/promo/details/${routeParam}`);
     try {
-      const routeParam = req.params.id;
       console.log("Route parameter:", routeParam);
 
       if (!routeParam) {
@@ -6299,14 +6253,13 @@ Provide the response strictly in JSON format matching the schema requested.`;
         return res.status(400).json({ success: false, error: "Missing page ID" });
       }
 
-      const promoCodesColl = collection(db, "promo_codes");
-      let q = query(promoCodesColl, where("pageId", "==", routeParam));
-      let qSnap = await getDocs(q);
+      const promoCodesColl = adminDb.collection("promo_codes");
+      console.log("[DEBUG] Searching for promo in Firestore...");
+      let qSnap = await promoCodesColl.where("pageId", "==", routeParam).get();
 
       if (qSnap.empty) {
-        // Fallback query to randomPageId
-        q = query(promoCodesColl, where("randomPageId", "==", routeParam));
-        qSnap = await getDocs(q);
+        console.log("[DEBUG] PageId not found, checking randomPageId...");
+        qSnap = await promoCodesColl.where("randomPageId", "==", routeParam).get();
       }
 
       console.log("Firestore lookup result:", !qSnap.empty ? "Found" : "Not Found");
@@ -9159,22 +9112,28 @@ Provide the response strictly in JSON format matching the schema requested.`;
     }
   });
 
-  // Vite middleware
+  // Vite middleware disabled due to hangs
+  /*
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+    // ...
   } else {
+  */
+    app.get('/', (req, res, next) => {
+      debugLog("ROOT ROUTE HIT");
+      next();
+    });
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      debugLog(`Serving index from: ${indexPath}`);
+      res.sendFile(indexPath);
     });
-  }
+  // }
 
+  debugLog(`startServer: Attempting to listen on port ${PORT}...`);
   app.listen(PORT, "0.0.0.0", () => {
+    debugLog(`Server started and listening on http://0.0.0.0:${PORT}`);
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

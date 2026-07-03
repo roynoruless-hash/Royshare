@@ -62,18 +62,29 @@ export default function App() {
     // Initialize Telegram WebApp
     const tg = (window as any).Telegram?.WebApp;
     if (tg) {
-      console.log("[App.tsx] Telegram WebApp detected. Initializing...");
+      console.log("=== TELEGRAM WEBAPP DETECTED IN APP.TSX ===");
+      console.log("Full URL:", window.location.href);
+      console.log("Version:", tg.version);
+      console.log("Platform:", tg.platform);
+      console.log("initData Length:", tg.initData?.length || 0);
+      console.log("initDataUnsafe:", JSON.stringify(tg.initDataUnsafe, null, 2));
+      console.log("start_param:", tg.initDataUnsafe?.start_param);
+      
       tg.ready();
       tg.expand();
       
       const userId = tg.initDataUnsafe?.user?.id;
       if (userId) {
-        console.log("[App.tsx] Running inside Telegram. User ID:", userId);
+        console.log("[App.tsx] User ID found in initDataUnsafe:", userId);
       } else {
-        console.log("[App.tsx] Telegram WebApp detected but user data is missing (initDataUnsafe.user.id)");
+        console.warn("[App.tsx] Telegram WebApp detected but user data is missing (initDataUnsafe.user.id)");
+        if (!tg.initData) {
+          console.warn("[App.tsx] CRITICAL: initData is COMPLETELY EMPTY. This means the page is NOT running as a secure Mini App context or the fragment was stripped.");
+        }
       }
+      console.log("==========================================");
     } else {
-      console.log("[App.tsx] Running in a standard browser environment (No Telegram WebApp detected)");
+      console.log("[App.tsx] No Telegram WebApp detected (window.Telegram.WebApp is undefined)");
     }
 
     fetch(`${API_BASE}/api/system-settings`)
@@ -131,25 +142,10 @@ export default function App() {
     console.log("[App.tsx] Pathname:", window.location.pathname);
     console.log("[App.tsx] Search params:", window.location.search);
 
-    // 2. Parse query parameters
     const params = new URLSearchParams(window.location.search);
     const redirectParam = params.get("redirect") || params.get("url") || params.get("id") || params.get("alias") || params.get("linkId") || params.get("gpl_token");
-    
-    const tg = (window as any).Telegram?.WebApp;
-    if (tg) {
-      tg.ready();
-      console.log("[App.tsx] === TELEGRAM WEBAPP DEBUG ===");
-      console.log("[App.tsx] Full URL:", window.location.href);
-      console.log("[App.tsx] initData:", tg.initData);
-      console.log("[App.tsx] initDataUnsafe:", JSON.stringify(tg.initDataUnsafe, null, 2));
-      console.log("[App.tsx] version:", tg.version);
-      console.log("[App.tsx] platform:", tg.platform);
-      console.log("[App.tsx] colorScheme:", tg.colorScheme);
-      console.log("[App.tsx] isExpanded:", tg.isExpanded);
-      console.log("[App.tsx] start_param (from unsafe):", tg.initDataUnsafe?.start_param);
-      console.log("[App.tsx] ==============================");
-    }
 
+    const tg = (window as any).Telegram?.WebApp;
     const startParam = tg?.initDataUnsafe?.start_param || params.get("tgWebAppStartParam") || params.get("startapp") || params.get("start_param");
     console.log("[App.tsx] Final Resolved startParam:", startParam);
 
