@@ -97,7 +97,7 @@ export default function App() {
 
     if (isTelegram) {
       return (
-        <TelegramAuthGuard setupComponent={<ProfileSetup />}>
+        <TelegramAuthGuard>
           <MiniAppHome />
         </TelegramAuthGuard>
       );

@@ -1,25 +1,68 @@
-import React from "react";
+import React, { useState } from "react";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
-import { motion } from "motion/react";
-import { Wallet, TrendingUp, Award, Share2, Gift, CreditCard, History, Settings, PlayCircle, ClipboardList, Gamepad2, Receipt, Users, Star } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { Wallet, TrendingUp, Award, Share2, Gift, CreditCard, History, Settings, PlayCircle, ClipboardList, Gamepad2, Receipt, Users, Star, ArrowLeft, Disc } from "lucide-react";
+import { SurveyPage } from "./SurveyPage";
+import { WalletPage } from "./WalletPage";
+import DailyBonusPage from "./DailyBonusPage";
 
 export const MiniAppHome: React.FC = () => {
   const { user } = useTelegramAuth();
+  const [currentView, setCurrentView] = useState<string>("home");
 
   if (!user) return null;
 
+  if (currentView === "surveys") {
+    return <SurveyPage onBack={() => setCurrentView("home")} />;
+  }
+
+  if (currentView === "wallet" || currentView === "withdraw") {
+    return <WalletPage onBack={() => setCurrentView("home")} />;
+  }
+
+  if (currentView === "daily-bonus" || currentView === "spin-wheel") {
+    return (
+      <div className="min-h-screen bg-[#020617]">
+        <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+          <button onClick={() => setCurrentView("home")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors">
+            <ArrowLeft className="w-6 h-6 text-slate-400" />
+          </button>
+          <h2 className="text-xl font-bold text-white">{currentView === "spin-wheel" ? "Spin Wheel" : "Daily Bonus"}</h2>
+        </header>
+        <DailyBonusPage />
+      </div>
+    );
+  }
+
   const actionButtons = [
-    { label: "Watch Ads", icon: PlayCircle, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
-    { label: "Surveys", icon: ClipboardList, color: "bg-purple-500", shadow: "shadow-purple-500/20" },
-    { label: "Offerwall", icon: Gamepad2, color: "bg-orange-500", shadow: "shadow-orange-500/20" },
-    { label: "Magic Receipts", icon: Receipt, color: "bg-emerald-500", shadow: "shadow-emerald-500/20" },
-    { label: "Cashback", icon: CreditCard, color: "bg-pink-500", shadow: "shadow-pink-500/20" },
-    { label: "Refer & Earn", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
-    { label: "Daily Bonus", icon: Gift, color: "bg-amber-500", shadow: "shadow-amber-500/20" },
-    { label: "Withdraw", icon: Wallet, color: "bg-rose-500", shadow: "shadow-rose-500/20" },
-    { label: "History", icon: History, color: "bg-slate-500", shadow: "shadow-slate-500/20" },
-    { label: "Settings", icon: Settings, color: "bg-zinc-500", shadow: "shadow-zinc-500/20" },
+    { id: "ads", label: "Watch Ads", icon: PlayCircle, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
+    { id: "surveys", label: "Surveys", icon: ClipboardList, color: "bg-purple-500", shadow: "shadow-purple-500/20" },
+    { id: "spin-wheel", label: "Spin Wheel", icon: Disc, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
+    { id: "offerwall", label: "Offerwall", icon: Gamepad2, color: "bg-orange-500", shadow: "shadow-orange-500/20" },
+    { id: "receipts", label: "Magic Receipts", icon: Receipt, color: "bg-emerald-500", shadow: "shadow-emerald-500/20" },
+    { id: "cashback", label: "Cashback", icon: CreditCard, color: "bg-pink-500", shadow: "shadow-pink-500/20" },
+    { id: "refer", label: "Refer & Earn", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
+    { id: "daily-bonus", label: "Daily Bonus", icon: Gift, color: "bg-amber-500", shadow: "shadow-amber-500/20" },
+    { id: "withdraw", label: "Withdraw", icon: Wallet, color: "bg-rose-500", shadow: "shadow-rose-500/20" },
+    { id: "wallet", label: "Wallet", icon: Wallet, color: "bg-blue-600", shadow: "shadow-blue-600/20" },
+    { id: "promos", label: "Promos", icon: Award, color: "bg-amber-600", shadow: "shadow-amber-600/20" },
+    { id: "history", label: "History", icon: History, color: "bg-slate-500", shadow: "shadow-slate-500/20" },
+    { id: "settings", label: "Settings", icon: Settings, color: "bg-zinc-500", shadow: "shadow-zinc-500/20" },
   ];
+
+  const handleAction = (id: string, label: string) => {
+    if (id === "surveys") {
+      setCurrentView("surveys");
+    } else if (id === "daily-bonus" || id === "spin-wheel") {
+      setCurrentView(id);
+    } else if (id === "wallet" || id === "withdraw") {
+      setCurrentView("wallet");
+    } else if (id === "ads") {
+      alert("Watch Ads feature is active - Reward processing...");
+    } else {
+      alert(`${label} feature is coming soon!`);
+    }
+  };
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -34,14 +77,6 @@ export const MiniAppHome: React.FC = () => {
   const itemVariants = {
     hidden: { opacity: 0, y: 20 },
     show: { opacity: 1, y: 0 }
-  };
-
-  const handleAction = (label: string) => {
-    if (label === "Surveys") {
-      alert("🚧 Surveys are coming soon.");
-    } else {
-      alert(`${label} feature is coming soon!`);
-    }
   };
 
   return (
@@ -160,7 +195,7 @@ export const MiniAppHome: React.FC = () => {
               key={idx}
               variants={itemVariants}
               whileTap={{ scale: 0.95 }}
-              onClick={() => handleAction(btn.label)}
+              onClick={() => handleAction(btn.id, btn.label)}
               className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-900/40 border border-slate-800/50 hover:border-slate-700 transition-all group`}
             >
               <div className={`w-12 h-12 ${btn.color} ${btn.shadow} rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>

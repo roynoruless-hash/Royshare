@@ -5,7 +5,7 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 
 interface TelegramAuthGuardProps {
   children: React.ReactNode;
-  setupComponent: React.ReactNode;
+  setupComponent?: React.ReactNode;
 }
 
 export const TelegramAuthGuard: React.FC<TelegramAuthGuardProps> = ({ children, setupComponent }) => {
@@ -45,10 +45,6 @@ export const TelegramAuthGuard: React.FC<TelegramAuthGuardProps> = ({ children, 
   }
 
   if (!user) return null;
-
-  if (!user.profileCompleted) {
-    return <>{setupComponent}</>;
-  }
 
   return <>{children}</>;
 };
