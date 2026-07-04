@@ -126,6 +126,12 @@ const ActivityCard = ({ activity, delay }: any) => {
 };
 
 const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
+  const isTelegram = typeof window !== "undefined" && !!(
+    (window as any).Telegram?.WebApp?.initData ||
+    window.location.search.includes("userId") ||
+    (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id
+  );
+
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
@@ -199,10 +205,10 @@ const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
         {/* QUICK ACTIONS */}
         <div className="space-y-4">
           <h2 className="text-lg font-bold text-white px-2">Quick Actions</h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-            <ActionButton title="Upload File" icon={Upload} color="bg-blue-600" delay={0.1} />
-            <ActionButton title="Create Smart Link" icon={LinkIcon} color="bg-purple-600" delay={0.2} />
-            <ActionButton title="Connect Drive" icon={Plus} color="bg-emerald-600" delay={0.3} />
+          <div className={isTelegram ? "max-w-xs" : "grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6"}>
+            {!isTelegram && <ActionButton title="Upload File" icon={Upload} color="bg-blue-600" delay={0.1} />}
+            {!isTelegram && <ActionButton title="Create Smart Link" icon={LinkIcon} color="bg-purple-600" delay={0.2} />}
+            {!isTelegram && <ActionButton title="Connect Drive" icon={Plus} color="bg-emerald-600" delay={0.3} />}
             <ActionButton title="Withdraw" icon={Wallet} color="bg-orange-600" delay={0.4} />
           </div>
         </div>
