@@ -15,6 +15,14 @@ export interface User {
   availableBalance: number;
   totalEarnings: number;
   todayEarnings: number;
+  fileEarnings?: number;
+  linkEarnings?: number;
+  referralEarnings?: number;
+  bonusBalance?: number;
+  rewardBalance?: number;
+  monthEarnings?: number;
+  pendingWithdrawals?: number;
+  withdrawnAmount?: number;
   
   // Profile
   level: "Bronze" | "Silver" | "Gold" | "Platinum" | "Diamond";

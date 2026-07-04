@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { User, TelegramAuthResponse } from "../types";
 import { API_BASE } from "../config/api";
+import { db } from "../lib/firebase";
+import { doc, onSnapshot } from "firebase/firestore";
 
 interface TelegramAuthContextType {
   user: User | null;
@@ -117,6 +119,29 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
   useEffect(() => {
     verifyAuth();
   }, []);
+
+  useEffect(() => {
+    if (!user || !user.id) return;
+
+    const userDocRef = doc(db, "users", String(user.id));
+    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const updatedData = docSnap.data();
+        setUser((prevUser) => {
+          if (!prevUser) return null;
+          return {
+            ...prevUser,
+            ...updatedData,
+            id: prevUser.id
+          } as User;
+        });
+      }
+    }, (err) => {
+      console.error("[TelegramAuthContext] Real-time user listener error:", err);
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
 
   return (
     <TelegramAuthContext.Provider

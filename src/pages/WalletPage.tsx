@@ -8,6 +8,16 @@ export const WalletPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   if (!user) return null;
 
+  const displayBalance = user.availableBalance !== undefined ? user.availableBalance : (user.balance || 0);
+  const displayWithdrawn = user.withdrawnAmount !== undefined ? user.withdrawnAmount : 0;
+  const displayTotalEarnings = user.totalEarnings !== undefined ? user.totalEarnings : (
+    (user.fileEarnings || 0) + 
+    (user.linkEarnings || 0) + 
+    (user.referralEarnings || 0) + 
+    (user.bonusBalance || 0) + 
+    (user.rewardBalance || 0)
+  );
+
   const transactions = [
     { id: 1, type: "Survey Reward", amount: 45.50, date: "Today, 2:30 PM", status: "Completed" },
     { id: 2, type: "Daily Bonus", amount: 5.00, date: "Today, 10:15 AM", status: "Completed" },
@@ -33,9 +43,9 @@ export const WalletPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         >
           <div className="relative z-10">
             <div className="flex items-center gap-2 text-blue-100/80 text-sm font-medium mb-2">
-              <Wallet className="w-4 h-4" /> Total Balance
+              <Wallet className="w-4 h-4" /> Available Balance
             </div>
-            <h3 className="text-5xl font-black tracking-tighter mb-8">₹{user.balance.toLocaleString()}</h3>
+            <h3 className="text-5xl font-black tracking-tighter mb-8">₹{displayBalance.toLocaleString()}</h3>
             
             <div className="grid grid-cols-2 gap-4">
               <button 
@@ -63,7 +73,46 @@ export const WalletPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4">
             <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">Total Payouts</p>
-            <p className="text-blue-400 font-bold text-lg">₹{(user.totalEarnings - user.balance).toFixed(2)}</p>
+            <p className="text-blue-400 font-bold text-lg">₹{displayWithdrawn.toLocaleString()}</p>
+          </div>
+        </div>
+
+        {/* Detailed Earnings Breakdown */}
+        <div className="bg-slate-900/40 border border-slate-800/50 rounded-3xl p-6 space-y-4">
+          <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest px-1">Earnings Breakdown</h4>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/40">
+              <span className="text-xs text-slate-400">File Earnings</span>
+              <p className="font-extrabold text-white mt-1">₹{(user.fileEarnings || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/40">
+              <span className="text-xs text-slate-400">Link Earnings</span>
+              <p className="font-extrabold text-white mt-1">₹{(user.linkEarnings || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/40">
+              <span className="text-xs text-slate-400">Referral Earnings</span>
+              <p className="font-extrabold text-white mt-1">₹{(user.referralEarnings || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/40">
+              <span className="text-xs text-slate-400">Bonus Balance</span>
+              <p className="font-extrabold text-white mt-1">₹{(user.bonusBalance || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/40">
+              <span className="text-xs text-slate-400">Reward Balance</span>
+              <p className="font-extrabold text-white mt-1">₹{(user.rewardBalance || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/40">
+              <span className="text-xs text-slate-400">Monthly Earnings</span>
+              <p className="font-extrabold text-white mt-1">₹{(user.monthEarnings || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/40">
+              <span className="text-xs text-slate-400">Pending Withdrawals</span>
+              <p className="font-extrabold text-amber-500 mt-1">₹{(user.pendingWithdrawals || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/40">
+              <span className="text-xs text-slate-400">Total Income</span>
+              <p className="font-extrabold text-indigo-400 mt-1">₹{displayTotalEarnings.toLocaleString()}</p>
+            </div>
           </div>
         </div>
 
