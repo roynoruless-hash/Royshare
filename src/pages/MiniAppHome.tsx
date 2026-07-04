@@ -35,6 +35,8 @@ export const MiniAppHome: React.FC = () => {
   const { user } = useTelegramAuth();
   const [currentView, setCurrentView] = useState<string>("home");
 
+  const displayName = user ? ((user as any).enteredName || `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username || "User") : "User";
+
   // Leaderboard State
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
@@ -62,6 +64,7 @@ export const MiniAppHome: React.FC = () => {
               firstName: data.firstName || "User",
               lastName: data.lastName || "",
               username: data.username || "",
+              enteredName: data.enteredName || "",
               balance: data.balance || 0,
               earnings: data.earnings || data.totalEarnings || 0,
               level: data.level || 1,
@@ -199,7 +202,7 @@ export const MiniAppHome: React.FC = () => {
                   className="w-20 h-20 rounded-full border-2 border-slate-800 p-0.5 bg-slate-900 mb-4 shadow-xl"
                 >
                   <img 
-                    src={user.photoUrl || `https://ui-avatars.com/api/?name=${user.firstName}&background=0D8ABC&color=fff`} 
+                    src={user.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D8ABC&color=fff`} 
                     alt={user.username}
                     className="w-full h-full rounded-full object-cover"
                   />
@@ -209,14 +212,14 @@ export const MiniAppHome: React.FC = () => {
                   animate={{ opacity: 1, y: 0 }}
                   className="text-3xl font-black tracking-tight text-white mb-1 bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-300"
                 >
-                  Self Earning
+                  Roy Share Earn
                 </motion.h1>
                 <motion.p 
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   className="text-slate-400 text-sm mb-4"
                 >
-                  Welcome, {user.firstName} {user.lastName} (@{user.username || "user"})
+                  Welcome, {displayName} (@{user.username || "user"})
                 </motion.p>
                 
                 <div className="flex gap-2">
@@ -423,7 +426,7 @@ export const MiniAppHome: React.FC = () => {
                           </div>
                           <div>
                             <p className="font-bold text-sm text-white">
-                              {leader.firstName} {leader.lastName} {isCurrentUser && " (You)"}
+                              {leader.enteredName || `${leader.firstName || ""} ${leader.lastName || ""}`.trim() || leader.username || "User"} {isCurrentUser && " (You)"}
                             </p>
                             <p className="text-[10px] text-slate-500">
                               {leader.username ? `@${leader.username}` : "User"}

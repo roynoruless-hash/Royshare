@@ -7,6 +7,8 @@ export interface User {
   photoUrl: string;
   languageCode: string;
   isPremium: boolean;
+  enteredName?: string;
+  phone?: string;
   
   // Wallet
   balance: number; // ₹

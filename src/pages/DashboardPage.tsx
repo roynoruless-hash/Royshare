@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { motion } from "motion/react";
+import { useTelegramAuth } from "../context/TelegramAuthContext";
+import { db } from "../lib/firebase";
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { User } from "../types";
 import { 
   FileText, 
   Download, 
@@ -126,6 +130,88 @@ const ActivityCard = ({ activity, delay }: any) => {
 };
 
 const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
+  const { user } = useTelegramAuth();
+  const [dbStats, setDbStats] = useState({
+    files: 0,
+    downloads: 0,
+    links: 0,
+    withdrawalsCount: 0,
+    withdrawalsTotal: 0,
+    loading: true
+  });
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchStats = async () => {
+      try {
+        const uploadsQuery = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
+        const uploadsSnap = await getDocs(uploadsQuery);
+        let totalFiles = 0;
+        let totalDownloads = 0;
+        uploadsSnap.forEach((doc) => {
+          totalFiles++;
+          totalDownloads += Number(doc.data().downloads || 0);
+        });
+
+        const linksQuery = query(collection(db, "links"), where("userId", "==", String(user.id)));
+        const linksSnap = await getDocs(linksQuery);
+        const totalLinks = linksSnap.size;
+
+        const withdrawalsQuery = query(collection(db, "withdrawals"), where("userId", "==", String(user.id)));
+        const withdrawalsSnap = await getDocs(withdrawalsQuery);
+        let withdrawalsCount = 0;
+        let withdrawalsTotal = 0;
+        withdrawalsSnap.forEach((doc) => {
+          withdrawalsCount++;
+          const data = doc.data();
+          if (data.status === "Approved" || data.status === "Completed") {
+            withdrawalsTotal += Number(data.amount || 0);
+          }
+        });
+
+        setDbStats({
+          files: totalFiles,
+          downloads: totalDownloads,
+          links: totalLinks,
+          withdrawalsCount,
+          withdrawalsTotal,
+          loading: false
+        });
+      } catch (err) {
+        console.error("Error fetching stats:", err);
+        setDbStats(prev => ({ ...prev, loading: false }));
+      }
+    };
+    fetchStats();
+  }, [user]);
+
+  const activeUser: User = user || {
+    id: "12345678",
+    telegramId: 12345678,
+    username: "rohit_sharma",
+    firstName: "Rohit",
+    lastName: "Sharma",
+    photoUrl: "",
+    languageCode: "en",
+    isPremium: false,
+    enteredName: "Rohit Sharma",
+    balance: 1250,
+    availableBalance: 1250,
+    totalEarnings: 1250,
+    todayEarnings: 0,
+    level: "Bronze" as const,
+    referralCode: "RS123456",
+    referredBy: null,
+    profileCompleted: true,
+    createdAt: "2023-10-01T00:00:00.000Z",
+    updatedAt: "2023-10-01T00:00:00.000Z",
+    lastActive: "2023-10-01T00:00:00.000Z",
+    status: "Active" as const
+  };
+
+  const displayName = activeUser.enteredName || `${activeUser.firstName || ""} ${activeUser.lastName || ""}`.trim() || activeUser.username || "User";
+  const formattedMemberSince = activeUser.createdAt ? new Date(activeUser.createdAt).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "Recently";
+
   const isTelegram = typeof window !== "undefined" && !!(
     (window as any).Telegram?.WebApp?.initData ||
     window.location.search.includes("userId") ||
@@ -164,15 +250,15 @@ const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
             <div className="flex items-center gap-2">
               <span className="text-2xl animate-bounce">👋</span>
               <h1 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight">
-                Welcome Back, <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">{USER_DATA.name}</span>
+                Welcome Back, <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">{displayName}</span>
               </h1>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <span className="px-3 py-1 rounded-full bg-blue-600/20 border border-blue-500/20 text-blue-400 text-xs font-bold uppercase tracking-wider">
-                {USER_DATA.rank}
+                {activeUser.level || "Bronze"}
               </span>
               <span className="text-slate-500 text-sm font-medium flex items-center gap-1.5">
-                <Clock className="w-4 h-4" /> Member Since {USER_DATA.memberSince}
+                <Clock className="w-4 h-4" /> Member Since {formattedMemberSince}
               </span>
             </div>
           </div>
@@ -185,7 +271,7 @@ const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 p-0.5 shadow-xl shadow-blue-500/20">
               <div className="w-full h-full rounded-[14px] bg-slate-950 flex items-center justify-center overflow-hidden">
                 <img 
-                  src={`https://ui-avatars.com/api/?name=${encodeURIComponent(USER_DATA.name)}&background=0f172a&color=3b82f6&bold=true`} 
+                  src={activeUser.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0f172a&color=3b82f6&bold=true`} 
                   alt="Avatar" 
                   className="w-full h-full object-cover"
                 />
@@ -196,10 +282,10 @@ const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
 
         {/* QUICK STATS */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-          <StatCard title="Total Files" value={USER_DATA.stats.files} icon={FileText} delay={0.1} />
-          <StatCard title="Total Downloads" value={USER_DATA.stats.downloads} icon={Download} delay={0.2} />
-          <StatCard title="Total Earnings" value={USER_DATA.stats.earnings} icon={DollarSign} delay={0.3} />
-          <StatCard title="Smart Links" value={USER_DATA.stats.links} icon={LinkIcon} delay={0.4} />
+          <StatCard title="Total Files" value={user ? dbStats.files : USER_DATA.stats.files} icon={FileText} delay={0.1} />
+          <StatCard title="Total Downloads" value={user ? dbStats.downloads : USER_DATA.stats.downloads} icon={Download} delay={0.2} />
+          <StatCard title="Total Earnings" value={user ? `₹${activeUser.balance.toLocaleString()}` : USER_DATA.stats.earnings} icon={DollarSign} delay={0.3} />
+          <StatCard title="Smart Links" value={user ? dbStats.links : USER_DATA.stats.links} icon={LinkIcon} delay={0.4} />
         </div>
 
         {/* QUICK ACTIONS */}
@@ -230,6 +316,43 @@ const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
           </div>
 
           <div className="space-y-8">
+            {/* TELEGRAM PROFILE DETAILS */}
+            {user && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold text-white px-2">Roy Share Earn Profile</h2>
+                <div className="p-6 rounded-[2rem] bg-white/[0.03] border border-white/10 backdrop-blur-xl space-y-4">
+                  <div className="flex justify-between items-center py-1.5 border-b border-white/5">
+                    <span className="text-sm font-medium text-slate-400">Profile Name</span>
+                    <span className="text-sm font-semibold text-white">{displayName}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-white/5">
+                    <span className="text-sm font-medium text-slate-400">Mobile Number</span>
+                    <span className="text-sm font-black text-emerald-400">{user.phone || (user as any).mobileNumber || "Not Available"}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-white/5">
+                    <span className="text-sm font-medium text-slate-400">Telegram ID</span>
+                    <span className="text-sm font-mono text-blue-400">{user.id}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-white/5">
+                    <span className="text-sm font-medium text-slate-400">Username</span>
+                    <span className="text-sm font-semibold text-slate-300">@{user.username || "None"}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-white/5">
+                    <span className="text-sm font-medium text-slate-400">Wallet Balance</span>
+                    <span className="text-sm font-bold text-emerald-400">₹{user.balance.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-white/5">
+                    <span className="text-sm font-medium text-slate-400">Referral Code</span>
+                    <span className="text-sm font-mono text-purple-400">{user.referralCode || "N/A"}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-1.5">
+                    <span className="text-sm font-medium text-slate-400">Total Withdrawals</span>
+                    <span className="text-sm font-bold text-orange-400">₹{dbStats.withdrawalsTotal.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ACCOUNT STATUS */}
             <div className="space-y-4">
               <h2 className="text-lg font-bold text-white px-2">Account Status</h2>

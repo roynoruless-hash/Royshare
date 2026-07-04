@@ -47,7 +47,7 @@ export const SurveyPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           animate={{ opacity: 1, y: 0 }}
           className="bg-gradient-to-br from-purple-600/20 to-blue-600/20 border border-purple-500/30 rounded-3xl p-6"
         >
-          <h3 className="text-xl font-bold mb-2">Welcome back, {user.firstName}!</h3>
+          <h3 className="text-xl font-bold mb-2">Welcome back, {(user as any).enteredName || user.firstName}!</h3>
           <p className="text-slate-400 text-sm mb-4">Your profile is 100% complete. You are eligible for high-paying surveys from BitLabs.</p>
           <div className="flex items-center gap-2 text-xs text-purple-400 bg-purple-500/10 w-fit px-3 py-1.5 rounded-full border border-purple-500/20">
             <Info className="w-3 h-3" />
