@@ -710,7 +710,7 @@ async function processStart(botToken: string, chatId: number, user: any, startTe
                 await fulfillDownload(botToken, chatId, userData.pendingDownloadId);
                 await setDoc(userDocRef, { pendingDownloadId: null }, { merge: true });
             } else {
-                await sendTelegramMessage(botToken, chatId, welcomeMsg, { reply_markup: getMainMenuKeyboard() });
+                await sendTelegramMessage(botToken, chatId, welcomeMsg, { reply_markup: getMainMenuKeyboard(user.id) });
             }
             return;
         }
@@ -2113,18 +2113,18 @@ async function handleSearchQuery(botToken: string, chatId: number, user: any, se
     await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
 }
 
-function getMainMenuKeyboard() {
+function getMainMenuKeyboard(userId?: string | number) {
+    const appUrl = getAppUrl();
+    const webAppUrl = userId ? `${appUrl}/?userId=${userId}` : appUrl;
     return {
         keyboard: [
-            [{ text: "💰 Earn Rewards" }, { text: "📋 Survey" }],
-            [{ text: "👤 Account" }, { text: "💰 Balance" }],
+            [{ text: "🚀 Self Earning", web_app: { url: webAppUrl } }],
             [{ text: "📤 Upload File" }, { text: "🔗 URL Shortener" }],
             [{ text: "📁 My Content" }, { text: "🔗 My Links" }],
-            [{ text: "📊 Dashboard" }, { text: "👥 Refer & Earn" }],
+            [{ text: "📢 Announcements" }, { text: "⚙️ Settings" }],
+            [{ text: "💰 Balance" }, { text: "👥 Refer & Earn" }],
             [{ text: "💸 Withdraw" }, { text: "📜 Withdrawal History" }],
-            [{ text: "🎫 Support" }, { text: "📢 Announcements" }],
-            [{ text: "🏆 Leaderboard" }, { text: "🎁 Daily Bonus" }],
-            [{ text: "⚙️ Settings" }]
+            [{ text: "🎫 Support" }]
         ],
         resize_keyboard: true
     };

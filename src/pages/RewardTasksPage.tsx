@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
-import { Clock, Play, Pause, RotateCcw, Volume2, VolumeX, ShieldCheck, AlertCircle, Sparkles, CheckCircle2, Zap, Award, Terminal } from "lucide-react";
+import { Clock, Play, Pause, RotateCcw, Volume2, VolumeX, ShieldCheck, AlertCircle, Sparkles, CheckCircle2, Zap, Award, Terminal, ArrowLeft } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore";
 import AdScriptRenderer from "../components/AdScriptRenderer";
@@ -20,7 +20,7 @@ interface Task {
   title?: string;
 }
 
-export default function RewardTasksPage() {
+export default function RewardTasksPage({ userIdProp, taskIdProp, onBack }: { userIdProp?: string; taskIdProp?: string; onBack?: () => void } = {}) {
   const [userId, setUserId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -133,6 +133,16 @@ export default function RewardTasksPage() {
   const timerRef = useRef<any>(null);
 
   useEffect(() => {
+    if (userIdProp) {
+      setUserId(userIdProp);
+    }
+    if (taskIdProp) {
+      setTaskId(taskIdProp);
+    }
+    if (userIdProp && taskIdProp) {
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const queryUserId = params.get("userId");
     const queryTaskId = params.get("taskId");
@@ -150,7 +160,7 @@ export default function RewardTasksPage() {
       setError("Missing query parameters (userId and taskId are required).");
       setLoading(false);
     }
-  }, []);
+  }, [userIdProp, taskIdProp]);
 
   // Fetch task, settings, and find active video ad
   useEffect(() => {
@@ -163,7 +173,7 @@ export default function RewardTasksPage() {
         const tg = (window as any).Telegram?.WebApp;
         const isActuallyInTelegram = !!(tg && tg.initDataUnsafe?.user?.id);
         
-        if (!isActuallyInTelegram) {
+        if (!isActuallyInTelegram && !userIdProp) {
           console.warn("[RewardTasksPage] Access denied: Not a Telegram Mini App environment.");
           setLoading(false);
           return;
@@ -962,6 +972,11 @@ export default function RewardTasksPage() {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-lg font-bold text-white flex items-center gap-2">
+              {onBack && (
+                <button onClick={onBack} className="p-1 hover:bg-slate-800 rounded-lg transition-colors mr-1">
+                  <ArrowLeft className="w-5 h-5 text-slate-400" />
+                </button>
+              )}
               <Sparkles size={18} className="text-amber-400" />
               <span>{currentTask?.name || currentTask?.title || "Watch Video Task"}</span>
             </h1>

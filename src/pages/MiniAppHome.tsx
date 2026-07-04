@@ -1,22 +1,122 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useTelegramAuth } from "../context/TelegramAuthContext";
 import { motion, AnimatePresence } from "motion/react";
-import { Wallet, TrendingUp, Award, Share2, Gift, CreditCard, History, Settings, PlayCircle, ClipboardList, Gamepad2, Receipt, Users, Star, ArrowLeft, Disc } from "lucide-react";
+import { 
+  Wallet, 
+  TrendingUp, 
+  Award, 
+  Share2, 
+  Gift, 
+  CreditCard, 
+  History, 
+  Settings, 
+  PlayCircle, 
+  ClipboardList, 
+  Users, 
+  Star, 
+  ArrowLeft, 
+  MessageSquare, 
+  Copy, 
+  CheckCircle2, 
+  LayoutDashboard,
+  HelpCircle,
+  Sparkles,
+  ArrowRight
+} from "lucide-react";
+import { db } from "../lib/firebase";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { SurveyPage } from "./SurveyPage";
 import { WalletPage } from "./WalletPage";
 import DailyBonusPage from "./DailyBonusPage";
+import DashboardPage from "./DashboardPage";
+import RewardTasksPage from "./RewardTasksPage";
 
 export const MiniAppHome: React.FC = () => {
   const { user } = useTelegramAuth();
   const [currentView, setCurrentView] = useState<string>("home");
 
+  // Leaderboard State
+  const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
+
+  // Earn Rewards Tasks State
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+
+  // Copy Feedback State
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  // Fetch Leaderboard when that view is active
+  useEffect(() => {
+    if (currentView === "leaderboard") {
+      setLoadingLeaderboard(true);
+      getDocs(collection(db, "users"))
+        .then((usersSnap) => {
+          const users: any[] = [];
+          usersSnap.forEach((doc) => {
+            const data = doc.data();
+            users.push({
+              id: doc.id,
+              firstName: data.firstName || "User",
+              lastName: data.lastName || "",
+              username: data.username || "",
+              balance: data.balance || 0,
+              earnings: data.earnings || data.totalEarnings || 0,
+              level: data.level || 1,
+            });
+          });
+          // Sort by earnings desc
+          users.sort((a, b) => b.earnings - a.earnings);
+          setLeaderboardData(users.slice(0, 10));
+        })
+        .catch((err) => console.error("Error loading leaderboard:", err))
+        .finally(() => setLoadingLeaderboard(false));
+    }
+  }, [currentView]);
+
+  // Fetch Tasks when Earn Rewards is active
+  useEffect(() => {
+    if (currentView === "earn-rewards") {
+      setLoadingTasks(true);
+      getDocs(collection(db, "tasks"))
+        .then((tasksSnap) => {
+          const fetchedTasks: any[] = [];
+          tasksSnap.forEach((doc) => {
+            const d = doc.data();
+            fetchedTasks.push({
+              id: doc.id,
+              name: d.title || d.name || "",
+              amount: Number(d.rewardAmount) || 0,
+              status: d.status || "🟢 Active",
+              description: d.description || "",
+            });
+          });
+          // Filter to active tasks
+          const activeTasks = fetchedTasks.filter((t) => 
+            t.status === "🟢 Active" || 
+            String(t.status || "").toLowerCase().includes("active")
+          );
+          setTasks(activeTasks);
+        })
+        .catch((err) => console.error("Error loading tasks:", err))
+        .finally(() => setLoadingTasks(false));
+    }
+  }, [currentView]);
+
   if (!user) return null;
+
+  // Render Sub-Views
+  if (currentView === "dashboard") {
+    return <DashboardPage onBack={() => setCurrentView("home")} />;
+  }
 
   if (currentView === "surveys") {
     return <SurveyPage onBack={() => setCurrentView("home")} />;
   }
 
-  if (currentView === "wallet" || currentView === "withdraw") {
+  if (currentView === "wallet" || currentView === "balance" || currentView === "withdraw" || currentView === "history") {
     return <WalletPage onBack={() => setCurrentView("home")} />;
   }
 
@@ -27,41 +127,40 @@ export const MiniAppHome: React.FC = () => {
           <button onClick={() => setCurrentView("home")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors">
             <ArrowLeft className="w-6 h-6 text-slate-400" />
           </button>
-          <h2 className="text-xl font-bold text-white">{currentView === "spin-wheel" ? "Spin Wheel" : "Daily Bonus"}</h2>
+          <h2 className="text-xl font-bold text-white">Daily Bonus</h2>
         </header>
         <DailyBonusPage />
       </div>
     );
   }
 
+  if (activeTaskId) {
+    return (
+      <RewardTasksPage 
+        userIdProp={user.id} 
+        taskIdProp={activeTaskId} 
+        onBack={() => setActiveTaskId(null)} 
+      />
+    );
+  }
+
+  const referralLink = `https://t.me/Roysharearn_bot?start=ref_${user.id}`;
+
   const actionButtons = [
-    { id: "ads", label: "Watch Ads", icon: PlayCircle, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
-    { id: "surveys", label: "Surveys", icon: ClipboardList, color: "bg-purple-500", shadow: "shadow-purple-500/20" },
-    { id: "spin-wheel", label: "Spin Wheel", icon: Disc, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
-    { id: "offerwall", label: "Offerwall", icon: Gamepad2, color: "bg-orange-500", shadow: "shadow-orange-500/20" },
-    { id: "receipts", label: "Magic Receipts", icon: Receipt, color: "bg-emerald-500", shadow: "shadow-emerald-500/20" },
-    { id: "cashback", label: "Cashback", icon: CreditCard, color: "bg-pink-500", shadow: "shadow-pink-500/20" },
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
+    { id: "balance", label: "Balance", icon: Wallet, color: "bg-emerald-500", shadow: "shadow-emerald-500/20" },
     { id: "refer", label: "Refer & Earn", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
     { id: "daily-bonus", label: "Daily Bonus", icon: Gift, color: "bg-amber-500", shadow: "shadow-amber-500/20" },
-    { id: "withdraw", label: "Withdraw", icon: Wallet, color: "bg-rose-500", shadow: "shadow-rose-500/20" },
-    { id: "wallet", label: "Wallet", icon: Wallet, color: "bg-blue-600", shadow: "shadow-blue-600/20" },
-    { id: "promos", label: "Promos", icon: Award, color: "bg-amber-600", shadow: "shadow-amber-600/20" },
-    { id: "history", label: "History", icon: History, color: "bg-slate-500", shadow: "shadow-slate-500/20" },
-    { id: "settings", label: "Settings", icon: Settings, color: "bg-zinc-500", shadow: "shadow-zinc-500/20" },
+    { id: "surveys", label: "Survey", icon: ClipboardList, color: "bg-purple-500", shadow: "shadow-purple-500/20" },
+    { id: "earn-rewards", label: "Earn Rewards", icon: Star, color: "bg-yellow-500", shadow: "shadow-yellow-500/20" },
+    { id: "leaderboard", label: "Leaderboard", icon: Award, color: "bg-amber-600", shadow: "shadow-amber-600/20" },
+    { id: "withdraw", label: "Withdraw", icon: CreditCard, color: "bg-rose-500", shadow: "shadow-rose-500/20" },
+    { id: "history", label: "Withdrawal History", icon: History, color: "bg-slate-500", shadow: "shadow-slate-500/20" },
+    { id: "support", label: "Support", icon: MessageSquare, color: "bg-teal-500", shadow: "shadow-teal-500/20" },
   ];
 
-  const handleAction = (id: string, label: string) => {
-    if (id === "surveys") {
-      setCurrentView("surveys");
-    } else if (id === "daily-bonus" || id === "spin-wheel") {
-      setCurrentView(id);
-    } else if (id === "wallet" || id === "withdraw") {
-      setCurrentView("wallet");
-    } else if (id === "ads") {
-      alert("Watch Ads feature is active - Reward processing...");
-    } else {
-      alert(`${label} feature is coming soon!`);
-    }
+  const handleAction = (id: string) => {
+    setCurrentView(id);
   };
 
   const containerVariants = {
@@ -69,160 +168,404 @@ export const MiniAppHome: React.FC = () => {
     show: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.1
+        staggerChildren: 0.05
       }
     }
   };
 
   const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
+    hidden: { opacity: 0, y: 12 },
     show: { opacity: 1, y: 0 }
   };
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white overflow-x-hidden pb-12">
-      <header className="relative pt-12 pb-24 px-6 overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-blue-600/20 to-transparent pointer-events-none" />
-        <div className="relative z-10 flex flex-col items-center">
-          <motion.div 
-            initial={{ scale: 0.5, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="w-24 h-24 rounded-full border-4 border-slate-800 p-1 bg-slate-900 mb-4 shadow-xl"
-          >
-            <img 
-              src={user.photoUrl || `https://ui-avatars.com/api/?name=${user.firstName}&background=0D8ABC&color=fff`} 
-              alt={user.username}
-              className="w-full h-full rounded-full object-cover"
-            />
-          </motion.div>
-          <motion.h2 
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-2xl font-bold tracking-tight mb-1"
-          >
-            {user.firstName} {user.lastName}
-          </motion.h2>
-          <motion.p 
+    <div className="min-h-screen bg-[#020617] text-white overflow-x-hidden pb-12 font-sans">
+      <AnimatePresence mode="wait">
+        {currentView === "home" && (
+          <motion.div
+            key="home-view"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="text-slate-400 text-sm mb-4"
+            exit={{ opacity: 0 }}
+            className="space-y-6"
           >
-            @{user.username || "user"}
-          </motion.p>
-          
-          <div className="flex gap-2">
-            <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 text-amber-400 text-xs font-bold rounded-full border border-amber-500/20">
-              <Star className="w-3 h-3 fill-amber-400" /> {user.level} Level
-            </span>
-            {user.isPremium && (
-              <span className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 text-blue-400 text-xs font-bold rounded-full border border-blue-500/20">
-                Premium
-              </span>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Stats Cards */}
-      <div className="px-6 -mt-16 relative z-20 space-y-4">
-        {/* Main Wallet Card */}
-        <motion.div 
-          initial={{ y: 40, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-2xl shadow-black/50"
-        >
-          <div className="flex justify-between items-start mb-6">
-            <div>
-              <p className="text-slate-400 text-sm font-medium mb-1">Wallet Balance</p>
-              <h3 className="text-4xl font-bold tracking-tighter">₹{user.balance.toLocaleString()}</h3>
-            </div>
-            <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-600/40">
-              <Wallet className="w-6 h-6" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-800/50">
-            <div>
-              <p className="text-slate-500 text-xs mb-1">Today's Earnings</p>
-              <p className="text-emerald-400 font-bold">₹{user.todayEarnings}</p>
-            </div>
-            <div>
-              <p className="text-slate-500 text-xs mb-1">Total Earnings</p>
-              <p className="text-blue-400 font-bold">₹{user.totalEarnings}</p>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Referral Section */}
-        <motion.div 
-          initial={{ y: 40, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.1 }}
-          className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 flex justify-between items-center"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center">
-              <Share2 className="w-5 h-5 text-indigo-400" />
-            </div>
-            <div>
-              <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">Referral Code</p>
-              <p className="text-white font-mono font-bold">{user.referralCode}</p>
-            </div>
-          </div>
-          <button 
-            onClick={() => {
-              navigator.clipboard.writeText(user.referralCode);
-              alert("Referral code copied!");
-            }}
-            className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-          >
-            Copy
-          </button>
-        </motion.div>
-      </div>
-
-      {/* Action Grid */}
-      <section className="px-6 mt-8">
-        <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-4 px-1">Quick Actions</h4>
-        <motion.div 
-          variants={containerVariants}
-          initial="hidden"
-          whileInView="show"
-          viewport={{ once: true }}
-          className="grid grid-cols-2 gap-3"
-        >
-          {actionButtons.map((btn, idx) => (
-            <motion.button
-              key={idx}
-              variants={itemVariants}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => handleAction(btn.id, btn.label)}
-              className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-900/40 border border-slate-800/50 hover:border-slate-700 transition-all group`}
-            >
-              <div className={`w-12 h-12 ${btn.color} ${btn.shadow} rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>
-                <btn.icon className="w-6 h-6 text-white" />
+            {/* Header / Brand */}
+            <header className="relative pt-12 pb-20 px-6 overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-blue-600/10 to-transparent pointer-events-none" />
+              <div className="relative z-10 flex flex-col items-center">
+                <motion.div 
+                  initial={{ scale: 0.5, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="w-20 h-20 rounded-full border-2 border-slate-800 p-0.5 bg-slate-900 mb-4 shadow-xl"
+                >
+                  <img 
+                    src={user.photoUrl || `https://ui-avatars.com/api/?name=${user.firstName}&background=0D8ABC&color=fff`} 
+                    alt={user.username}
+                    className="w-full h-full rounded-full object-cover"
+                  />
+                </motion.div>
+                <motion.h1 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-3xl font-black tracking-tight text-white mb-1 bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-300"
+                >
+                  Self Earning
+                </motion.h1>
+                <motion.p 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-slate-400 text-sm mb-4"
+                >
+                  Welcome, {user.firstName} {user.lastName} (@{user.username || "user"})
+                </motion.p>
+                
+                <div className="flex gap-2">
+                  <span className="flex items-center gap-1 px-3 py-1 bg-amber-500/10 text-amber-400 text-xs font-bold rounded-full border border-amber-500/20">
+                    <Star className="w-3 h-3 fill-amber-400" /> {user.level || 1} Level
+                  </span>
+                  {user.isPremium && (
+                    <span className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 text-indigo-400 text-xs font-bold rounded-full border border-indigo-500/20">
+                      Premium
+                    </span>
+                  )}
+                </div>
               </div>
-              <span className="text-xs font-bold text-slate-300">{btn.label}</span>
-            </motion.button>
-          ))}
-        </motion.div>
-      </section>
+            </header>
 
-      {/* Level Banner */}
-      <section className="px-6 mt-8">
-        <motion.div 
-          whileHover={{ scale: 1.02 }}
-          className="bg-gradient-to-r from-amber-600 to-amber-400 rounded-3xl p-6 relative overflow-hidden"
-        >
-          <div className="relative z-10">
-            <h4 className="text-white font-bold text-lg mb-1">Upgrade to Silver</h4>
-            <p className="text-white/80 text-xs mb-4">Complete 10 more tasks to unlock 1.2x earnings</p>
-            <div className="w-full h-1.5 bg-black/10 rounded-full overflow-hidden">
-              <div className="h-full bg-white w-2/3" />
+            {/* Wallet Balance Card representing Balance */}
+            <div className="px-6 -mt-12 relative z-20">
+              <motion.div 
+                initial={{ y: 30, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                onClick={() => setCurrentView("balance")}
+                className="bg-slate-900/90 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-6 shadow-2xl shadow-black/50 cursor-pointer hover:border-slate-700 transition-all group"
+              >
+                <div className="flex justify-between items-start mb-6">
+                  <div>
+                    <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Wallet Balance</p>
+                    <h3 className="text-3xl font-black tracking-tight">₹{user.balance.toLocaleString()}</h3>
+                  </div>
+                  <div className="w-12 h-12 bg-emerald-600/20 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform shadow-lg">
+                    <Wallet className="w-6 h-6" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-800/50">
+                  <div>
+                    <p className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mb-0.5">Today's Earnings</p>
+                    <p className="text-emerald-400 font-bold text-sm">+₹{user.todayEarnings}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mb-0.5">Total Earnings</p>
+                    <p className="text-blue-400 font-bold text-sm">₹{user.totalEarnings}</p>
+                  </div>
+                </div>
+              </motion.div>
             </div>
-          </div>
-          <TrendingUp className="absolute top-1/2 -right-4 -translate-y-1/2 w-32 h-32 text-white/10 -rotate-12" />
-        </motion.div>
-      </section>
+
+            {/* Menu Buttons Grid */}
+            <section className="px-6 pt-4">
+              <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 px-1">Navigation Menu</h4>
+              <motion.div 
+                variants={containerVariants}
+                initial="hidden"
+                animate="show"
+                className="grid grid-cols-2 gap-3"
+              >
+                {actionButtons.map((btn, idx) => (
+                  <motion.button
+                    key={btn.id}
+                    variants={itemVariants}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => handleAction(btn.id)}
+                    className="flex flex-col items-center justify-center p-5 rounded-2xl bg-slate-900/40 border border-slate-800/50 hover:border-slate-700 hover:bg-slate-900/60 transition-all group"
+                  >
+                    <div className={`w-11 h-11 ${btn.color} ${btn.shadow} rounded-xl flex items-center justify-center mb-3 group-hover:scale-105 transition-transform`}>
+                      <btn.icon className="w-5 h-5 text-white" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-300 group-hover:text-white transition-colors">{btn.label}</span>
+                  </motion.button>
+                ))}
+              </motion.div>
+            </section>
+          </motion.div>
+        )}
+
+        {/* 👥 Refer & Earn Dedicated View */}
+        {currentView === "refer" && (
+          <motion.div
+            key="refer-view"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="min-h-screen bg-[#020617] text-white"
+          >
+            <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+              <button onClick={() => setCurrentView("home")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors">
+                <ArrowLeft className="w-6 h-6 text-slate-400" />
+              </button>
+              <h2 className="text-xl font-bold text-white">Refer & Earn</h2>
+            </header>
+
+            <main className="p-6 space-y-6">
+              <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-3xl p-6 text-center shadow-xl">
+                <Share2 className="w-12 h-12 mx-auto mb-3 text-indigo-200 animate-bounce" />
+                <h3 className="text-xl font-bold mb-2">Invite Friends & Earn Lifetime Commissions</h3>
+                <p className="text-indigo-100 text-xs leading-relaxed max-w-sm mx-auto">
+                  Earn 10% on every single reward task or survey your friends complete. There is absolutely no limit!
+                </p>
+              </div>
+
+              {/* Referral Code Box */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Your Referral Code</p>
+                <div className="flex items-center justify-between bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                  <span className="font-mono font-bold text-lg text-indigo-400">{user.referralCode}</span>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(user.referralCode);
+                      setCopiedCode(true);
+                      setTimeout(() => setCopiedCode(false), 2000);
+                    }}
+                    className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-indigo-400"
+                  >
+                    {copiedCode ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Referral Link Box */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Your Invite Link</p>
+                <div className="flex items-center justify-between bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                  <span className="text-xs text-slate-400 truncate pr-4">{referralLink}</span>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(referralLink);
+                      setCopiedLink(true);
+                      setTimeout(() => setCopiedLink(false), 2000);
+                    }}
+                    className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-indigo-400 shrink-0"
+                  >
+                    {copiedLink ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Steps */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">How it works</h4>
+                <div className="space-y-3">
+                  {[
+                    { step: "1", title: "Copy Link", desc: "Share your premium invite link with your circle." },
+                    { step: "2", title: "Friends Join", desc: "They register on RoyShare using your link." },
+                    { step: "3", title: "Start Earning", desc: "You get 10% commission on all their earnings instantly." },
+                  ].map((s) => (
+                    <div key={s.step} className="flex gap-4 p-4 rounded-xl bg-slate-900/30 border border-slate-850">
+                      <div className="w-8 h-8 rounded-full bg-indigo-500/10 text-indigo-400 font-bold flex items-center justify-center border border-indigo-500/20 shrink-0">
+                        {s.step}
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm text-white">{s.title}</p>
+                        <p className="text-xs text-slate-400 leading-relaxed mt-0.5">{s.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </main>
+          </motion.div>
+        )}
+
+        {/* 🏆 Leaderboard Dedicated View */}
+        {currentView === "leaderboard" && (
+          <motion.div
+            key="leaderboard-view"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="min-h-screen bg-[#020617] text-white pb-12"
+          >
+            <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+              <button onClick={() => setCurrentView("home")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors">
+                <ArrowLeft className="w-6 h-6 text-slate-400" />
+              </button>
+              <h2 className="text-xl font-bold text-white">Leaderboard</h2>
+            </header>
+
+            <main className="p-6 space-y-6">
+              <div className="text-center space-y-2">
+                <Award className="w-14 h-14 mx-auto text-amber-400 animate-pulse" />
+                <h3 className="text-lg font-bold">Top Creators & Earners</h3>
+                <p className="text-xs text-slate-400">Ranks are updated automatically based on performance.</p>
+              </div>
+
+              {loadingLeaderboard ? (
+                <div className="flex justify-center py-12">
+                  <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden divide-y divide-slate-850">
+                  {leaderboardData.map((leader, index) => {
+                    const isCurrentUser = leader.id === user.id;
+                    return (
+                      <div 
+                        key={leader.id} 
+                        className={`p-4 flex items-center justify-between ${isCurrentUser ? "bg-indigo-500/10 border-y border-indigo-500/20" : ""}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-xl font-bold flex items-center justify-center text-sm ${
+                            index === 0 ? "bg-amber-400 text-black font-black" :
+                            index === 1 ? "bg-slate-300 text-black font-black" :
+                            index === 2 ? "bg-amber-600 text-white font-black" :
+                            "bg-slate-800 text-slate-400"
+                          }`}>
+                            {index + 1}
+                          </div>
+                          <div>
+                            <p className="font-bold text-sm text-white">
+                              {leader.firstName} {leader.lastName} {isCurrentUser && " (You)"}
+                            </p>
+                            <p className="text-[10px] text-slate-500">
+                              {leader.username ? `@${leader.username}` : "User"}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-black text-indigo-400 text-sm">₹{leader.earnings.toLocaleString()}</p>
+                          <p className="text-[9px] text-slate-500 font-semibold uppercase">Level {leader.level}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </main>
+          </motion.div>
+        )}
+
+        {/* 🎯 Earn Rewards Dedicated View */}
+        {currentView === "earn-rewards" && (
+          <motion.div
+            key="earn-rewards-view"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="min-h-screen bg-[#020617] text-white pb-12"
+          >
+            <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+              <button onClick={() => setCurrentView("home")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors">
+                <ArrowLeft className="w-6 h-6 text-slate-400" />
+              </button>
+              <h2 className="text-xl font-bold text-white">Earn Rewards</h2>
+            </header>
+
+            <main className="p-6 space-y-6">
+              <div className="bg-slate-900/50 rounded-2xl p-5 border border-slate-800 flex gap-4 items-center">
+                <Sparkles className="w-10 h-10 text-yellow-400 animate-spin-slow shrink-0" />
+                <div>
+                  <h3 className="font-bold text-sm">Task Center</h3>
+                  <p className="text-xs text-slate-400 mt-1">Complete instant-reward tasks to instantly credit your wallet balance.</p>
+                </div>
+              </div>
+
+              {loadingTasks ? (
+                <div className="flex justify-center py-12">
+                  <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : tasks.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 text-sm">
+                  No active tasks available. Check back soon!
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {tasks.map((task) => (
+                    <div 
+                      key={task.id} 
+                      className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col gap-3 hover:border-slate-700 transition-colors"
+                    >
+                      <div className="flex justify-between items-start gap-4">
+                        <div>
+                          <h4 className="font-bold text-sm text-white">{task.name}</h4>
+                          <p className="text-xs text-slate-400 mt-1">{task.description}</p>
+                        </div>
+                        <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 px-3 py-1 rounded-xl text-right shrink-0">
+                          <p className="text-[9px] uppercase tracking-wider font-bold">REWARD</p>
+                          <p className="font-bold text-sm">₹{task.amount}</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => setActiveTaskId(task.id)}
+                        className="w-full py-3 bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <PlayCircle className="w-4 h-4" /> Start Task
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </main>
+          </motion.div>
+        )}
+
+        {/* 🆘 Support Dedicated View */}
+        {currentView === "support" && (
+          <motion.div
+            key="support-view"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="min-h-screen bg-[#020617] text-white pb-12"
+          >
+            <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+              <button onClick={() => setCurrentView("home")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors">
+                <ArrowLeft className="w-6 h-6 text-slate-400" />
+              </button>
+              <h2 className="text-xl font-bold text-white">Support Help Center</h2>
+            </header>
+
+            <main className="p-6 space-y-6">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex items-center gap-4">
+                <HelpCircle className="w-10 h-10 text-teal-400 shrink-0" />
+                <div>
+                  <h3 className="font-bold text-sm">How can we help?</h3>
+                  <p className="text-xs text-slate-400 mt-1">Get instant assistance from the RoyShare team.</p>
+                </div>
+              </div>
+
+              {/* FAQ Accordion Placeholder */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">Frequently Asked Questions</h4>
+                <div className="space-y-3">
+                  {[
+                    { q: "How is my payout calculated?", a: "Earnings depend on completed tasks and dynamic survey rates. Payouts are made in INR." },
+                    { q: "What is the minimum withdrawal?", a: "The minimum withdrawal is specified in your wallet section depending on your tier." },
+                    { q: "How long does verification take?", a: "Security verification processes payouts automatically within 24 to 48 hours." },
+                  ].map((faq, i) => (
+                    <div key={i} className="p-4 rounded-xl bg-slate-900/30 border border-slate-800 space-y-1.5">
+                      <p className="font-bold text-xs text-white flex items-center gap-2">
+                        <span className="text-teal-400">Q.</span> {faq.q}
+                      </p>
+                      <p className="text-xs text-slate-400 leading-relaxed pl-4">{faq.a}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Direct Support Button */}
+              <div className="pt-4">
+                <a 
+                  href="https://t.me/RoyShareCommunity" 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="w-full py-4 bg-teal-600 hover:bg-teal-500 text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2 transition-colors shadow-lg shadow-teal-500/10"
+                >
+                  <MessageSquare className="w-4 h-4" /> Message Support Community
+                </a>
+              </div>
+            </main>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
