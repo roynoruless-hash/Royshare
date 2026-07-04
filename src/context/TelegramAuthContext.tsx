@@ -20,10 +20,18 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
 
   const verifyAuth = async () => {
     const tg = (window as any).Telegram?.WebApp;
-    const initData = tg?.initData;
+    
+    // If no Telegram object, we are definitely not in a Mini App
+    if (!tg) {
+      setLoading(false);
+      return;
+    }
+
+    const initData = tg.initData;
 
     // If no initData, we are likely not in a Telegram Mini App context that requires auth
     if (!initData) {
+      console.log("[TelegramAuthContext] No initData found, skipping verification");
       setLoading(false);
       return;
     }

@@ -36,9 +36,16 @@ export const MiniAppHome: React.FC = () => {
     show: { opacity: 1, y: 0 }
   };
 
+  const handleAction = (label: string) => {
+    if (label === "Surveys") {
+      alert("🚧 Surveys are coming soon.");
+    } else {
+      alert(`${label} feature is coming soon!`);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#020617] text-white overflow-x-hidden pb-12">
-      {/* Header Profile Area */}
       <header className="relative pt-12 pb-24 px-6 overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-blue-600/20 to-transparent pointer-events-none" />
         <div className="relative z-10 flex flex-col items-center">
@@ -126,7 +133,13 @@ export const MiniAppHome: React.FC = () => {
               <p className="text-white font-mono font-bold">{user.referralCode}</p>
             </div>
           </div>
-          <button className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+          <button 
+            onClick={() => {
+              navigator.clipboard.writeText(user.referralCode);
+              alert("Referral code copied!");
+            }}
+            className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+          >
             Copy
           </button>
         </motion.div>
@@ -147,6 +160,7 @@ export const MiniAppHome: React.FC = () => {
               key={idx}
               variants={itemVariants}
               whileTap={{ scale: 0.95 }}
+              onClick={() => handleAction(btn.label)}
               className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-900/40 border border-slate-800/50 hover:border-slate-700 transition-all group`}
             >
               <div className={`w-12 h-12 ${btn.color} ${btn.shadow} rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>

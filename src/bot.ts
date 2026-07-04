@@ -292,6 +292,17 @@ https://youtube.com`;
         } else if (msg.text === "👥 Refer & Earn") {
             console.log("User selected Refer & Earn");
             await processReferAndEarn(botToken, chatId, user);
+        } else if (msg.text === "📋 Survey") {
+            console.log("User selected Survey");
+            const appUrl = getAppUrl();
+            const webAppUrl = `${appUrl}/surveys?userId=${user.id}`;
+            const message = `📋 *RoyShare Surveys*\n\nComplete surveys to earn extra rewards! New surveys are added regularly.\n\nClick the button below to start.`;
+            const inlineKeyboard = {
+                inline_keyboard: [
+                    [{ text: "📋 Open Surveys", web_app: { url: webAppUrl } }]
+                ]
+            };
+            await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
         } else if (msg.text && (msg.text.trim().startsWith("http://") || msg.text.trim().startsWith("https://"))) {
             console.log("Direct URL detected. Processing independent shortening.");
             await processShortenUrl(botToken, chatId, user, msg.text);
@@ -716,12 +727,16 @@ Please complete the following steps.
 3️⃣ Verify
 4️⃣ Complete Registration`;
         
+        const appUrl = getAppUrl();
+        const surveyUrl = `${appUrl}/surveys?userId=${user.id}`;
+
         await sendTelegramMessage(botToken, chatId, message, {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: "📢 Join Channel", url: "https://t.me/royshare_official" }],
                     [{ text: "👥 Join Group", url: "https://t.me/RoyShareCommunity" }],
-                    [{ text: "✅ Verify", callback_data: "verify_membership" }]
+                    [{ text: "✅ Verify", callback_data: "verify_membership" }],
+                    [{ text: "📋 Take a Survey", web_app: { url: surveyUrl } }]
                 ]
             }
         });
@@ -2101,7 +2116,7 @@ async function handleSearchQuery(botToken: string, chatId: number, user: any, se
 function getMainMenuKeyboard() {
     return {
         keyboard: [
-            [{ text: "💰 Earn Rewards" }],
+            [{ text: "💰 Earn Rewards" }, { text: "📋 Survey" }],
             [{ text: "👤 Account" }, { text: "💰 Balance" }],
             [{ text: "📤 Upload File" }, { text: "🔗 URL Shortener" }],
             [{ text: "📁 My Content" }, { text: "🔗 My Links" }],
