@@ -26,6 +26,19 @@ const db = getDb();
 import { getFirestore as getAdminFirestore, FieldValue } from "firebase-admin/firestore";
 let adminDb: any;
 
+// Middleware to check if Firebase Admin is initialized
+const requireAdminDb = (req: any, res: any, next: any) => {
+  if (!adminDb) {
+    debugLog(`[ERROR] Attempted access to ${req.path} but adminDb is not initialized.`);
+    return res.status(500).json({ 
+      error: "Authentication Failed", 
+      message: "The backend service could not load necessary credentials to access the database.",
+      details: "Firebase Admin SDK failed to initialize. Please check FIREBASE_SERVICE_ACCOUNT environment variable."
+    });
+  }
+  next();
+};
+
 // Helper to log to a file we can read
 const debugLog = (msg: string) => {
   const timestamp = new Date().toISOString();
@@ -43,49 +56,61 @@ debugLog("Server starting/restarting...");
 const configPath = path.join(process.cwd(), "firebase-applet-config.json");
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 
-if (getApps().length === 0) {
+async function initializeFirebaseAdmin() {
+  if (getApps().length > 0) {
+    const adminApp = getApps()[0];
+    adminDb = getAdminFirestore(adminApp);
+    debugLog("Firebase Admin already initialized.");
+    return true;
+  }
+
   debugLog("Initializing Firebase Admin SDK...");
   let credential;
   const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
+  const googleCredsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
   const serviceAccountFilePath = path.join(process.cwd(), "firebase-service-account.json");
 
-  if (serviceAccountEnv) {
-    try {
-      debugLog("[FIREBASE ADMIN] Initializing using FIREBASE_SERVICE_ACCOUNT env variable.");
-      credential = cert(JSON.parse(serviceAccountEnv));
-    } catch (e: any) {
-      debugLog(`[FIREBASE ADMIN] Failed to parse FIREBASE_SERVICE_ACCOUNT env string: ${e.message || e}`);
+  try {
+    if (serviceAccountEnv) {
+      debugLog("[FIREBASE ADMIN] Attempting initialization using FIREBASE_SERVICE_ACCOUNT env variable.");
+      const jsonStr = serviceAccountEnv.trim().startsWith("{") ? serviceAccountEnv : Buffer.from(serviceAccountEnv, 'base64').toString();
+      credential = cert(JSON.parse(jsonStr));
+    } else if (googleCredsEnv && fs.existsSync(googleCredsEnv)) {
+      debugLog("[FIREBASE ADMIN] Attempting initialization using GOOGLE_APPLICATION_CREDENTIALS file path.");
+      credential = cert(JSON.parse(fs.readFileSync(googleCredsEnv, "utf8")));
+    } else if (fs.existsSync(serviceAccountFilePath)) {
+      debugLog("[FIREBASE ADMIN] Attempting initialization using local firebase-service-account.json file.");
+      credential = cert(JSON.parse(fs.readFileSync(serviceAccountFilePath, "utf8")));
     }
-  } else if (fs.existsSync(serviceAccountFilePath)) {
-    try {
-      debugLog("[FIREBASE ADMIN] Initializing using firebase-service-account.json file.");
-      const keyData = JSON.parse(fs.readFileSync(serviceAccountFilePath, "utf8"));
-      credential = cert(keyData);
-    } catch (e: any) {
-      debugLog(`[FIREBASE ADMIN] Failed to parse firebase-service-account.json file: ${e.message || e}`);
-    }
+  } catch (e: any) {
+    debugLog(`[FIREBASE ADMIN] Error parsing credentials: ${e.message}`);
+  }
+
+  if (!credential) {
+    debugLog("[FIREBASE ADMIN] CRITICAL: No valid service account credentials found. Server will likely fail to connect to Firestore.");
   }
 
   const appOptions: any = {
     projectId: config.projectId,
-    storageBucket: config.storageBucket || `${config.projectId}.appspot.com`
+    storageBucket: config.storageBucket || `${config.projectId}.appspot.com`,
+    credential
   };
-
-  if (credential) {
-    appOptions.credential = credential;
-  }
 
   try {
     const adminApp = initializeApp(appOptions);
     adminDb = getAdminFirestore(adminApp);
-    debugLog("Firebase Admin initialized successfully.");
+    debugLog("Firebase Admin initialized. Verifying connectivity...");
+    
+    // Verify connectivity with a timeout
+    const testDoc = adminDb.collection("system_status").doc("startup_check");
+    await testDoc.set({ lastCheck: new Date().toISOString(), status: "ok" }, { merge: true });
+    debugLog("Firestore connectivity verified successfully.");
+    return true;
   } catch (e: any) {
-    debugLog(`Firebase Admin initialization FAILED: ${e.message || e}`);
+    debugLog(`[FIREBASE ADMIN] CRITICAL FAILURE: ${e.message}`);
+    console.error("Firebase Admin initialization FAILED:", e);
+    return false;
   }
-} else {
-  const adminApp = getApps()[0];
-  adminDb = getAdminFirestore(adminApp);
-  debugLog("Firebase Admin already initialized.");
 }
 
 async function cleanupDemoTasks() {
@@ -154,6 +179,17 @@ process.on('uncaughtException', (err) => {
 
 async function startServer() {
   debugLog("startServer: Beginning startup sequence...");
+  
+  // Initialize Firebase Admin first
+  const initialized = await initializeFirebaseAdmin();
+  if (!initialized) {
+    debugLog("startServer: FATAL - Firebase Admin failed to initialize. Stopping server start.");
+    // In production/Render, we want to stop so it doesn't serve broken routes
+    if (process.env.NODE_ENV === "production") {
+      process.exit(1);
+    }
+  }
+
   // Run cleanup on startup (non-blocking)
   debugLog("startServer: Launching cleanupDemoTasks (non-blocking)...");
   cleanupDemoTasks();
@@ -177,7 +213,29 @@ async function startServer() {
   const PORT = 3000;
 
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", uptime: process.uptime() });
+    res.json({ 
+      status: "ok", 
+      uptime: process.uptime(),
+      firebaseAdmin: !!adminDb,
+      firebaseClient: !!db
+    });
+  });
+
+  app.get("/api/test-db", async (req, res) => {
+    try {
+      if (!adminDb) {
+        return res.status(500).json({ error: "adminDb not initialized" });
+      }
+      const testRef = adminDb.collection("system_test").doc("connectivity");
+      await testRef.set({
+        lastTest: new Date().toISOString(),
+        status: "success"
+      });
+      const snap = await testRef.get();
+      res.json({ success: true, data: snap.data() });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
 // Admin Logging Helper
@@ -197,7 +255,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
 }
 
   // --- Admin: Account Verification Management ---
-  app.get("/api/admin/users/verified", async (req, res) => {
+  app.get("/api/admin/users/verified", requireAdminDb, async (req, res) => {
     try {
       const usersRef = collection(db, "users");
       const snapshot = await getDocs(usersRef);
@@ -212,7 +270,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
     }
   });
 
-  app.post("/api/admin/users/update-status", async (req, res) => {
+  app.post("/api/admin/users/update-status", requireAdminDb, async (req, res) => {
     try {
       const { telegramId, status, adminId, ip } = req.body;
       if (!telegramId || !status) return res.status(400).json({ error: "Missing parameters" });
@@ -230,7 +288,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
   });
 
   // Admin Dashboard route
-  app.get("/api/admin/dashboard", async (req, res) => {
+  app.get("/api/admin/dashboard", requireAdminDb, async (req, res) => {
     try {
       const getCount = async (coll: any) => {
         try { return (await getCountFromServer(coll)).data().count; } catch (e) { return 0; }
@@ -305,7 +363,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
   });
 
   // Admin Withdrawals Routes
-  app.get("/api/admin/withdrawals", async (req, res) => {
+  app.get("/api/admin/withdrawals", requireAdminDb, async (req, res) => {
     try {
       const wQuery = query(collection(db, "withdrawals"));
       const snapshot = await getDocs(wQuery);
@@ -409,7 +467,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
     }
   };
 
-  app.post("/api/auth/telegram-verify", async (req, res) => {
+  app.post("/api/auth/telegram-verify", requireAdminDb, async (req, res) => {
     try {
       const { initData } = req.body;
       if (!initData) return res.status(400).json({ error: "Missing initData" });
@@ -434,7 +492,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
     }
   });
 
-  app.get("/api/user/profile/:id", async (req, res) => {
+  app.get("/api/user/profile/:id", requireAdminDb, async (req, res) => {
     try {
       const { id } = req.params;
       const userSnap = await adminDb.collection("users").doc(id).get();
@@ -445,7 +503,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
     }
   });
 
-  app.post("/api/user/complete-profile", async (req, res) => {
+  app.post("/api/user/complete-profile", requireAdminDb, async (req, res) => {
     try {
       const { userId, details } = req.body;
       if (!userId || !details) return res.status(400).json({ error: "Missing parameters" });
@@ -469,7 +527,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
     }
   });
 
-  app.post("/api/admin/withdrawals/:id/approve", async (req, res) => {
+  app.post("/api/admin/withdrawals/:id/approve", requireAdminDb, async (req, res) => {
     try {
       const { id } = req.params;
       const ref = doc(db, "withdrawals", id);
@@ -487,7 +545,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
     }
   });
 
-  app.post("/api/admin/withdrawals/:id/paid", async (req, res) => {
+  app.post("/api/admin/withdrawals/:id/paid", requireAdminDb, async (req, res) => {
     try {
       const { id } = req.params;
       const { transactionReference } = req.body;
@@ -506,7 +564,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
     }
   });
 
-  app.post("/api/admin/withdrawals/:id/reject", async (req, res) => {
+  app.post("/api/admin/withdrawals/:id/reject", requireAdminDb, async (req, res) => {
     try {
       const { id } = req.params;
       const { rejectReason, rejectionType } = req.body;
@@ -4118,7 +4176,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  app.post("/api/daily-bonus/claim", async (req, res) => {
+  app.post("/api/daily-bonus/claim", requireAdminDb, async (req, res) => {
     try {
       const { userId, type } = req.body;
       if (!userId || !type) return res.status(400).json({ error: "Missing parameters" });
@@ -4237,7 +4295,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     return crypto.createHash("sha256").update(otp).digest("hex");
   };
 
-  app.post("/api/auth/send-otp", async (req, res) => {
+  app.post("/api/auth/send-otp", requireAdminDb, async (req, res) => {
     try {
       const { mobile, fingerprint } = req.body;
       if (!mobile) {
@@ -4344,7 +4402,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  app.post("/api/auth/verify-otp", async (req, res) => {
+  app.post("/api/auth/verify-otp", requireAdminDb, async (req, res) => {
     try {
       const { mobile, otp, fingerprint } = req.body;
       if (!mobile || !otp) {
@@ -4450,7 +4508,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  app.post("/api/auth/check-session", async (req, res) => {
+  app.post("/api/auth/check-session", requireAdminDb, async (req, res) => {
     const requestId = Math.random().toString(36).substring(7);
     try {
       const { token, fingerprint } = req.body;
@@ -4458,11 +4516,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       if (!token) {
         return res.status(200).json({ success: false, authenticated: false, error: "No token provided" });
-      }
-
-      if (!adminDb) {
-        debugLog(`[${requestId}] adminDb NOT INITIALIZED`);
-        return res.status(500).json({ error: "Server database not ready" });
       }
 
       const sessionsColl = adminDb.collection("sessions");
