@@ -68,14 +68,8 @@ export function useTelegramUser(): UseTelegramUserReturn {
         }
       }
 
-      // 2. If in Telegram but no session, try to get status via initData
-      if (initData) {
-        const res = await fetch(`/api/promo/status?initData=${encodeURIComponent(initData)}`);
-        const data = await res.json();
-        if (data.success && data.user && data.user.isVerified) {
-          setUser(data.user);
-        }
-      }
+      // 2. If in Telegram but no session, we could try other methods if they exist
+      // For now, we rely on the session token
     } catch (err: any) {
       console.error("[useTelegramUser] Error:", err);
       setError(err.message || "Authentication check failed");

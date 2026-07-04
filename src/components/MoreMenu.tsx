@@ -27,7 +27,6 @@ import {
 
 const menuItems = [
   { name: "Home", icon: Home, href: "/" },
-  { name: "🎁 Promo Rewards", icon: Gift, href: "/promo-rewards" },
   { name: "About Us", icon: User, href: "/about" },
   { name: "Help Center", icon: HelpCircle, href: "/help" },
   { name: "FAQ", icon: MessageSquare, href: "/faq" },

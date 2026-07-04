@@ -28,7 +28,7 @@ const AD_LINKS = [
   },
   {
     title: "Stake - Premium Online Casino",
-    desc: "Play slots, blackjack, roulette and sports betting with 100% safe deposits. Use promo code ROYSHARE for double bonus!",
+    desc: "Play slots, blackjack, roulette and sports betting with 100% safe deposits.",
     cta: "Play Now",
     url: "https://stake.com"
   },
@@ -821,7 +821,7 @@ export default function EarnRewardsPage() {
                       STAKE Casino & Betting <ExternalLink size={11} />
                     </h4>
                     <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">
-                      Safe crypto casino & sportsbook. Double your deposit with promo code <strong className="text-amber-400 font-bold">ROYSHARE</strong>. Play now!
+                      Safe crypto casino & sportsbook. Play now!
                     </p>
                   </div>
                 </div>

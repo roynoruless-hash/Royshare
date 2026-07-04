@@ -9,7 +9,6 @@ import {
   Search, User, Filter, Download, Users
 } from "lucide-react";
 import AdScriptRenderer from "../components/AdScriptRenderer";
-import PromoRewardManager from "../components/PromoRewardManager";
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('Overview');
@@ -1909,7 +1908,7 @@ export default function AdminDashboard() {
         <div className="space-y-8 max-w-7xl mx-auto">
           {/* Navigation Buttons */}
           <div className="flex flex-wrap gap-3">
-            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "🎁 Promo Reward Manager", "📢 Ads Manager", "🔗 Smart URL Shortener", "📥 Google Drive Accounts", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "💰 Monetag Postback", "⚙️ System Settings"].map((btn) => (
+            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "🔗 Smart URL Shortener", "📥 Google Drive Accounts", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "💰 Monetag Postback", "⚙️ System Settings"].map((btn) => (
               <button 
                 key={btn} 
                 onClick={() => {
@@ -3151,9 +3150,6 @@ export default function AdminDashboard() {
                 </div>
               ) : null}
             </div>
-          )}
-          {activeTab === '🎁 Promo Reward Manager' && (
-            <PromoRewardManager />
           )}
           {activeTab === '👥 Users' && (
             <div className="space-y-6">
