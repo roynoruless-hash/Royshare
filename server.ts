@@ -28,13 +28,9 @@ let adminDb: any;
 
 // Middleware to check if Firebase Admin is initialized
 const requireAdminDb = (req: any, res: any, next: any) => {
+  // We no longer block access if adminDb is missing, as many routes use the client SDK (db)
   if (!adminDb) {
-    debugLog(`[ERROR] Attempted access to ${req.path} but adminDb is not initialized.`);
-    return res.status(500).json({ 
-      error: "Authentication Failed", 
-      message: "The backend service could not load necessary credentials to access the database.",
-      details: "Firebase Admin SDK failed to initialize. Please check FIREBASE_SERVICE_ACCOUNT environment variable."
-    });
+    debugLog(`[Firebase] Warning: adminDb not initialized for ${req.path}.`);
   }
   next();
 };
@@ -56,61 +52,21 @@ debugLog("Server starting/restarting...");
 const configPath = path.join(process.cwd(), "firebase-applet-config.json");
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 
-async function initializeFirebaseAdmin() {
-  if (getApps().length > 0) {
-    const adminApp = getApps()[0];
+// Initialize Admin SDK minimally (will use ADC if available, otherwise will likely fail silently until used)
+try {
+  if (getApps().length === 0) {
+    const adminApp = initializeApp({
+      projectId: config.projectId,
+      storageBucket: config.storageBucket || `${config.projectId}.appspot.com`
+    });
     adminDb = getAdminFirestore(adminApp);
-    debugLog("Firebase Admin already initialized.");
-    return true;
+    debugLog("[Firebase] Admin SDK initialized (minimal).");
+  } else {
+    adminDb = getAdminFirestore(getApps()[0]);
+    debugLog("[Firebase] Admin SDK reused existing app.");
   }
-
-  debugLog("Initializing Firebase Admin SDK...");
-  let credential;
-  const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
-  const googleCredsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  const serviceAccountFilePath = path.join(process.cwd(), "firebase-service-account.json");
-
-  try {
-    if (serviceAccountEnv) {
-      debugLog("[FIREBASE ADMIN] Attempting initialization using FIREBASE_SERVICE_ACCOUNT env variable.");
-      const jsonStr = serviceAccountEnv.trim().startsWith("{") ? serviceAccountEnv : Buffer.from(serviceAccountEnv, 'base64').toString();
-      credential = cert(JSON.parse(jsonStr));
-    } else if (googleCredsEnv && fs.existsSync(googleCredsEnv)) {
-      debugLog("[FIREBASE ADMIN] Attempting initialization using GOOGLE_APPLICATION_CREDENTIALS file path.");
-      credential = cert(JSON.parse(fs.readFileSync(googleCredsEnv, "utf8")));
-    } else if (fs.existsSync(serviceAccountFilePath)) {
-      debugLog("[FIREBASE ADMIN] Attempting initialization using local firebase-service-account.json file.");
-      credential = cert(JSON.parse(fs.readFileSync(serviceAccountFilePath, "utf8")));
-    }
-  } catch (e: any) {
-    debugLog(`[FIREBASE ADMIN] Error parsing credentials: ${e.message}`);
-  }
-
-  if (!credential) {
-    debugLog("[FIREBASE ADMIN] CRITICAL: No valid service account credentials found. Server will likely fail to connect to Firestore.");
-  }
-
-  const appOptions: any = {
-    projectId: config.projectId,
-    storageBucket: config.storageBucket || `${config.projectId}.appspot.com`,
-    credential
-  };
-
-  try {
-    const adminApp = initializeApp(appOptions);
-    adminDb = getAdminFirestore(adminApp);
-    debugLog("Firebase Admin initialized. Verifying connectivity...");
-    
-    // Verify connectivity with a timeout
-    const testDoc = adminDb.collection("system_status").doc("startup_check");
-    await testDoc.set({ lastCheck: new Date().toISOString(), status: "ok" }, { merge: true });
-    debugLog("Firestore connectivity verified successfully.");
-    return true;
-  } catch (e: any) {
-    debugLog(`[FIREBASE ADMIN] CRITICAL FAILURE: ${e.message}`);
-    console.error("Firebase Admin initialization FAILED:", e);
-    return false;
-  }
+} catch (e: any) {
+  debugLog(`[Firebase] Admin SDK minimal init failed: ${e.message}`);
 }
 
 async function cleanupDemoTasks() {
@@ -180,16 +136,6 @@ process.on('uncaughtException', (err) => {
 async function startServer() {
   debugLog("startServer: Beginning startup sequence...");
   
-  // Initialize Firebase Admin first
-  const initialized = await initializeFirebaseAdmin();
-  if (!initialized) {
-    debugLog("startServer: FATAL - Firebase Admin failed to initialize. Stopping server start.");
-    // In production/Render, we want to stop so it doesn't serve broken routes
-    if (process.env.NODE_ENV === "production") {
-      process.exit(1);
-    }
-  }
-
   // Run cleanup on startup (non-blocking)
   debugLog("startServer: Launching cleanupDemoTasks (non-blocking)...");
   cleanupDemoTasks();
@@ -427,8 +373,8 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
   const ensureTelegramUserSynced = async (userObj: any) => {
     if (!userObj || !userObj.id) return null;
     const userId = String(userObj.id);
-    const userDocRef = adminDb.collection("users").doc(userId);
-    const userSnap = await userDocRef.get();
+    const userDocRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userDocRef);
     const nowIso = new Date().toISOString();
     
     const uData: any = {
@@ -443,8 +389,8 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       updatedAt: nowIso
     };
 
-    if (userSnap.exists) {
-      await userDocRef.update(uData);
+    if (userSnap.exists()) {
+      await updateDoc(userDocRef, uData);
       return { id: userId, ...userSnap.data(), ...uData };
     } else {
       const newUser = {
@@ -462,7 +408,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
         profileCompleted: false,
         status: "Active"
       };
-      await userDocRef.set(newUser);
+      await setDoc(userDocRef, newUser);
       return newUser;
     }
   };
@@ -472,8 +418,9 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       const { initData } = req.body;
       if (!initData) return res.status(400).json({ error: "Missing initData" });
 
-      const tgSettingsSnap = await adminDb.collection("settings").doc("telegram").get();
-      const botToken = tgSettingsSnap.exists ? tgSettingsSnap.data().botToken : process.env.TELEGRAM_BOT_TOKEN;
+      const tgSettingsRef = doc(db, "settings", "telegram");
+      const tgSettingsSnap = await getDoc(tgSettingsRef);
+      const botToken = tgSettingsSnap.exists() ? tgSettingsSnap.data().botToken : process.env.TELEGRAM_BOT_TOKEN;
 
       if (!botToken) {
         return res.status(500).json({ error: "Telegram Bot Token not configured" });
@@ -495,8 +442,8 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
   app.get("/api/user/profile/:id", requireAdminDb, async (req, res) => {
     try {
       const { id } = req.params;
-      const userSnap = await adminDb.collection("users").doc(id).get();
-      if (!userSnap.exists) return res.status(404).json({ error: "User not found" });
+      const userSnap = await getDoc(doc(db, "users", id));
+      if (!userSnap.exists()) return res.status(404).json({ error: "User not found" });
       res.json({ success: true, user: { id: userSnap.id, ...userSnap.data() } });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -508,9 +455,9 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       const { userId, details } = req.body;
       if (!userId || !details) return res.status(400).json({ error: "Missing parameters" });
 
-      const userDocRef = adminDb.collection("users").doc(String(userId));
-      const userSnap = await userDocRef.get();
-      if (!userSnap.exists) return res.status(404).json({ error: "User not found" });
+      const userDocRef = doc(db, "users", String(userId));
+      const userSnap = await getDoc(userDocRef);
+      if (!userSnap.exists()) return res.status(404).json({ error: "User not found" });
 
       const updateData = {
         ...details,
@@ -518,7 +465,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
         updatedAt: new Date().toISOString()
       };
 
-      await userDocRef.update(updateData);
+      await updateDoc(userDocRef, updateData);
       const updatedUser = { id: userDocRef.id, ...userSnap.data(), ...updateData };
       res.json({ success: true, user: updatedUser });
     } catch (e: any) {
@@ -4192,15 +4139,17 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       let tgUserId = "";
 
       // Start Firestore Transaction
-      await adminDb.runTransaction(async (transaction: any) => {
-        const userSnap = await transaction.get(adminDb.collection("users").doc(userId));
-        if (!userSnap.exists) throw new Error("User not found");
+      await runTransaction(db, async (transaction) => {
+        const userRef = doc(db, "users", userId);
+        const userSnap = await transaction.get(userRef);
+        if (!userSnap.exists()) throw new Error("User not found");
         const uData = userSnap.data();
         userName = uData.name || uData.firstName || uData.username || "User";
         tgUserId = uData.telegramId || "";
 
-        const stateSnap = await transaction.get(adminDb.collection("user_daily_states").doc(userId));
-        if (!stateSnap.exists) throw new Error("State not found");
+        const stateRef = doc(db, "user_daily_states", userId);
+        const stateSnap = await transaction.get(stateRef);
+        if (!stateSnap.exists()) throw new Error("State not found");
         const stateData = stateSnap.data();
 
         const pending = stateData.pendingRewards?.[type];
@@ -4209,31 +4158,33 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         rewardAmount = Number(pending.amount);
 
         // Update User Balances
-        transaction.update(adminDb.collection("users").doc(userId), {
-          bonusBalance: FieldValue.increment(rewardAmount),
-          availableBalance: FieldValue.increment(rewardAmount),
-          earnings: FieldValue.increment(rewardAmount)
+        transaction.update(userRef, {
+          bonusBalance: increment(rewardAmount),
+          availableBalance: increment(rewardAmount),
+          earnings: increment(rewardAmount)
         });
 
         // Mark as Claimed
-        transaction.update(adminDb.collection("user_daily_states").doc(userId), {
+        transaction.update(stateRef, {
           [`pendingRewards.${type}.claimed`]: true
         });
 
         // Update Statistics
+        const statsDocRef = doc(db, "user_statistics", userId);
         const rewardField = type === "wheel" ? "wheelRewards" : type === "box" ? "boxRewards" : "scratchRewards";
-        transaction.set(adminDb.collection("user_statistics").doc(userId), { 
-          [rewardField]: FieldValue.increment(rewardAmount),
-          totalClaims: FieldValue.increment(1),
-          totalRewards: FieldValue.increment(rewardAmount)
+        transaction.set(statsDocRef, { 
+          [rewardField]: increment(rewardAmount),
+          totalClaims: increment(1),
+          totalRewards: increment(rewardAmount)
         }, { merge: true });
 
         // Update Global Distributed Rewards
-        transaction.set(adminDb.collection("settings").doc("global"), { totalRewardsDistributed: FieldValue.increment(rewardAmount) }, { merge: true });
+        const globalRef = doc(db, "settings", "global");
+        transaction.set(globalRef, { totalRewardsDistributed: increment(rewardAmount) }, { merge: true });
       });
 
       // After transaction success, Add to history
-      await adminDb.collection("claimHistory").add({
+      await addDoc(collection(db, "claimHistory"), {
         userId,
         userName,
         amount: rewardAmount,
@@ -4244,8 +4195,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       // Send Telegram Notification
       try {
-        const telegramSettingsSnap = await adminDb.collection("settings").doc("telegram").get();
-        if (telegramSettingsSnap.exists) {
+        const tgSettingsRef = doc(db, "settings", "telegram");
+        const telegramSettingsSnap = await getDoc(tgSettingsRef);
+        if (telegramSettingsSnap.exists()) {
           const { botToken, rewardChannelId } = telegramSettingsSnap.data();
           if (botToken && (rewardChannelId || tgUserId)) {
             const emoji = type === "wheel" ? "🎡" : type === "box" ? "📦" : type === "scratch" ? "🎫" : "🪙";
@@ -4303,8 +4255,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       // Check for lockout
-      const failuresRef = adminDb.collection("otp_failures").doc(mobile.trim());
-      const failureSnap = await failuresRef.get();
+      const failuresRef = doc(db, "otp_failures", mobile.trim());
+      const failureSnap = await getDoc(failuresRef);
       if (failureSnap.exists) {
         const fdata = failureSnap.data();
         if (fdata.attempts >= 3) {
@@ -4318,13 +4270,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
             });
           } else {
             // Reset after lockout period passed
-            await failuresRef.delete();
+            await deleteDoc(failuresRef);
           }
         }
       }
 
       // 1. Check if mobile is registered in RoyShare
-      const qMobile = await adminDb.collection("users").where("mobile", "==", mobile.trim()).get();
+      const qMobile = await getDocs(query(collection(db, "users"), where("mobile", "==", mobile.trim())));
       
       if (qMobile.empty) {
         return res.status(404).json({ error: "❌ Mobile Number Not Registered in RoyShare." });
@@ -4338,10 +4290,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
       // 2. Rate Limiting: Max 5 OTPs per hour per TG ID
-      const rateSnap = await adminDb.collection("otpRequests")
-        .where("telegramId", "==", telegramId)
-        .where("createdAt", ">=", oneHourAgo.toISOString())
-        .get();
+      const rateSnap = await getDocs(query(collection(db, "otpRequests"), 
+        where("telegramId", "==", telegramId), 
+        where("createdAt", ">=", oneHourAgo.toISOString())));
+      
       if (rateSnap.size >= 5) {
         return res.status(429).json({ error: "Maximum OTP requests (5/hour) exceeded. Please try again later." });
       }
@@ -4352,16 +4304,16 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const expiresAt = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
 
       // 4. Invalidate previous OTPs for this user
-      const oldSnap = await adminDb.collection("otps")
-        .where("telegramId", "==", telegramId)
-        .where("used", "==", false)
-        .get();
+      const oldSnap = await getDocs(query(collection(db, "otps"), 
+        where("telegramId", "==", telegramId), 
+        where("used", "==", false)));
+        
       for (const oldDoc of oldSnap.docs) {
-        await oldDoc.ref.update({ used: true });
+        await updateDoc(oldDoc.ref, { used: true });
       }
 
       // 5. Store new OTP attempt
-      await adminDb.collection("otps").add({
+      await addDoc(collection(db, "otps"), {
         telegramId,
         mobile,
         hashedOtp,
@@ -4371,7 +4323,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       });
 
       // 6. Log Request
-      await adminDb.collection("otpRequests").add({
+      await addDoc(collection(db, "otpRequests"), {
         telegramId,
         mobile,
         createdAt: now.toISOString()
@@ -4410,9 +4362,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       // Check lockout first
-      const failuresRef = adminDb.collection("otp_failures").doc(mobile.trim());
-      const failureSnap = await failuresRef.get();
-      if (failureSnap.exists) {
+      const failuresRef = doc(db, "otp_failures", mobile.trim());
+      const failureSnap = await getDoc(failuresRef);
+      if (failureSnap.exists()) {
         const fdata = failureSnap.data();
         if (fdata.attempts >= 3) {
           const lastFail = new Date(fdata.lastAttempt).getTime();
@@ -4427,22 +4379,21 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const now = new Date().toISOString();
 
       // Find valid OTP
-      const otpSnap = await adminDb.collection("otps")
-        .where("mobile", "==", mobile.trim())
-        .where("hashedOtp", "==", hashedInput)
-        .where("used", "==", false)
-        .where("expiresAt", ">=", now)
-        .get();
+      const otpSnap = await getDocs(query(collection(db, "otps"), 
+        where("mobile", "==", mobile.trim()), 
+        where("hashedOtp", "==", hashedInput), 
+        where("used", "==", false), 
+        where("expiresAt", ">=", now)));
       
       if (otpSnap.empty) {
         // Increment failures
-        if (failureSnap.exists) {
-          await failuresRef.update({
-            attempts: FieldValue.increment(1),
+        if (failureSnap.exists()) {
+          await updateDoc(failuresRef, {
+            attempts: increment(1),
             lastAttempt: now
           });
         } else {
-          await failuresRef.set({
+          await setDoc(failuresRef, {
             attempts: 1,
             lastAttempt: now
           });
@@ -4451,19 +4402,19 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       // Success - reset failures
-      await failuresRef.delete();
+      await deleteDoc(failuresRef);
 
       // Mark OTP as used
       const otpDoc = otpSnap.docs[0];
       const telegramId = otpDoc.data().telegramId;
-      await otpDoc.ref.update({ used: true });
+      await updateDoc(otpDoc.ref, { used: true });
 
       // Generate 30-day session token
       const sessionToken = crypto.randomBytes(32).toString("hex");
       const sessionExpiresAt = new Date();
       sessionExpiresAt.setDate(sessionExpiresAt.getDate() + 30);
 
-      await adminDb.collection("sessions").add({
+      await addDoc(collection(db, "sessions"), {
         userId: telegramId,
         token: sessionToken,
         fingerprint: fingerprint || "legacy",
@@ -4474,14 +4425,15 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       });
 
       // Get User Data
-      const userSnap = await adminDb.collection("users").doc(telegramId).get();
+      const userRef = doc(db, "users", telegramId);
+      const userSnap = await getDoc(userRef);
       
-      if (!userSnap.exists) {
+      if (!userSnap.exists()) {
         return res.status(404).json({ error: "User profile lost. Please register again." });
       }
 
       const userData = userSnap.data();
-      await adminDb.collection("users").doc(telegramId).update({ 
+      await updateDoc(userRef, { 
         lastLogin: now,
         isVerified: true,
         verifiedAt: now 
@@ -4518,15 +4470,12 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(200).json({ success: false, authenticated: false, error: "No token provided" });
       }
 
-      const sessionsColl = adminDb.collection("sessions");
-      // Use Date object for Firestore Admin SDK comparison
-      const now = new Date();
+      const now = new Date().toISOString();
       
       debugLog(`[${requestId}] Querying session...`);
-      const snap = await sessionsColl
-        .where("token", "==", token)
-        .where("expiresAt", ">", now)
-        .get();
+      const snap = await getDocs(query(collection(db, "sessions"), 
+        where("token", "==", token), 
+        where("expiresAt", ">", now)));
 
       if (snap.empty) {
         debugLog(`[${requestId}] Session not found or expired`);
@@ -4554,9 +4503,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       debugLog(`[${requestId}] Fetching user doc: ${sessionData.userId}`);
-      const userSnap = await adminDb.collection("users").doc(String(sessionData.userId)).get();
+      const userSnap = await getDoc(doc(db, "users", String(sessionData.userId)));
       
-      if (!userSnap.exists) {
+      if (!userSnap.exists()) {
         debugLog(`[${requestId}] User doc NOT FOUND`);
         return res.status(200).json({ success: false, authenticated: false, error: "User profile not found" });
       }
