@@ -67,6 +67,8 @@ export default function DailyBonusPage() {
   const [scratchedPercent, setScratchedPercent] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+
+
   // Initialization
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -181,89 +183,10 @@ export default function DailyBonusPage() {
     }
   };
 
-  const showMonetagAd = () => {
-    return new Promise<boolean>(async (resolve) => {
-      // 1. Verify that Monetag SDK is loaded correctly before calling the rewarded ad
-      const sdkLoaded = typeof (window as any).show_11210088 === 'function';
-      if (!sdkLoaded) {
-        alert("Rewarded ad unavailable. Please try again.");
-        resolve(false);
-        return;
-      }
 
-      const tg = (window as any).Telegram?.WebApp;
-      const telegramId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : String(userId);
-
-      if (!telegramId || telegramId === "null" || telegramId === "undefined") {
-        alert("Telegram User ID missing. Please ensure you open this page inside the Telegram bot.");
-        resolve(false);
-        return;
-      }
-
-      // Generate secure options for Monetag
-      const uniqueYmid = `${telegramId}_bonus_${activeView}_${Date.now()}`;
-      const adOptions = { 
-        ymid: uniqueYmid,
-        request_var: `bonus_${activeView}`,
-        ext_id: telegramId,
-        subid: telegramId,
-        subid1: `bonus_${activeView}`
-      };
-
-      try {
-        console.log("[DAILY_BONUS_MONETAG] Calling show_11210088 with options:", JSON.stringify(adOptions));
-        // Wait for the Monetag rewarded callback before sending the claim request
-        const result = await (window as any).show_11210088(adOptions);
-        console.log("[DAILY_BONUS_MONETAG] Callback result received (resolved):", result, "Type:", typeof result);
-
-        let callbackStatus = "unknown";
-        if (result === true) {
-          callbackStatus = "completed";
-        } else if (result === false) {
-          callbackStatus = "skipped_or_closed";
-        } else if (result && typeof result === 'object') {
-          callbackStatus = result.status || result.event || "resolved_object";
-        } else if (typeof result === 'string') {
-          callbackStatus = result;
-        }
-
-        const isSkippedOrClosed = 
-          result === false || 
-          callbackStatus === "skipped" || 
-          callbackStatus === "closed" || 
-          callbackStatus === "skipped_or_closed" || 
-          callbackStatus === "dismissed";
-
-        if (isSkippedOrClosed) {
-          alert("Ad failed to load or was closed early. Please try again to claim your reward.");
-          resolve(false);
-        } else {
-          // Success
-          resolve(true);
-        }
-      } catch (err: any) {
-        console.error("[DAILY_BONUS_MONETAG] SDK Error caught:", err);
-        const errStr = String(err).toLowerCase();
-        const isExplicitSkipOrClose = errStr.includes("skip") || errStr.includes("close") || errStr.includes("dismiss") || errStr.includes("cancel");
-
-        if (isExplicitSkipOrClose) {
-          alert("Ad failed to load or was closed early. Please try again to claim your reward.");
-        } else {
-          alert("Rewarded ad unavailable. Please try again.");
-        }
-        resolve(false);
-      }
-    });
-  };
 
   const handleClaim = async () => {
     if (claiming || !userId || !revealedReward) return;
-
-    // 1. Show Monetag Rewarded Ad
-    const adCompleted = await showMonetagAd();
-    if (!adCompleted) {
-      return;
-    }
 
     setClaiming(true);
     try {
@@ -814,6 +737,8 @@ export default function DailyBonusPage() {
           )}
         </AnimatePresence>
       </main>
+
+
     </div>
   );
 }

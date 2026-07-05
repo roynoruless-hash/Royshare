@@ -416,7 +416,7 @@ export default function DriveUploadPage() {
               You must link your Google Drive account before using the Large File Upload service.
             </p>
             <a 
-              href={`https://royshare.onrender.com/api/google-drive/connect?tg_id=${tgId}`}
+              href={`https://royshare.online/api/google-drive/connect?tg_id=${tgId}`}
               className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-medium transition text-sm flex items-center gap-2 shadow-lg shadow-blue-600/20"
             >
               <Cloud className="w-4 h-4" /> Connect Google Drive

@@ -14,7 +14,7 @@ function formatCurrency(amount: number, currency: string = "INR", includeSymbol:
 }
 
 function getAppUrl(): string {
-    return "https://royshare.onrender.com";
+    return "https://royshare.online";
 }
 
 async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string): Promise<string> {
@@ -5450,7 +5450,7 @@ This feature is currently under maintenance and will be implemented soon.`;
 }
 
 function getActualAppUrl(): string {
-    return "https://royshare.onrender.com";
+    return "https://royshare.online";
 }
 
 async function showUploadMenu(botToken: string, chatId: number, userId: string, messageIdToEdit?: number) {

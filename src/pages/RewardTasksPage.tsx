@@ -230,6 +230,9 @@ export default function RewardTasksPage({ userIdProp, taskIdProp, onBack }: { us
 
         if (resolvedTask) {
           setCurrentTask(resolvedTask);
+          if (resolvedTask.adNetwork === 'Monetag Mini App') {
+            setVideoCompleted(true);
+          }
           if ((data.completedTaskIds || []).includes(taskId)) {
             setShowRewardAlreadyClaimed(true);
             return;
@@ -840,110 +843,7 @@ export default function RewardTasksPage({ userIdProp, taskIdProp, onBack }: { us
               </AnimatePresence>
             </div>
 
-            {/* Monetag SDK Debug Section */}
-            {monetagDebug && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="mt-6 p-4 bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden text-left"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                    <Terminal size={12} /> Monetag Debugger & Environment Audit
-                  </h4>
-                  <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                    monetagDebug.event?.includes('SUCCESS') ? 'bg-emerald-500/10 text-emerald-400' : 
-                    monetagDebug.event?.includes('ERROR') ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'
-                  }`}>
-                    {monetagDebug.event}
-                  </span>
-                </div>
-                <div className="space-y-3">
-                  {/* Environment Audit Section */}
-                  <div className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-2xl space-y-2">
-                    <p className="text-[9px] font-bold text-blue-400 uppercase tracking-tight">Telegram Env Audit</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[9px]">
-                          <span className="text-slate-500">typeof Telegram:</span>
-                          <span className="text-white font-mono">{(window as any).TG_AUDIT?.typeof_window_Telegram}</span>
-                        </div>
-                        <div className="flex justify-between text-[9px]">
-                          <span className="text-slate-500">typeof WebApp:</span>
-                          <span className="text-white font-mono">{(window as any).TG_AUDIT?.typeof_window_Telegram_WebApp}</span>
-                        </div>
-                        <div className="flex justify-between text-[9px]">
-                          <span className="text-slate-500">TG Platform:</span>
-                          <span className="text-white font-mono">{(window as any).TG_AUDIT?.platform}</span>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[9px]">
-                          <span className="text-slate-500">initData:</span>
-                          <span className={(window as any).TG_AUDIT?.has_initData ? "text-emerald-400" : "text-red-400"}>{(window as any).TG_AUDIT?.has_initData ? "PRESENT" : "MISSING"}</span>
-                        </div>
-                        <div className="flex justify-between text-[9px]">
-                          <span className="text-slate-500">User Object:</span>
-                          <span className={(window as any).TG_AUDIT?.has_user ? "text-emerald-400" : "text-red-400"}>{(window as any).TG_AUDIT?.has_user ? "PRESENT" : "MISSING"}</span>
-                        </div>
-                        <div className="flex justify-between text-[9px]">
-                          <span className="text-slate-500">User ID:</span>
-                          <span className="text-emerald-400 font-mono font-bold">{(window as any).TG_AUDIT?.user_id}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="p-2 bg-black/40 rounded-xl border border-slate-800/50">
-                      <p className="text-[8px] text-slate-500 uppercase mb-1">Pass to SDK (ext_id)</p>
-                      <p className="text-[10px] font-mono font-bold text-emerald-400 truncate">{monetagDebug.tg_id || 'NULL'}</p>
-                    </div>
-                    <div className="p-2 bg-black/40 rounded-xl border border-slate-800/50">
-                      <p className="text-[8px] text-slate-500 uppercase mb-1">SDK Status</p>
-                      <p className={`text-[10px] font-bold ${monetagDebug.sdk_status === 'FOUND' ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {monetagDebug.sdk_status || 'UNKNOWN'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="p-2 bg-black/40 rounded-xl border border-slate-800/50">
-                      <p className="text-[8px] text-slate-500 uppercase mb-1">TG Version</p>
-                      <p className="text-[10px] font-mono font-bold text-blue-400">{monetagDebug.tg_version || 'N/A'}</p>
-                    </div>
-                    <div className="p-2 bg-black/40 rounded-xl border border-slate-800/50">
-                      <p className="text-[8px] text-slate-500 uppercase mb-1">TG Platform</p>
-                      <p className="text-[10px] font-mono font-bold text-blue-400">{monetagDebug.tg_platform || 'N/A'}</p>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-[8px] text-slate-500 uppercase mb-1">Outgoing Payload</p>
-                    <pre className="text-[9px] font-mono text-blue-300 bg-black/60 p-2 rounded-xl overflow-x-auto border border-slate-800">
-                      {JSON.stringify(monetagDebug.payload, null, 2)}
-                    </pre>
-                  </div>
-                  {monetagDebug.result && (
-                    <div>
-                      <p className="text-[8px] text-slate-500 uppercase mb-1">SDK Response (Callback)</p>
-                      <pre className="text-[9px] font-mono text-emerald-400 bg-black/60 p-2 rounded-xl overflow-x-auto border border-slate-800">
-                        {JSON.stringify(monetagDebug.result, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-                  {monetagDebug.error && (
-                    <div>
-                      <p className="text-[8px] text-slate-500 uppercase mb-1">SDK Error Log</p>
-                      <pre className="text-[9px] font-mono text-red-400 bg-black/60 p-2 rounded-xl overflow-x-auto border border-slate-800">
-                        {JSON.stringify(monetagDebug.error, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-                  <div className="pt-2 border-t border-slate-800 mt-2">
-                     <p className="text-[8px] text-slate-600 font-mono">Last Check: {new Date(monetagDebug.timestamp).toLocaleTimeString()}</p>
-                  </div>
-                </div>
-              </motion.div>
-            )}
           </div>
         </motion.div>
 
@@ -1014,39 +914,12 @@ export default function RewardTasksPage({ userIdProp, taskIdProp, onBack }: { us
             <div className="aspect-video bg-slate-950 flex items-center justify-center p-8">
               <div className="text-center space-y-6">
                 <div className="w-16 h-16 bg-blue-500/10 border border-blue-500/20 rounded-full flex items-center justify-center mx-auto text-blue-400">
-                  <Play size={32} />
+                  <Award size={32} className="text-amber-400" />
                 </div>
                 <div className="space-y-2">
-                  <h3 className="text-xl font-bold text-white">Watch Rewarded Ad</h3>
-                  <p className="text-sm text-slate-400">Complete the short ad to claim your reward coins.</p>
+                  <h3 className="text-xl font-bold text-white">Reward Unlocked!</h3>
+                  <p className="text-sm text-slate-400">Claim your rewards immediately using the button below.</p>
                 </div>
-                {!adWatchedSuccessfully ? (
-                  <button
-                    onClick={handleWatchMonetagAd}
-                    disabled={isMonetagAdRunning || submitting}
-                    className="w-full py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white rounded-2xl font-bold transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2 text-lg active:scale-95"
-                  >
-                    {isMonetagAdRunning ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span>Ad is Running...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play size={20} />
-                        <span>Watch Ad Now</span>
-                      </>
-                    )}
-                  </button>
-                ) : (
-                  <div className="w-full py-4 bg-slate-900/60 border border-blue-500/30 text-blue-400 rounded-2xl font-bold flex flex-col items-center justify-center gap-2">
-                    <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm">Verifying Ad Completion...</span>
-                    <p className="text-[10px] font-normal text-slate-400">
-                      Processing reward automatically.
-                    </p>
-                  </div>
-                )}
               </div>
             </div>
           ) : videoAd && (videoAd.adType === 'VAST Video Ad' || videoAd.adType === 'VAST Video') ? (

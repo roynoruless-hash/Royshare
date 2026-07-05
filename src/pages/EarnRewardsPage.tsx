@@ -562,7 +562,7 @@ export default function EarnRewardsPage() {
               {currentTask?.name || "Earn Rewards"}
             </h1>
             <p className="text-gray-400 text-lg leading-relaxed px-4">
-              {currentTask?.description || "Watch a short ad to claim your reward coins instantly."}
+              {currentTask?.description || "Complete this dynamic task to claim your reward coins instantly."}
             </p>
           </div>
 
@@ -576,93 +576,31 @@ export default function EarnRewardsPage() {
 
           {/* Claim Button */}
           <div className="pt-4 px-2">
-            {!adWatchedSuccessfully ? (
-              <button
-                onClick={handleWatchMonetagAd}
-                disabled={isMonetagAdRunning || submitting}
-                className={`w-full py-6 rounded-[2.5rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white shadow-blue-900/40`}
-              >
-                {isMonetagAdRunning ? (
-                  <>
-                    <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin mb-1" />
-                    <span>Loading Ad...</span>
-                  </>
-                ) : (
-                  <>
-                    <motion.div
-                      animate={{ scale: [1, 1.2, 1] }}
-                      transition={{ repeat: Infinity, duration: 1.5 }}
-                    >
-                      <Play size={36} className="text-blue-400" />
-                    </motion.div>
-                    <span>Watch Ad</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <div
-                className="w-full py-6 rounded-[2.5rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-xl bg-slate-900/60 border border-blue-500/30 text-blue-400 shadow-blue-900/20"
-              >
-                <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-1" />
-                <span>Verifying Ad Completion...</span>
-                <p className="text-xs font-normal text-slate-400 px-4">
-                  Please wait, checking with ad network server. Your reward will be credited automatically.
-                </p>
-              </div>
-            )}
-
-            {/* Status & Errors */}
-            <div className="h-8 mt-6">
-              <AnimatePresence mode="wait">
-                {monetagError ? (
-                  <motion.p 
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 10 }}
-                    className="text-red-400 text-sm font-bold flex items-center justify-center gap-1.5 bg-red-400/10 py-2 px-4 rounded-full border border-red-400/20"
+            <button
+              onClick={submitTaskCompletion}
+              disabled={submitting}
+              className={`w-full py-6 rounded-[2.5rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white shadow-blue-900/40`}
+            >
+              {submitting ? (
+                <>
+                  <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin mb-1" />
+                  <span>Claiming Reward...</span>
+                </>
+              ) : (
+                <>
+                  <motion.div
+                    animate={{ scale: [1, 1.2, 1] }}
+                    transition={{ repeat: Infinity, duration: 1.5 }}
+                    className="flex justify-center"
                   >
-                    <AlertCircle size={14} /> {monetagError}
-                  </motion.p>
-                ) : isCompletedSuccess ? (
-                  <motion.p 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-emerald-400 text-sm font-bold"
-                  >
-                    Reward Credited Successfully
-                  </motion.p>
-                ) : adWatchedSuccessfully ? (
-                  <motion.p 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-blue-400 text-sm font-bold"
-                  >
-                    Ready to Claim!
-                  </motion.p>
-                ) : (
-                  <p className="text-slate-500 text-xs font-medium uppercase tracking-[0.3em] opacity-50">
-                    Watch complete ad to unlock
-                  </p>
-                )}
-              </AnimatePresence>
-            </div>
+                    <Award size={36} className="text-blue-400" />
+                  </motion.div>
+                  <span>Claim Reward</span>
+                </>
+              )}
+            </button>
           </div>
         </motion.div>
-
-        {/* Success Popup */}
-        <AnimatePresence>
-          {showSuccessPopup && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8, y: 50 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.8, y: 50 }}
-              className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-white px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2"
-            >
-              <CheckCircle2 size={20} />
-              <span>Advertisement watched successfully.</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     );
   }
@@ -870,7 +808,7 @@ export default function EarnRewardsPage() {
             placementKey="Footer Banner"
             fallback={
               <div 
-                onClick={() => handleAdClick("https://royshare.onrender.com")}
+                onClick={() => handleAdClick("https://royshare.online")}
                 className="bg-slate-900/50 border border-slate-800 rounded-xl p-3 cursor-pointer hover:border-slate-700 hover:bg-slate-900/70 transition-all shadow-sm group relative"
               >
                 <span className="absolute top-1.5 right-2 bg-slate-800 text-[8px] text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase tracking-widest">Ad</span>

@@ -462,12 +462,12 @@ export default function AdminDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           botToken: telegramConfigs.botToken,
-          url: "https://royshare.onrender.com/api/telegram/webhook"
+          url: "https://royshare.online/api/telegram/webhook"
         })
       });
       const data = await res.json();
       if (res.ok) {
-        setTelegramFeedback(`✅ Webhook Set & Verified Successfully!\nURL: ${data.webhookInfo?.url || "https://royshare.onrender.com/api/telegram/webhook"}`);
+        setTelegramFeedback(`✅ Webhook Set & Verified Successfully!\nURL: ${data.webhookInfo?.url || "https://royshare.online/api/telegram/webhook"}`);
         
         // Refresh the diagnostics panel automatically
         setActionLoading((prev: any) => ({ ...prev, runDiagnostics: true }));
@@ -5867,11 +5867,11 @@ export default function AdminDashboard() {
                         <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                           <div>
                             <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider block">Automatic Webhook URL (Read-Only)</span>
-                            <code className="text-sm font-mono text-slate-300 select-all break-all">https://royshare.onrender.com/api/telegram/webhook</code>
+                            <code className="text-sm font-mono text-slate-300 select-all break-all">https://royshare.online/api/telegram/webhook</code>
                           </div>
                           <button
                             onClick={() => {
-                              navigator.clipboard.writeText("https://royshare.onrender.com/api/telegram/webhook");
+                              navigator.clipboard.writeText("https://royshare.online/api/telegram/webhook");
                               setTelegramFeedback("📋 Webhook URL Copied to Clipboard!");
                               setTimeout(() => setTelegramFeedback(""), 2000);
                             }}

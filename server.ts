@@ -4730,10 +4730,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         if (dbTaskSnap.exists()) {
           const tData = dbTaskSnap.data();
           
-          // Security: Block direct completion for Monetag ads
-          if (tData.adNetwork === "Monetag Mini App" || tData.provider === "monetag_mini") {
-            return res.status(403).json({ error: "Monetag rewards are processed automatically via Server-Side Postback. Please wait for verification." });
-          }
+          // Direct completion permitted for all tasks temporarily
 
           amount = Number(tData.rewardAmount) || 0;
           isDbTask = true;
@@ -5385,7 +5382,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const recentEvents = recentSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
       // Always generate the postback URL targeting the production Render backend
-      const postbackUrl = `https://royshare.onrender.com/api/monetag/postback?telegram_id={telegram_id}&ymid={ymid}&zone_id={zone_id}&event_type={event_type}&reward_event_type={reward_event_type}&estimated_price={estimated_price}&request_var={request_var}`;
+      const postbackUrl = `https://royshare.online/api/monetag/postback?telegram_id={telegram_id}&ymid={ymid}&zone_id={zone_id}&event_type={event_type}&reward_event_type={reward_event_type}&estimated_price={estimated_price}&request_var={request_var}`;
 
       res.json({
         success: true,
@@ -5407,7 +5404,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       const testYmid = "test_" + Math.random().toString(36).substring(7);
       
-      const testUrl = `https://royshare.onrender.com/api/monetag/postback?telegram_id=${telegramId}&zone_id=12345&sub_zone_id=67890&event_type=ad_completed&reward_event_type=yes&estimated_price=0.01&ymid=${testYmid}&request_var=monetag_default_task`;
+      const testUrl = `https://royshare.online/api/monetag/postback?telegram_id=${telegramId}&zone_id=12345&sub_zone_id=67890&event_type=ad_completed&reward_event_type=yes&estimated_price=0.01&ymid=${testYmid}&request_var=monetag_default_task`;
 
       console.log("Simulating Monetag Postback:", testUrl);
       
@@ -6157,9 +6154,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       const newLinkId = "LNK_" + Math.random().toString(36).substring(2, 10).toUpperCase();
-      const rawAppUrl = process.env.APP_URL || "https://royshare.onrender.com";
+      const rawAppUrl = process.env.APP_URL || "https://royshare.online";
       const appUrl = (rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") 
-        ? "https://royshare.onrender.com" 
+        ? "https://royshare.online" 
         : rawAppUrl;
       const baseDomain = appUrl.replace(/\/$/, "");
       const shortUrl = `${baseDomain}/s/${alias}`;
@@ -6225,9 +6222,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       }
 
-      const rawAppUrl = process.env.APP_URL || "https://royshare.onrender.com";
+      const rawAppUrl = process.env.APP_URL || "https://royshare.online";
       const appUrl = (rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") 
-        ? "https://royshare.onrender.com" 
+        ? "https://royshare.online" 
         : rawAppUrl;
       const baseDomain = appUrl.replace(/\/$/, "");
       const shortUrl = `${baseDomain}/s/${alias}`;
@@ -6465,8 +6462,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(400).send("Error: Missing tg_id query parameter.");
       }
 
-      const appUrl = "https://royshare.onrender.com";
-      const redirectUri = "https://royshare.onrender.com/api/google-drive/callback";
+      const appUrl = "https://royshare.online";
+      const redirectUri = "https://royshare.online/api/google-drive/callback";
 
       const clientId = process.env.GOOGLE_CLIENT_ID;
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -6580,8 +6577,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         return res.status(400).send("Error: Missing code or state parameters from Google callback.");
       }
 
-      const appUrl = "https://royshare.onrender.com";
-      const redirectUri = "https://royshare.onrender.com/api/google-drive/callback";
+      const appUrl = "https://royshare.online";
+      const redirectUri = "https://royshare.online/api/google-drive/callback";
       const oauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
@@ -6696,7 +6693,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      "https://royshare.onrender.com/api/google-drive/callback"
+      "https://royshare.online/api/google-drive/callback"
     );
 
     oauth2Client.setCredentials({
@@ -6980,7 +6977,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         if (!qSnap.empty) {
           existingDoc = qSnap.docs[0].data();
           uniqueFileId = qSnap.docs[0].id;
-          royshareLink = existingDoc.royshareLink || `https://royshare.onrender.com/download/${uniqueFileId}`;
+          royshareLink = existingDoc.royshareLink || `https://royshare.online/download/${uniqueFileId}`;
           console.log(`[Google API Trace] Found existing RoyShare record for driveFileId ${driveFileId}. Reusing ID: ${uniqueFileId}`);
         }
       } catch (findErr) {
@@ -6989,7 +6986,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       if (!uniqueFileId) {
         uniqueFileId = "gd_" + Math.random().toString(36).substring(2, 10);
-        royshareLink = `https://royshare.onrender.com/download/${uniqueFileId}`;
+        royshareLink = `https://royshare.online/download/${uniqueFileId}`;
         console.log(`[Google API Trace] Generated new RoyShare download ID: ${uniqueFileId}`);
       }
 

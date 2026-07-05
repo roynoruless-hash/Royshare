@@ -8,14 +8,14 @@
     
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://royshare.com/" />
+    <meta property="og:url" content="https://royshare.online/" />
     <meta property="og:title" content="RoyShare - Secure File Sharing & Rewards" />
     <meta property="og:description" content="Premium Telegram-powered file sharing, URL shortening, and monetization platform." />
     <meta property="og:image" content="/og-image.png" />
 
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image" />
-    <meta property="twitter:url" content="https://royshare.com/" />
+    <meta property="twitter:url" content="https://royshare.online/" />
     <meta property="twitter:title" content="RoyShare - Secure File Sharing & Rewards" />
     <meta property="twitter:description" content="Premium Telegram-powered file sharing, URL shortening, and monetization platform." />
     <meta property="twitter:image" content="/og-image.png" />
@@ -29,17 +29,6 @@
             console.log("[INDEX] Telegram SDK Found. Calling ready/expand...");
             tg.ready();
             tg.expand();
-            
-            // Inject Monetag SDK only if inside Telegram
-            if (tg.initData && !document.getElementById('monetag-sdk')) {
-              const script = document.createElement('script');
-              script.id = 'monetag-sdk';
-              script.src = "//libtl.com/sdk.js";
-              script.setAttribute('data-zone', '11210088');
-              script.setAttribute('data-sdk', 'show_11210088');
-              document.head.appendChild(script);
-              console.log("[MONETAG] SDK script injected via Index Init");
-            }
           }
         }
         
