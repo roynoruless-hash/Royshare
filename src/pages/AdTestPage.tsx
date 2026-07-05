@@ -7,8 +7,6 @@ import {
   Loader2, 
   Activity, 
   Terminal, 
-  Settings, 
-  AlertTriangle, 
   Globe, 
   RefreshCw,
   Info,
@@ -75,171 +73,87 @@ export default function AdTestPage() {
   const [interceptedRequests, setInterceptedRequests] = useState<InterceptedRequest[]>([]);
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [ocManInspector, setOcManInspector] = useState<any>(null);
+  
+  // Diagnostic State Machine: IDLE -> RUNNING -> COMPLETED
+  const [diagnosticState, setDiagnosticState] = useState<"IDLE" | "RUNNING" | "COMPLETED">("IDLE");
+  
   const isMounted = useRef(true);
+  const auditHasRun = useRef(false);
 
-  // Helper to log console messages
+  // References to safely clean up monkeypatches and observers without memory leaks
+  const cleanupRefs = useRef<{
+    restoreFetch?: () => void;
+    restoreXHR?: () => void;
+    disconnectObserver?: () => void;
+    removeEventListeners?: () => void;
+  }>({});
+
+  // Refs to prevent stale closures inside asynchronous monkeypatched interceptors
+  const addLogRef = useRef<(msg: string) => void>(() => {});
+  const updateDebugRef = useRef<(key: keyof DebugLog, value: any) => void>(() => {});
+
+  // Standard logging helper
   const addLog = (msg: string) => {
+    if (!isMounted.current) return;
     setConsoleLogs(prev => [
       `[${new Date().toLocaleTimeString()}] ${msg}`,
       ...prev.slice(0, 59)
     ]);
   };
 
-  const updateDebug = (key: keyof DebugLog, value: any) => {
-    setDebugLog(prev => ({
-      ...prev,
-      [key]: value
-    }));
-  };
+  // Sync refs on render
+  useEffect(() => {
+    addLogRef.current = addLog;
+  });
 
-  // Extract attributes and inject OnClickA script
-  const fetchConfigAndInject = async () => {
+  const runAudit = async () => {
+    if (diagnosticState === "RUNNING") return;
+
+    // Safety cleanup of any lingering callbacks from prior runs
+    if (cleanupRefs.current.restoreFetch) cleanupRefs.current.restoreFetch();
+    if (cleanupRefs.current.restoreXHR) cleanupRefs.current.restoreXHR();
+    if (cleanupRefs.current.disconnectObserver) cleanupRefs.current.disconnectObserver();
+    if (cleanupRefs.current.removeEventListeners) cleanupRefs.current.removeEventListeners();
+
+    setDiagnosticState("RUNNING");
     setLoading(true);
     setError(null);
     setConsoleLogs([]);
     setInterceptedRequests([]);
     setOcManInspector(null);
-    setDebugLog({
+    setGlobalStatuses([]);
+
+    const initialDebugLog: DebugLog = {
       scriptLoaded: "PENDING",
       sdkInitialized: "PENDING",
       requestSent: "PENDING",
       httpStatus: "N/A",
-      response: "Awaiting initialization...",
+      response: "Running audit...",
       adRendered: "PENDING",
       sdkError: "None detected",
       failureReason: "None detected"
-    });
+    };
+    setDebugLog(initialDebugLog);
 
-    addLog("Fetching advertisement configuration from Firestore settings/advertisement...");
-    
-    try {
-      const docRef = doc(db, "settings", "advertisement");
-      const docSnap = await getDoc(docRef);
-      
-      if (!docSnap.exists()) {
-        throw new Error("Document 'settings/advertisement' does not exist in Firestore.");
-      }
+    // Keep local mirror to bypass stale react closures in callbacks
+    const localDebugLog = { ...initialDebugLog };
+    const updateLocalDebug = (key: keyof DebugLog, value: any) => {
+      localDebugLog[key] = value;
+      setDebugLog(prev => ({ ...prev, [key]: value }));
+    };
+    updateDebugRef.current = updateLocalDebug;
 
-      const data = docSnap.data();
-      addLog(`Config fetched: enabled=${data.enabled}, verified=${data.verified}, network=${data.network}`);
-      
-      setAdConfig({
-        enabled: data.enabled ?? false,
-        verified: data.verified ?? false,
-        script: data.script || "",
-        network: data.network || "onclicka"
-      });
+    addLogRef.current("Initializing deep runtime audit. This will perform a deterministic, clean 5-second assessment...");
 
-      if (!data.enabled || !data.verified) {
-        updateDebug("scriptLoaded", "FAIL");
-        updateDebug("failureReason", "Ad configuration is disabled or not verified in Firestore database.");
-        addLog("OnClickA is disabled or not verified in Firestore configuration.");
-        setLoading(false);
-        return;
-      }
-
-      const scriptCode = data.script || "";
-      if (!scriptCode) {
-        throw new Error("No script code found in advertisement settings.");
-      }
-
-      // Parse script src and attributes
-      let src = "https://js.onclckmn.com/static/onclicka.js";
-      const attributes: { [key: string]: string } = {};
-
-      try {
-        const parser = new DOMParser();
-        const docObj = parser.parseFromString(scriptCode, "text/html");
-        const parsedScript = docObj.querySelector("script");
-        if (parsedScript) {
-          src = parsedScript.getAttribute("src") || src;
-          for (let i = 0; i < parsedScript.attributes.length; i++) {
-            const attr = parsedScript.attributes[i];
-            if (attr.name !== "src") {
-              attributes[attr.name] = attr.value;
-            }
-          }
-          addLog(`Parsed loader script URL: ${src}`);
-          addLog(`Parsed loader attributes: ${JSON.stringify(attributes)}`);
-        } else {
-          addLog("DOMParser could not find script tag, using default URL and fallback attribute parsing.");
-        }
-      } catch (e: any) {
-        addLog(`Warning parsing script with DOMParser: ${e.message}`);
-      }
-
-      // Check if loader script is already loaded
-      const existingScript = document.querySelector(`script[src="${src}"]`);
-      if (existingScript) {
-        addLog("Existing OnClickA script tag found. Removing to trigger fresh instrumentation load.");
-        existingScript.remove();
-      }
-
-      addLog("Injecting new OnClickA script tag to head...");
-      const scriptEl = document.createElement("script");
-      scriptEl.src = src;
-      Object.keys(attributes).forEach((key) => {
-        scriptEl.setAttribute(key, attributes[key]);
-      });
-      scriptEl.setAttribute("data-cfasync", "false");
-      scriptEl.async = true;
-
-      scriptEl.onload = () => {
-        if (!isMounted.current) return;
-        addLog("OnClickA script loaded successfully (onload triggered).");
-        updateDebug("scriptLoaded", "PASS");
-        (window as any).__onclickaScriptLoaded = true;
-      };
-
-      scriptEl.onerror = () => {
-        if (!isMounted.current) return;
-        addLog("OnClickA script failed to load (onerror triggered). AdBlocker, privacy extension, or CSP blocking.");
-        updateDebug("scriptLoaded", "FAIL");
-        updateDebug("failureReason", "Network blocked script (AdBlocker or Content Security Policy blockedonclicka.js)");
-        (window as any).__onclickaScriptLoaded = false;
-      };
-
-      document.head.appendChild(scriptEl);
-      setLoading(false);
-
-    } catch (err: any) {
-      addLog(`Error during ad initialization: ${err.message}`);
-      setError(err.message || "Unknown error");
-      updateDebug("scriptLoaded", "FAIL");
-      updateDebug("failureReason", `Initialization failed: ${err.message}`);
-      setLoading(false);
-    }
-  };
-
-  const handleManualInit = () => {
-    const oc = (window as any).ocMan;
-    if (oc) {
-      addLog("Triggering manual initialization via window.ocMan.init()...");
-      try {
-        oc.tagId = adConfig?.script?.match(/data-admpid="(\d+)"/)?.[1] || oc.tagId || "447147";
-        addLog(`Set ocMan.tagId to: ${oc.tagId}`);
-        oc.init();
-        addLog("Manual initialization call complete.");
-      } catch (e: any) {
-        addLog(`Manual init failed with error: ${e.message}`);
-      }
-    } else {
-      addLog("Cannot manual init: window.ocMan is not defined.");
-    }
-  };
-
-  useEffect(() => {
-    isMounted.current = true;
-
-    // --- Monkeypatching Fetch & XHR to track ad network communication ---
+    // 1. Monkeypatch fetch to log outgoing requests
     const nativeFetch = window.fetch;
     window.fetch = async function(...args) {
       const url = typeof args[0] === 'string' ? args[0] : (args[0] as Request).url;
       const isAdReq = url.includes("onclicka") || url.includes("onclckmn") || url.includes("clickadu") || url.includes("groleeguls") || url.includes("wa-") || url.includes("ntvpwpush.com") || url.includes("bid.onclcktg.com") || url.includes("ssp.zog.link");
       
       if (isAdReq) {
-        addLog(`[FETCH INITIATED] Outgoing request detected to: ${url}`);
-        updateDebug('requestSent', 'PASS');
+        addLogRef.current(`[FETCH INITIATED] Outgoing request to: ${url}`);
+        updateDebugRef.current('requestSent', 'PASS');
         
         const newReq: InterceptedRequest = {
           id: Math.random().toString(),
@@ -255,8 +169,8 @@ export default function AdTestPage() {
       try {
         const response = await nativeFetch.apply(this, args);
         if (isAdReq) {
-          addLog(`[FETCH RESPONSE] Status: ${response.status} ${response.statusText} for URL: ${url}`);
-          updateDebug('httpStatus', `${response.status} ${response.statusText}`);
+          addLogRef.current(`[FETCH RESPONSE] Status: ${response.status} ${response.statusText} for URL: ${url}`);
+          updateDebugRef.current('httpStatus', `${response.status} ${response.statusText}`);
           
           setInterceptedRequests(prev => prev.map(r => r.url === url ? { ...r, status: `${response.status} ${response.statusText}` } : r));
 
@@ -264,35 +178,39 @@ export default function AdTestPage() {
             const clone = response.clone();
             const text = await clone.text();
             const truncatedText = text.length > 500 ? text.slice(0, 500) + "..." : text;
-            updateDebug('response', truncatedText || "Empty Response");
-            addLog(`[FETCH BODY PREVIEW] ${truncatedText}`);
+            updateDebugRef.current('response', truncatedText || "Empty Response");
+            addLogRef.current(`[FETCH BODY PREVIEW] ${truncatedText}`);
             
             setInterceptedRequests(prev => prev.map(r => r.url === url ? { ...r, responsePreview: truncatedText } : r));
           } catch (_) {
-            updateDebug('response', "Response text unreadable");
+            updateDebugRef.current('response', "Response text unreadable");
           }
         }
         return response;
       } catch (err: any) {
         if (isAdReq) {
-          addLog(`[FETCH ERROR] Request failed/blocked: ${err.message}`);
-          updateDebug('httpStatus', 'Failed/Blocked');
-          updateDebug('sdkError', err.message || String(err));
+          addLogRef.current(`[FETCH ERROR] Request failed/blocked: ${err.message}`);
+          updateDebugRef.current('httpStatus', 'Failed/Blocked');
+          updateDebugRef.current('sdkError', err.message || String(err));
           
           setInterceptedRequests(prev => prev.map(r => r.url === url ? { ...r, status: "FAILED/BLOCKED", responsePreview: err.message } : r));
         }
         throw err;
       }
     };
+    cleanupRefs.current.restoreFetch = () => {
+      window.fetch = nativeFetch;
+    };
 
+    // 2. Monkeypatch XMLHttpRequest to log outgoing requests
     const nativeXHR = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(method, url, ...rest) {
       const urlStr = typeof url === 'string' ? url : (url as URL).toString();
       const isAdReq = urlStr.includes("onclicka") || urlStr.includes("onclckmn") || urlStr.includes("clickadu") || urlStr.includes("groleeguls") || urlStr.includes("wa-") || urlStr.includes("ntvpwpush.com") || urlStr.includes("bid.onclcktg.com") || urlStr.includes("ssp.zog.link");
       
       if (isAdReq) {
-        addLog(`[XHR INITIATED] Outgoing request: ${method} to: ${urlStr}`);
-        updateDebug('requestSent', 'PASS');
+        addLogRef.current(`[XHR INITIATED] Outgoing request: ${method} to: ${urlStr}`);
+        updateDebugRef.current('requestSent', 'PASS');
 
         const newReq: InterceptedRequest = {
           id: Math.random().toString(),
@@ -308,12 +226,12 @@ export default function AdTestPage() {
         const originalOnReadyStateChange = this.onreadystatechange;
         this.onreadystatechange = function() {
           if (self.readyState === 4) {
-            addLog(`[XHR RESPONSE] Status: ${self.status} for URL: ${urlStr}`);
-            updateDebug('httpStatus', String(self.status));
+            addLogRef.current(`[XHR RESPONSE] Status: ${self.status} for URL: ${urlStr}`);
+            updateDebugRef.current('httpStatus', String(self.status));
             
             const text = self.responseText ? (self.responseText.length > 500 ? self.responseText.slice(0, 500) + "..." : self.responseText) : "Empty Response";
-            updateDebug('response', text);
-            addLog(`[XHR BODY PREVIEW] ${text}`);
+            updateDebugRef.current('response', text);
+            addLogRef.current(`[XHR BODY PREVIEW] ${text}`);
 
             setInterceptedRequests(prev => prev.map(r => r.url === urlStr ? { ...r, status: String(self.status), responsePreview: text } : r));
           }
@@ -324,46 +242,181 @@ export default function AdTestPage() {
       }
       return nativeXHR.call(this, method, url, ...rest);
     };
+    cleanupRefs.current.restoreXHR = () => {
+      XMLHttpRequest.prototype.open = nativeXHR;
+    };
 
-    // --- Listeners for SDK Errors ---
+    // 3. Register global SDK error listeners
     const errorHandler = (event: ErrorEvent) => {
       const msg = event.message || "";
       const filename = event.filename || "";
       if (msg.includes("onclicka") || msg.includes("onclckmn") || msg.includes("clickadu") || filename.includes("onclicka") || msg.includes("ocMan")) {
-        addLog(`[SDK ERROR] Uncaught JavaScript Error: ${msg} in ${filename}`);
-        updateDebug('sdkError', `${msg} (${filename}:${event.lineno})`);
+        addLogRef.current(`[SDK ERROR] Uncaught JS Error: ${msg} in ${filename}`);
+        updateDebugRef.current('sdkError', `${msg} (${filename}:${event.lineno})`);
       }
     };
 
     const rejectionHandler = (event: PromiseRejectionEvent) => {
       const reason = event.reason ? String(event.reason) : "";
       if (reason.includes("onclicka") || reason.includes("onclckmn") || reason.includes("clickadu") || reason.includes("ocMan")) {
-        addLog(`[SDK REJECTION] Unhandled Promise Rejection: ${reason}`);
-        updateDebug('sdkError', `Promise Rejection: ${reason}`);
+        addLogRef.current(`[SDK REJECTION] Unhandled Promise Rejection: ${reason}`);
+        updateDebugRef.current('sdkError', `Promise Rejection: ${reason}`);
       }
     };
 
     window.addEventListener('error', errorHandler);
     window.addEventListener('unhandledrejection', rejectionHandler);
+    cleanupRefs.current.removeEventListeners = () => {
+      window.removeEventListener('error', errorHandler);
+      window.removeEventListener('unhandledrejection', rejectionHandler);
+    };
 
-    // Initial Fetch
-    fetchConfigAndInject();
+    // 4. Setup MutationObserver to watch for iframe/ad elements reactively
+    const observer = new MutationObserver(() => {
+      const container = document.getElementById("onclicka-inpage-ad-stage");
+      const hasChild = container && container.children.length > 0;
+      const iframePresent = !!document.querySelector('iframe[src*="onclicka"]') || 
+                            !!document.querySelector('iframe[src*="clickadu"]') || 
+                            !!document.querySelector('[id^="wa-"] iframe') || 
+                            !!document.querySelector('[class^="wa-"] iframe');
 
-    // --- Periodic Audit Loop ---
-    let checkCount = 0;
-    const interval = setInterval(() => {
-      if (!isMounted.current) return;
-      checkCount++;
-
-      // 1. Audit Script Element & Load Flag
-      const scriptTagPresent = !!document.head.querySelector('script[src*="onclicka"]') || 
-                               !!document.head.querySelector('script[src*="onclckmn"]');
-      if (scriptTagPresent && debugLog.scriptLoaded === "PENDING") {
-        updateDebug("scriptLoaded", "PASS");
+      if (hasChild || iframePresent) {
+        addLogRef.current("[RENDERED] OnClickA advertisement rendered (iframe or container nodes detected)!");
+        updateDebugRef.current("adRendered", "PASS");
       }
+    });
 
-      // 2. Audit All Possible Global Namespaces
+    observer.observe(document.body, { childList: true, subtree: true });
+    cleanupRefs.current.disconnectObserver = () => {
+      observer.disconnect();
+    };
+
+    // 5. Fetch Firestore configuration
+    addLogRef.current("Step 1: Fetching advertisement configuration from Firestore...");
+    let dbConfig: any = null;
+    try {
+      const docRef = doc(db, "settings", "advertisement");
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        throw new Error("No settings/advertisement document exists in Firestore.");
+      }
+      dbConfig = docSnap.data();
+      addLogRef.current(`Config loaded: enabled=${dbConfig.enabled}, verified=${dbConfig.verified}, network=${dbConfig.network}`);
+      
+      setAdConfig({
+        enabled: dbConfig.enabled ?? false,
+        verified: dbConfig.verified ?? false,
+        script: dbConfig.script || "",
+        network: dbConfig.network || "onclicka"
+      });
+    } catch (err: any) {
+      addLogRef.current(`Error fetching Firestore config: ${err.message}`);
+      setError(err.message || "Failed to fetch Firestore config.");
+      updateLocalDebug("scriptLoaded", "FAIL");
+      updateLocalDebug("failureReason", `Firestore config fetch error: ${err.message}`);
+      setLoading(false);
+      setDiagnosticState("COMPLETED");
+      if (cleanupRefs.current.restoreFetch) cleanupRefs.current.restoreFetch();
+      if (cleanupRefs.current.restoreXHR) cleanupRefs.current.restoreXHR();
+      if (cleanupRefs.current.disconnectObserver) cleanupRefs.current.disconnectObserver();
+      if (cleanupRefs.current.removeEventListeners) cleanupRefs.current.removeEventListeners();
+      return;
+    }
+
+    if (!dbConfig.enabled || !dbConfig.verified) {
+      addLogRef.current("Ad settings are disabled or not verified in Firestore. Terminating diagnostic.");
+      updateLocalDebug("scriptLoaded", "FAIL");
+      updateLocalDebug("failureReason", "Ad settings are disabled or not verified in Firestore database.");
+      setLoading(false);
+      setDiagnosticState("COMPLETED");
+      if (cleanupRefs.current.restoreFetch) cleanupRefs.current.restoreFetch();
+      if (cleanupRefs.current.restoreXHR) cleanupRefs.current.restoreXHR();
+      if (cleanupRefs.current.disconnectObserver) cleanupRefs.current.disconnectObserver();
+      if (cleanupRefs.current.removeEventListeners) cleanupRefs.current.removeEventListeners();
+      return;
+    }
+
+    // Extract attributes
+    const scriptCode = dbConfig.script || "";
+    let src = "https://js.onclckmn.com/static/onclicka.js";
+    const attributes: { [key: string]: string } = {};
+
+    try {
+      const parser = new DOMParser();
+      const docObj = parser.parseFromString(scriptCode, "text/html");
+      const parsedScript = docObj.querySelector("script");
+      if (parsedScript) {
+        src = parsedScript.getAttribute("src") || src;
+        for (let i = 0; i < parsedScript.attributes.length; i++) {
+          const attr = parsedScript.attributes[i];
+          if (attr.name !== "src") {
+            attributes[attr.name] = attr.value;
+          }
+        }
+        addLogRef.current(`Parsed loader script URL: ${src}`);
+        addLogRef.current(`Parsed attributes: ${JSON.stringify(attributes)}`);
+      }
+    } catch (e: any) {
+      addLogRef.current(`Warning parsing script attributes: ${e.message}`);
+    }
+
+    // 6. Check if OnClickA script is already injected
+    const existingScript = document.querySelector('script[src*="onclicka"]') || 
+                           document.querySelector('script[src*="onclckmn"]');
+
+    if (existingScript) {
+      addLogRef.current("Step 2: OnClickA script tag is ALREADY present in document.head. Respecting single-injection rule.");
+      updateLocalDebug("scriptLoaded", "PASS");
+    } else {
+      addLogRef.current("Step 2: No existing OnClickA script tag found. Injecting script tag once...");
+      const scriptEl = document.createElement("script");
+      scriptEl.src = src;
+      Object.keys(attributes).forEach((key) => {
+        scriptEl.setAttribute(key, attributes[key]);
+      });
+      scriptEl.setAttribute("data-cfasync", "false");
+      scriptEl.async = true;
+
+      const scriptLoadPromise = new Promise<boolean>((resolve) => {
+        scriptEl.onload = () => resolve(true);
+        scriptEl.onerror = () => resolve(false);
+        // Safety timeout of 5 seconds
+        setTimeout(() => resolve(false), 5000);
+      });
+
+      document.head.appendChild(scriptEl);
+
+      const isLoaded = await scriptLoadPromise;
+      if (isLoaded) {
+        addLogRef.current("OnClickA script loaded successfully (onload triggered).");
+        updateLocalDebug("scriptLoaded", "PASS");
+        (window as any).__onclickaScriptLoaded = true;
+      } else {
+        addLogRef.current("OnClickA script failed to load (or timed out). AdBlocker or CSP blocked execution.");
+        updateLocalDebug("scriptLoaded", "FAIL");
+        updateLocalDebug("failureReason", "Network blocked script (AdBlocker or Content Security Policy blocked onclicka.js)");
+        (window as any).__onclickaScriptLoaded = false;
+        
+        // Finalize immediately
+        setLoading(false);
+        setDiagnosticState("COMPLETED");
+        if (cleanupRefs.current.restoreFetch) cleanupRefs.current.restoreFetch();
+        if (cleanupRefs.current.restoreXHR) cleanupRefs.current.restoreXHR();
+        if (cleanupRefs.current.disconnectObserver) cleanupRefs.current.disconnectObserver();
+        if (cleanupRefs.current.removeEventListeners) cleanupRefs.current.removeEventListeners();
+        return;
+      }
+    }
+
+    setLoading(false);
+
+    // 7. Active Observation Phase
+    addLogRef.current("Step 3: Script confirmed. Running deterministic observation phase to capture async SDK triggers, requests, and rendering...");
+
+    const checkSDKNamespace = () => {
       const win = window as any;
+      const oc = win.ocMan || win.a3klsam || win.wa || win.onclicka || win.OnClickA;
+      
       const statuses: GlobalObjStatus[] = [
         {
           name: "window.ocMan",
@@ -402,14 +455,10 @@ export default function AdTestPage() {
           details: null
         }
       ];
-
       setGlobalStatuses(statuses);
 
-      // Deep inspection of ocMan
       if (win.ocMan) {
-        updateDebug("sdkInitialized", "PASS");
-        
-        // Populate the live inspector with properties
+        updateLocalDebug("sdkInitialized", "PASS");
         const inspectorData: any = {};
         try {
           const keys = Object.getOwnPropertyNames(win.ocMan).concat(Object.getOwnPropertyNames(Object.getPrototypeOf(win.ocMan)));
@@ -422,94 +471,142 @@ export default function AdTestPage() {
           });
           setOcManInspector(inspectorData);
         } catch (_) {}
-      } else {
-        if (checkCount > 15) {
-          updateDebug("sdkInitialized", "FAIL");
-          updateDebug("failureReason", "Global namespace 'window.ocMan' is not defined after script load.");
-        }
       }
+    };
 
-      // 3. Audit performance resource timings for ad network calls
-      try {
-        const resources = window.performance.getEntriesByType("resource");
-        const adRequests = resources.filter(r => 
-          (r.name.includes("onclicka") || r.name.includes("clickadu") || r.name.includes("onclckmn") || r.name.includes("groleeguls") || r.name.includes("wa-") || r.name.includes("ntvpwpush.com") || r.name.includes("bid.onclcktg.com") || r.name.includes("ssp.zog.link")) &&
-          !r.name.endsWith("onclicka.js")
-        );
+    // Initial check
+    checkSDKNamespace();
 
-        if (adRequests.length > 0) {
-          updateDebug("requestSent", "PASS");
-          
-          // Populate unique list of intercepted requests
-          adRequests.forEach((res: any) => {
-            setInterceptedRequests(prev => {
-              const exists = prev.some(r => r.url === res.name);
-              if (exists) return prev;
-              return [{
-                id: Math.random().toString(),
-                time: new Date().toLocaleTimeString(),
-                type: "RESOURCE_TIMING",
-                url: res.name,
-                status: `Loaded (~${res.duration.toFixed(0)}ms)`,
-                responsePreview: `Transfer Size: ${res.transferSize || 0} bytes. Protocol: ${res.nextHopProtocol || "N/A"}`
-              }, ...prev];
-            });
+    // Check again at midpoint (2.5 seconds)
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    checkSDKNamespace();
+
+    // Check again at end (2.5 seconds)
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    checkSDKNamespace();
+
+    // Secondary fallback: Audit Performance Resource Timings
+    try {
+      const resources = window.performance.getEntriesByType("resource");
+      const adRequests = resources.filter(r => 
+        (r.name.includes("onclicka") || r.name.includes("clickadu") || r.name.includes("onclckmn") || r.name.includes("groleeguls") || r.name.includes("wa-") || r.name.includes("ntvpwpush.com") || r.name.includes("bid.onclcktg.com") || r.name.includes("ssp.zog.link")) &&
+        !r.name.endsWith("onclicka.js")
+      );
+
+      if (adRequests.length > 0) {
+        updateLocalDebug("requestSent", "PASS");
+        adRequests.forEach((res: any) => {
+          setInterceptedRequests(prev => {
+            const exists = prev.some(r => r.url === res.name);
+            if (exists) return prev;
+            return [{
+              id: Math.random().toString(),
+              time: new Date().toLocaleTimeString(),
+              type: "RESOURCE_TIMING",
+              url: res.name,
+              status: `Loaded (~${res.duration.toFixed(0)}ms)`,
+              responsePreview: `Transfer Size: ${res.transferSize || 0} bytes. Protocol: ${res.nextHopProtocol || "N/A"}`
+            }, ...prev];
           });
-        }
-      } catch (_) {}
-
-      // 4. Audit Ad Render (check container children or injected iframe)
-      const container = document.getElementById("onclicka-inpage-ad-stage");
-      const hasChild = container && container.children.length > 0;
-      const iframePresent = !!document.querySelector('iframe[src*="onclicka"]') || 
-                            !!document.querySelector('iframe[src*="clickadu"]') || 
-                            !!document.querySelector('[id^="wa-"] iframe') || 
-                            !!document.querySelector('[class^="wa-"] iframe');
-
-      if (hasChild || iframePresent) {
-        updateDebug("adRendered", "PASS");
-      } else if (checkCount > 20) { // after ~10s with no renders
-        if (debugLog.requestSent === "PASS") {
-          updateDebug("adRendered", "FAIL");
-          
-          // Determine failure reasons
-          let reason = "No fill";
-          const errorMsg = debugLog.sdkError.toLowerCase();
-          
-          if (errorMsg.includes("csp") || errorMsg.includes("content security policy")) {
-            reason = "Content Security Policy (CSP) blocked resources";
-          } else if (errorMsg.includes("domain") || errorMsg.includes("origin")) {
-            reason = "Domain restriction (This domain is not allowed/whitelisted by OnClickA)";
-          } else if (errorMsg.includes("geo") || errorMsg.includes("country")) {
-            reason = "Geo restriction (No campaigns available for this IP geographic location)";
-          } else if (errorMsg.includes("telegram") || errorMsg.includes("tgwebapp")) {
-            reason = "Telegram WebView restriction (SDK requires active Telegram client)";
-          } else if (errorMsg.includes("initialized") || errorMsg.includes("undefined")) {
-            reason = "Initialization failure";
-          }
-          
-          updateDebug("failureReason", reason);
-        } else if (debugLog.scriptLoaded === "FAIL") {
-          updateDebug("adRendered", "FAIL");
-          updateDebug("failureReason", "Script blocked or failed to load");
-        } else {
-          updateDebug("adRendered", "FAIL");
-          updateDebug("failureReason", "Awaiting SDK triggers... Check console logs for errors.");
-        }
+        });
       }
+    } catch (_) {}
 
-    }, 500);
+    // Final DOM render check
+    const container = document.getElementById("onclicka-inpage-ad-stage");
+    const hasChild = container && container.children.length > 0;
+    const iframePresent = !!document.querySelector('iframe[src*="onclicka"]') || 
+                          !!document.querySelector('iframe[src*="clickadu"]') || 
+                          !!document.querySelector('[id^="wa-"] iframe') || 
+                          !!document.querySelector('[class^="wa-"] iframe');
 
+    if (hasChild || iframePresent) {
+      updateLocalDebug("adRendered", "PASS");
+    }
+
+    // 8. Compile Final Report
+    addLogRef.current("Step 4: Observation window closed. Compiling final report...");
+
+    if (localDebugLog.sdkInitialized === "PENDING") {
+      updateLocalDebug("sdkInitialized", "FAIL");
+      updateLocalDebug("failureReason", "Global namespace 'window.ocMan' is not defined after script load.");
+    }
+
+    if (localDebugLog.requestSent === "PENDING") {
+      updateLocalDebug("requestSent", "FAIL");
+      if (localDebugLog.sdkInitialized === "PASS") {
+        updateLocalDebug("failureReason", "SDK is initialized but sent no request (requires manual trigger or Telegram client view).");
+      } else {
+        updateLocalDebug("failureReason", "Request could not be sent because SDK failed to initialize.");
+      }
+    }
+
+    if (localDebugLog.adRendered === "PENDING") {
+      updateLocalDebug("adRendered", "FAIL");
+      if (localDebugLog.requestSent === "PASS") {
+        let reason = "No fill";
+        const errorMsg = localDebugLog.sdkError.toLowerCase();
+        if (errorMsg.includes("csp") || errorMsg.includes("content security policy")) {
+          reason = "Content Security Policy (CSP) blocked resources";
+        } else if (errorMsg.includes("domain") || errorMsg.includes("origin")) {
+          reason = "Domain restriction (This domain is not allowed/whitelisted by OnClickA)";
+        } else if (errorMsg.includes("geo") || errorMsg.includes("country")) {
+          reason = "Geo restriction (No campaigns available for this IP geographic location)";
+        } else if (errorMsg.includes("telegram") || errorMsg.includes("tgwebapp")) {
+          reason = "Telegram WebView restriction (SDK requires active Telegram client)";
+        }
+        updateLocalDebug("failureReason", reason);
+      } else if (localDebugLog.scriptLoaded === "FAIL") {
+        updateLocalDebug("failureReason", "Script failed to load or was blocked by AdBlocker/network filter.");
+      }
+    }
+
+    if (localDebugLog.scriptLoaded === "PASS" && localDebugLog.sdkInitialized === "PASS" && localDebugLog.requestSent === "PASS" && localDebugLog.adRendered === "PASS") {
+      updateLocalDebug("failureReason", "None (All direct SDK namespace audit indicators passed successfully!)");
+    }
+
+    // 9. Remove all monkeypatches and listeners completely to guarantee clean state
+    if (cleanupRefs.current.restoreFetch) cleanupRefs.current.restoreFetch();
+    if (cleanupRefs.current.restoreXHR) cleanupRefs.current.restoreXHR();
+    if (cleanupRefs.current.disconnectObserver) cleanupRefs.current.disconnectObserver();
+    if (cleanupRefs.current.removeEventListeners) cleanupRefs.current.removeEventListeners();
+
+    addLogRef.current("Audit completed. Diagnostic state set to COMPLETED.");
+    setDiagnosticState("COMPLETED");
+  };
+
+  const handleManualInit = () => {
+    const oc = (window as any).ocMan;
+    if (oc) {
+      addLog("Triggering manual initialization via window.ocMan.init()...");
+      try {
+        oc.tagId = adConfig?.script?.match(/data-admpid="(\d+)"/)?.[1] || oc.tagId || "447156";
+        addLog(`Set ocMan.tagId to: ${oc.tagId}`);
+        oc.init();
+        addLog("Manual initialization call complete.");
+      } catch (e: any) {
+        addLog(`Manual init failed with error: ${e.message}`);
+      }
+    } else {
+      addLog("Cannot manual init: window.ocMan is not defined.");
+    }
+  };
+
+  // Run audit exactly once on mount, guarded against strict mode dual-mounting
+  useEffect(() => {
+    isMounted.current = true;
+    if (!auditHasRun.current) {
+      auditHasRun.current = true;
+      runAudit();
+    }
     return () => {
       isMounted.current = false;
-      clearInterval(interval);
-      window.removeEventListener('error', errorHandler);
-      window.removeEventListener('unhandledrejection', rejectionHandler);
-      // Restore native methods
-      window.fetch = nativeFetch;
-      XMLHttpRequest.prototype.open = nativeXHR;
+      if (cleanupRefs.current.restoreFetch) cleanupRefs.current.restoreFetch();
+      if (cleanupRefs.current.restoreXHR) cleanupRefs.current.restoreXHR();
+      if (cleanupRefs.current.disconnectObserver) cleanupRefs.current.disconnectObserver();
+      if (cleanupRefs.current.removeEventListeners) cleanupRefs.current.removeEventListeners();
     };
-  }, [adConfig]);
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#020617] text-[#f1f5f9] p-4 sm:p-8 font-sans antialiased selection:bg-blue-600 selection:text-white">
@@ -528,7 +625,7 @@ export default function AdTestPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          {winExists("ocMan") && (
+          {!!(window as any).ocMan && (
             <button
               onClick={handleManualInit}
               className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition-all active:scale-95"
@@ -537,10 +634,11 @@ export default function AdTestPage() {
             </button>
           )}
           <button
-            onClick={fetchConfigAndInject}
-            className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 border border-slate-700 hover:border-slate-500 rounded-lg text-sm font-medium transition-all active:scale-95"
+            onClick={() => runAudit()}
+            disabled={diagnosticState === "RUNNING"}
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 border border-slate-700 hover:border-slate-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-all active:scale-95"
           >
-            <RefreshCw className="w-4 h-4" /> Restart Audit
+            <RefreshCw className={`w-4 h-4 ${diagnosticState === "RUNNING" ? "animate-spin" : ""}`} /> Restart Diagnostic
           </button>
         </div>
       </div>
@@ -550,6 +648,74 @@ export default function AdTestPage() {
         {/* Left column: Controls and detailed global namespace lists */}
         <div className="lg:col-span-8 space-y-6">
           
+          {/* PRISTINE FINAL AUDIT REPORT CARD */}
+          {diagnosticState === "COMPLETED" && (
+            <div className="bg-gradient-to-br from-slate-900 to-slate-950 border-2 border-blue-500/30 rounded-xl p-6 shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 bg-blue-600/15 text-blue-400 font-mono text-[10px] px-3 py-1 uppercase tracking-wider rounded-bl border-l border-b border-blue-500/20">
+                Final Audit Report
+              </div>
+              
+              <div className="flex items-center gap-3 mb-4">
+                <CheckCircle className="w-6 h-6 text-emerald-500" />
+                <div>
+                  <h3 className="text-lg font-bold text-white">Diagnostic Audit Completed</h3>
+                  <p className="text-xs text-slate-400">All direct SDK namespace measurements and network interactions captured successfully.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 border-t border-b border-slate-800 py-4 my-4">
+                <div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Script Loaded</span>
+                  <span className={`text-sm font-semibold font-mono ${debugLog.scriptLoaded === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
+                    {debugLog.scriptLoaded === "PASS" ? "PASS" : "FAIL"}
+                  </span>
+                </div>
+                
+                <div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">SDK Initialized</span>
+                  <span className={`text-sm font-semibold font-mono ${debugLog.sdkInitialized === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
+                    {debugLog.sdkInitialized === "PASS" ? "PASS" : "FAIL"}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Request Sent</span>
+                  <span className={`text-sm font-semibold font-mono ${debugLog.requestSent === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
+                    {debugLog.requestSent === "PASS" ? "PASS" : "FAIL"}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">HTTP Status</span>
+                  <span className="text-sm font-semibold font-mono text-blue-400">
+                    {debugLog.httpStatus}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Ad Rendered</span>
+                  <span className={`text-sm font-semibold font-mono ${debugLog.adRendered === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
+                    {debugLog.adRendered === "PASS" ? "PASS" : "FAIL"}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Audit Result</span>
+                  <span className={`text-sm font-semibold font-mono ${debugLog.adRendered === "PASS" ? "text-emerald-400" : "text-amber-400"}`}>
+                    {debugLog.adRendered === "PASS" ? "SUCCESS" : "FAILED / BLOCKED"}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[10px] text-slate-500 font-mono uppercase block mb-1">Failure Reason & Evidence</span>
+                <div className="bg-slate-950 px-3 py-2 rounded border border-slate-800 text-xs font-mono text-slate-300">
+                  {debugLog.failureReason}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Main 6 Core States Dashboard */}
           <div className="bg-slate-900/60 backdrop-blur-md rounded-xl border border-slate-800 p-6 shadow-2xl">
             <div className="flex items-center gap-2 mb-4 border-b border-slate-800 pb-3">
@@ -869,8 +1035,4 @@ export default function AdTestPage() {
       </div>
     </div>
   );
-}
-
-function winExists(name: string): boolean {
-  return typeof (window as any)[name] !== "undefined";
 }
