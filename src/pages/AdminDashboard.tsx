@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { db } from "../lib/firebase";
@@ -8,7 +8,8 @@ import {
   Target, ShieldAlert, Award, Clock, AlertCircle, Info,
   Smartphone, MousePointer2, ClipboardCheck, Sparkles,
   Copy, ExternalLink, Eye, EyeOff, RotateCcw, UserPlus, Trash2,
-  Search, User, Filter, Download, Users
+  Search, User, Filter, Download, Users,
+  Check, Loader2, Terminal, Globe, RefreshCw, FileCode, Activity, Layers, Radio, XCircle, CheckCircle
 } from "lucide-react";
 
 
@@ -145,6 +146,40 @@ export default function AdminDashboard() {
   const [adSettingsFeedback, setAdSettingsFeedback] = useState("");
   const [adSettingsError, setAdSettingsError] = useState("");
   const [adSettingsLastUpdated, setAdSettingsLastUpdated] = useState<any>(null);
+
+  // --- OnClickA Live Advertisement Preview states & refs ---
+  const [liveAdPreviewState, setLiveAdPreviewState] = useState<"IDLE" | "RUNNING" | "COMPLETED">("IDLE");
+  const [liveAdPreviewLogs, setLiveAdPreviewLogs] = useState<string[]>([]);
+  const [liveAdPreviewStatus, setLiveAdPreviewStatus] = useState<any>({
+    scriptLoaded: "PENDING",
+    sdkInitialized: "PENDING",
+    requestSent: "PENDING",
+    httpStatus: "N/A",
+    adRendered: "PENDING",
+    fillStatus: "N/A",
+    currentDomain: "N/A",
+    spotId: "N/A",
+    publisherId: "N/A"
+  });
+  const [liveAdPreviewNetworkLogs, setLiveAdPreviewNetworkLogs] = useState<any[]>([]);
+  const [liveAdPreviewFinalResult, setLiveAdPreviewFinalResult] = useState<string>("NONE");
+
+  const previewCleanupRefs = useRef<(() => void)[]>([]);
+  const liveAdPreviewLogsRef = useRef<string[]>([]);
+  const liveAdPreviewNetworkLogsRef = useRef<any[]>([]);
+  const liveAdPreviewStatusRef = useRef<any>({
+    scriptLoaded: "PENDING",
+    sdkInitialized: "PENDING",
+    requestSent: "PENDING",
+    httpStatus: "N/A",
+    adRendered: "PENDING",
+    fillStatus: "N/A",
+    currentDomain: "N/A",
+    spotId: "N/A",
+    publisherId: "N/A"
+  });
+  const previewAddLogRef = useRef<(msg: string) => void>(() => {});
+  const previewUpdateStatusRef = useRef<(key: string, value: any) => void>(() => {});
 
   const [systemSettings, setSystemSettings] = useState<any>({
     botSettings: {},
@@ -1199,6 +1234,466 @@ export default function AdminDashboard() {
       setAdSettingsLoading(false);
     }
   };
+
+  // --- OnClickA Live Advertisement Preview Engine ---
+  const startAdPreview = () => {
+    // 1. Clear previous
+    clearLiveAdPreview();
+    
+    // 2. Set state
+    setLiveAdPreviewState("RUNNING");
+    setLiveAdPreviewFinalResult("NONE");
+    
+    // Reset refs and state lists
+    liveAdPreviewLogsRef.current = [];
+    setLiveAdPreviewLogs([]);
+    liveAdPreviewNetworkLogsRef.current = [];
+    setLiveAdPreviewNetworkLogs([]);
+    
+    liveAdPreviewStatusRef.current = {
+      scriptLoaded: "PENDING",
+      sdkInitialized: "PENDING",
+      requestSent: "PENDING",
+      httpStatus: "N/A",
+      adRendered: "PENDING",
+      fillStatus: "N/A",
+      currentDomain: window.location.hostname,
+      spotId: "N/A",
+      publisherId: "N/A"
+    };
+    setLiveAdPreviewStatus({ ...liveAdPreviewStatusRef.current });
+    
+    addLog("Initializing OnClickA Live Advertisement Preview...");
+    
+    // 3. Parse script
+    const scriptText = adSettings.script;
+    if (!scriptText || !scriptText.trim()) {
+      addLog("❌ Error: Script code is empty.");
+      setLiveAdPreviewState("COMPLETED");
+      setLiveAdPreviewFinalResult("INIT_FAILED");
+      return;
+    }
+    
+    const parser = new DOMParser();
+    const docObj = parser.parseFromString(scriptText, "text/html");
+    const parsedScript = docObj.querySelector("script");
+    if (!parsedScript) {
+      addLog("❌ Error: Could not find any <script> tag in the input.");
+      setLiveAdPreviewState("COMPLETED");
+      setLiveAdPreviewFinalResult("INIT_FAILED");
+      return;
+    }
+    
+    const src = parsedScript.getAttribute("src") || "";
+    const admpid = parsedScript.getAttribute("data-admpid") || "";
+    
+    if (!src) {
+      addLog("❌ Error: <script> tag does not contain a 'src' attribute.");
+      setLiveAdPreviewState("COMPLETED");
+      setLiveAdPreviewFinalResult("INIT_FAILED");
+      return;
+    }
+    
+    updateStatus("spotId", admpid || "N/A");
+    updateStatus("publisherId", admpid || "N/A");
+    addLog(`Extracted SDK Source: ${src}`);
+    addLog(`Extracted Spot ID: ${admpid || 'None specified'}`);
+    
+    // 4. Hook fetch & XHR
+    const originalFetch = window.fetch;
+    window.fetch = async function (...args: any[]) {
+      const url = typeof args[0] === 'string' ? args[0] : (args[0] as any).url || '';
+      const method = args[1]?.method || 'GET';
+      const startTime = performance.now();
+      const logId = Math.random().toString(36).substring(7);
+      
+      const isAdRelated = url.includes('onclicka') || url.includes('clickadu') || url.includes('onclckmn') || url.includes('wa-') || url.includes('bid.onclcktg') || url.includes('ssp.zog') || url.includes('groleeguls') || url.includes('push');
+      
+      if (isAdRelated) {
+        addNetworkLog({
+          id: logId,
+          url,
+          method,
+          status: 'pending',
+          duration: 0,
+          timestamp: new Date().toLocaleTimeString(),
+          responsePreview: ''
+        });
+        addLog(`[Network] fetch: ${method} -> ${url}`);
+        updateStatus("requestSent", "PASS");
+      }
+      
+      try {
+        const response = await originalFetch.apply(this, args);
+        const duration = Math.round(performance.now() - startTime);
+        if (isAdRelated) {
+          updateNetworkLog(logId, {
+            status: response.status,
+            duration,
+            responsePreview: `Status: ${response.statusText || response.status}`
+          });
+          addLog(`[Network] fetch response: ${response.status} (${duration}ms)`);
+          updateStatus("httpStatus", `${response.status}`);
+        }
+        return response;
+      } catch (err: any) {
+        const duration = Math.round(performance.now() - startTime);
+        if (isAdRelated) {
+          updateNetworkLog(logId, {
+            status: 'failed',
+            duration,
+            responsePreview: err.message || 'Network Error'
+          });
+          addLog(`[Network] fetch error: ${err.message || 'Unknown'}`);
+          updateStatus("httpStatus", `Failed`);
+        }
+        throw err;
+      }
+    };
+    
+    previewCleanupRefs.current.push(() => {
+      window.fetch = originalFetch;
+    });
+    
+    const originalXHROpen = XMLHttpRequest.prototype.open;
+    const originalXHRSend = XMLHttpRequest.prototype.send;
+    
+    XMLHttpRequest.prototype.open = function(method: string, url: string, ...rest: any[]) {
+      this._url = url;
+      this._method = method;
+      this._startTime = performance.now();
+      return originalXHROpen.apply(this, [method, url, ...rest]);
+    };
+    
+    XMLHttpRequest.prototype.send = function(body?: any) {
+      const self = this as any;
+      const url = self._url || '';
+      const method = self._method || 'GET';
+      const startTime = self._startTime || performance.now();
+      const logId = Math.random().toString(36).substring(7);
+      
+      const isAdRelated = url.includes('onclicka') || url.includes('clickadu') || url.includes('onclckmn') || url.includes('wa-') || url.includes('bid.onclcktg') || url.includes('ssp.zog') || url.includes('groleeguls') || url.includes('push');
+      
+      if (isAdRelated) {
+        addNetworkLog({
+          id: logId,
+          url,
+          method,
+          status: 'pending',
+          duration: 0,
+          timestamp: new Date().toLocaleTimeString(),
+          responsePreview: ''
+        });
+        addLog(`[Network] XHR: ${method} -> ${url}`);
+        updateStatus("requestSent", "PASS");
+        
+        self.addEventListener('readystatechange', function() {
+          if (self.readyState === 4) {
+            const duration = Math.round(performance.now() - startTime);
+            let preview = '';
+            try {
+              preview = self.responseText ? self.responseText.substring(0, 100) : '';
+            } catch (e) {}
+            
+            updateNetworkLog(logId, {
+              status: self.status || 200,
+              duration,
+              responsePreview: preview || `Status: ${self.status}`
+            });
+            addLog(`[Network] XHR response: ${self.status} (${duration}ms)`);
+            updateStatus("httpStatus", `${self.status}`);
+          }
+        });
+      }
+      
+      return originalXHRSend.apply(this, [body]);
+    };
+    
+    previewCleanupRefs.current.push(() => {
+      XMLHttpRequest.prototype.open = originalXHROpen;
+      XMLHttpRequest.prototype.send = originalXHRSend;
+    });
+    
+    // 5. Setup Resource PerformanceObserver
+    try {
+      const observer = new PerformanceObserver((list) => {
+        list.getEntries().forEach((entry) => {
+          const url = entry.name;
+          const isAdRelated = url.includes('onclicka') || url.includes('clickadu') || url.includes('onclckmn') || url.includes('wa-') || url.includes('bid.onclcktg') || url.includes('ssp.zog') || url.includes('groleeguls') || url.includes('push');
+          if (isAdRelated) {
+            const alreadyExists = liveAdPreviewNetworkLogsRef.current.some(item => item.url === url);
+            if (!alreadyExists) {
+              addNetworkLog({
+                id: Math.random().toString(36).substring(7),
+                url,
+                method: 'GET',
+                status: '200',
+                duration: Math.round(entry.duration),
+                timestamp: new Date().toLocaleTimeString(),
+                responsePreview: 'Resource Loaded (timing)'
+              });
+            }
+          }
+        });
+      });
+      observer.observe({ entryTypes: ['resource'] });
+      previewCleanupRefs.current.push(() => observer.disconnect());
+    } catch (e) {
+      console.warn("PerformanceObserver not supported or failed to start", e);
+    }
+    
+    // 6. Setup MutationObserver to watch for ad container changes and ad iframe injections
+    const mutationObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of Array.from(mutation.addedNodes)) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const el = node as HTMLElement;
+            const isIFrame = el.tagName === "IFRAME";
+            const srcAttr = el.getAttribute("src") || "";
+            
+            const isAdRelated = 
+              isIFrame && 
+              (srcAttr.includes("onclicka") || srcAttr.includes("clickadu") || srcAttr.includes("wa-") || srcAttr.includes("wa."));
+              
+            const isTargetStage = el.id === "onclicka-inpage-ad-stage" || document.getElementById("onclicka-inpage-ad-stage")?.contains(el);
+            const hasAdClass = el.className && typeof el.className === 'string' && (el.className.includes("wa-") || el.id?.startsWith("wa-"));
+            
+            if (isAdRelated || isTargetStage || hasAdClass) {
+              addLog("🎉 Real advertisement element or iframe injection detected in the DOM!");
+              updateStatus("adRendered", "PASS");
+              updateStatus("fillStatus", "Yes");
+              setLiveAdPreviewFinalResult("SUCCESS");
+              setLiveAdPreviewState("COMPLETED");
+            }
+          }
+        }
+      }
+    });
+    mutationObserver.observe(document.body, { childList: true, subtree: true });
+    previewCleanupRefs.current.push(() => mutationObserver.disconnect());
+    
+    // 7. Inject the script
+    addLog("Injecting SDK Script tag...");
+    const scriptEl = document.createElement("script");
+    
+    // Copy all attributes from the parsed script tag
+    Array.from(parsedScript.attributes).forEach(attr => {
+      scriptEl.setAttribute(attr.name, attr.value);
+    });
+    
+    scriptEl.onload = () => {
+      addLog("✅ SDK Script tag loaded successfully (onload triggered)!");
+      updateStatus("scriptLoaded", "PASS");
+    };
+    
+    scriptEl.onerror = () => {
+      addLog("❌ Error loading SDK script tag (onerror triggered). Adblocker or offline network?");
+      updateStatus("scriptLoaded", "FAIL");
+      setLiveAdPreviewFinalResult("TIMEOUT");
+      setLiveAdPreviewState("COMPLETED");
+    };
+    
+    document.body.appendChild(scriptEl);
+    
+    previewCleanupRefs.current.push(() => {
+      scriptEl.remove();
+    });
+    
+    // 8. Poller for globals window.ocMan / window.a3klsam
+    const globalPoller = setInterval(() => {
+      if ((window as any).ocMan || (window as any).a3klsam) {
+        addLog("🔍 SDK Globals detected! (window.ocMan / window.a3klsam is active)");
+        updateStatus("sdkInitialized", "PASS");
+        
+        const ocMan = (window as any).ocMan || {};
+        const tagId = ocMan.tagId || '';
+        const siteId = ocMan.siteId || '';
+        const customDomain = ocMan.customDomain || window.location.hostname;
+        
+        if (tagId) updateStatus("spotId", String(tagId));
+        if (siteId) updateStatus("publisherId", String(siteId));
+        if (customDomain) updateStatus("currentDomain", String(customDomain));
+      }
+    }, 250);
+    
+    previewCleanupRefs.current.push(() => {
+      clearInterval(globalPoller);
+    });
+    
+    // 9. Timeout at 20 seconds (up to 20 seconds for SDK activity)
+    const previewTimeout = setTimeout(() => {
+      setLiveAdPreviewState(currState => {
+        if (currState === "RUNNING") {
+          addLog("⏳ 20 seconds preview period elapsed. Analyzing audit metrics...");
+          
+          const status = liveAdPreviewStatusRef.current;
+          const netLogs = liveAdPreviewNetworkLogsRef.current;
+          
+          let finalResult = "NO_FILL";
+          
+          if (status.scriptLoaded !== "PASS") {
+            finalResult = "TIMEOUT";
+            addLog("❌ Timeout: The script element failed to complete loading. Might be blocked by an AdBlocker.");
+          } else if (status.sdkInitialized !== "PASS") {
+            finalResult = "INIT_FAILED";
+            addLog("❌ SDK Initialization Failed: Script loaded but globals (window.ocMan / window.a3klsam) never initialized.");
+          } else if (status.requestSent !== "PASS") {
+            finalResult = "INVALID_SPOT";
+            addLog("❌ Invalid Spot: No outgoing network requests made by the SDK. Check spot configuration.");
+          } else {
+            const has403 = netLogs.some((item: any) => item.status === 403);
+            const has404 = netLogs.some((item: any) => item.status === 404);
+            const geoBlocked = netLogs.some((item: any) => 
+              item.responsePreview?.toLowerCase().includes("geoblock") || 
+              item.responsePreview?.toLowerCase().includes("country restricted") ||
+              item.responsePreview?.toLowerCase().includes("geo restricted")
+            );
+            const domainBlocked = netLogs.some((item: any) => 
+              item.responsePreview?.toLowerCase().includes("domain restricted") ||
+              item.responsePreview?.toLowerCase().includes("origin restricted")
+            );
+            
+            if (has403 || domainBlocked) {
+              finalResult = "DOMAIN_RESTRICTED";
+              addLog("❌ Domain Restricted: The network rejected the request for this origin domain.");
+            } else if (has404) {
+              finalResult = "INVALID_SPOT";
+              addLog("❌ Invalid Spot ID: The server returned 404 Not Found for the advertisement spot.");
+            } else if (geoBlocked) {
+              finalResult = "GEO_RESTRICTED";
+              addLog("❌ Geo Restricted: The publisher or spot is restricted in your current geographical region.");
+            } else {
+              finalResult = "NO_FILL";
+              addLog("❌ No Fill: SDK successfully initialized and requested ads, but the OnClickA server returned no advertising fill for this location at this time.");
+            }
+          }
+          
+          updateStatus("adRendered", "FAIL");
+          updateStatus("fillStatus", "No");
+          setLiveAdPreviewFinalResult(finalResult);
+          return "COMPLETED";
+        }
+        return currState;
+      });
+    }, 20000);
+    
+    previewCleanupRefs.current.push(() => {
+      clearTimeout(previewTimeout);
+    });
+  };
+
+  const clearLiveAdPreview = () => {
+    setLiveAdPreviewState("IDLE");
+    setLiveAdPreviewFinalResult("NONE");
+    setLiveAdPreviewLogs([]);
+    setLiveAdPreviewNetworkLogs([]);
+    setLiveAdPreviewStatus({
+      scriptLoaded: "PENDING",
+      sdkInitialized: "PENDING",
+      requestSent: "PENDING",
+      httpStatus: "N/A",
+      adRendered: "PENDING",
+      fillStatus: "N/A",
+      currentDomain: "N/A",
+      spotId: "N/A",
+      publisherId: "N/A"
+    });
+    
+    previewCleanupRefs.current.forEach(cleanup => {
+      try {
+        cleanup();
+      } catch (e) {
+        console.warn("Cleanup error during reset", e);
+      }
+    });
+    previewCleanupRefs.current = [];
+    
+    document.querySelectorAll('script[src*="onclicka"], script[src*="onclckmn"], script[src*="clickadu"]').forEach(el => {
+      el.remove();
+    });
+    
+    const stage = document.getElementById("onclicka-inpage-ad-stage");
+    if (stage) {
+      stage.innerHTML = "";
+    }
+  };
+
+  const copyAdDebugReport = () => {
+    const status = liveAdPreviewStatusRef.current;
+    const logsText = liveAdPreviewLogsRef.current.join("\n");
+    const netLogsText = liveAdPreviewNetworkLogsRef.current.map(item => 
+      `- [${item.timestamp}] ${item.method} ${item.url} -> Status: ${item.status} (${item.duration}ms)`
+    ).join("\n");
+    
+    const report = `### OnClickA Ad Previewer Diagnostics Audit Report
+**Generated At:** ${new Date().toLocaleString()}
+**Domain:** ${window.location.hostname}
+**Final Result:** ${liveAdPreviewFinalResult}
+
+#### Live Status Metrics
+- **Script Loaded:** ${status.scriptLoaded}
+- **SDK Initialized:** ${status.sdkInitialized}
+- **Request Sent:** ${status.requestSent}
+- **HTTP Status:** ${status.httpStatus}
+- **Ad Rendered:** ${status.adRendered}
+- **Fill Status:** ${status.fillStatus}
+- **Current Domain:** ${status.currentDomain}
+- **Spot ID:** ${status.spotId}
+- **Publisher ID:** ${status.publisherId}
+
+#### SDK Logs
+\`\`\`
+${logsText || "No logs available."}
+\`\`\`
+
+#### Network Requests Logged
+${netLogsText || "No network requests captured."}
+`;
+
+    navigator.clipboard.writeText(report);
+    setAdSettingsFeedback("📋 Debug diagnostics report successfully copied to clipboard!");
+  };
+
+  const updateStatus = (key: string, value: any) => {
+    liveAdPreviewStatusRef.current = {
+      ...liveAdPreviewStatusRef.current,
+      [key]: value
+    };
+    setLiveAdPreviewStatus({ ...liveAdPreviewStatusRef.current });
+  };
+
+  const addLog = (msg: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const formatted = `[${timestamp}] ${msg}`;
+    liveAdPreviewLogsRef.current = [...liveAdPreviewLogsRef.current, formatted];
+    setLiveAdPreviewLogs([...liveAdPreviewLogsRef.current]);
+  };
+
+  const addNetworkLog = (req: any) => {
+    liveAdPreviewNetworkLogsRef.current = [...liveAdPreviewNetworkLogsRef.current, req];
+    setLiveAdPreviewNetworkLogs([...liveAdPreviewNetworkLogsRef.current]);
+  };
+
+  const updateNetworkLog = (id: string, updates: any) => {
+    liveAdPreviewNetworkLogsRef.current = liveAdPreviewNetworkLogsRef.current.map(req => {
+      if (req.id === id) {
+        return { ...req, ...updates };
+      }
+      return req;
+    });
+    setLiveAdPreviewNetworkLogs([...liveAdPreviewNetworkLogsRef.current]);
+  };
+
+  useEffect(() => {
+    return () => {
+      previewCleanupRefs.current.forEach(cleanup => {
+        try { cleanup(); } catch (e) {}
+      });
+      document.querySelectorAll('script[src*="onclicka"], script[src*="onclckmn"], script[src*="clickadu"]').forEach(el => {
+        el.remove();
+      });
+    };
+  }, []);
 
   const fetchSystemSettings = async () => {
     setSystemSettingsLoading(true);
@@ -7205,6 +7700,363 @@ export default function AdminDashboard() {
                         >
                           🔴 Disable Ads
                         </button>
+                      </div>
+                    </div>
+
+                    {/* OnClickA Live Advertisement Preview Section */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+                      <div className="border-b border-slate-800 pb-4">
+                        <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                          📺 Live Advertisement Preview
+                        </h3>
+                        <p className="text-slate-400 text-sm mt-1">
+                          Test the current script before saving or deploying.
+                        </p>
+                      </div>
+
+                      {/* Diagnostic / Final Result Banner */}
+                      {liveAdPreviewState === "COMPLETED" && liveAdPreviewFinalResult !== "NONE" && (
+                        <div className={`p-4 rounded-xl flex items-center gap-3 border ${
+                          liveAdPreviewFinalResult === "SUCCESS"
+                            ? "bg-emerald-950/40 border-emerald-500/30 text-emerald-400"
+                            : "bg-rose-950/40 border-rose-500/30 text-rose-400"
+                        }`}>
+                          <div className="shrink-0 text-xl">
+                            {liveAdPreviewFinalResult === "SUCCESS" ? "✅" : "❌"}
+                          </div>
+                          <div>
+                            <span className="font-bold block">
+                              {liveAdPreviewFinalResult === "SUCCESS" && "✅ Advertisement Loaded Successfully"}
+                              {liveAdPreviewFinalResult === "NO_FILL" && "❌ No Fill"}
+                              {liveAdPreviewFinalResult === "TIMEOUT" && "❌ Network Timeout"}
+                              {liveAdPreviewFinalResult === "DOMAIN_RESTRICTED" && "❌ Domain Restricted"}
+                              {liveAdPreviewFinalResult === "INVALID_SPOT" && "❌ Invalid Spot"}
+                              {liveAdPreviewFinalResult === "INIT_FAILED" && "❌ SDK Initialization Failed"}
+                              {liveAdPreviewFinalResult === "GEO_RESTRICTED" && "❌ Geo Restricted"}
+                            </span>
+                            <span className="text-xs text-slate-400 mt-0.5 block">
+                              {liveAdPreviewFinalResult === "SUCCESS" && "The OnClickA SDK loaded, initialized, and injected real advertising content successfully!"}
+                              {liveAdPreviewFinalResult === "NO_FILL" && "The SDK requested ads successfully, but the network currently returned no fill (typical for low inventory or regional caps)."}
+                              {liveAdPreviewFinalResult === "TIMEOUT" && "The SDK failed to load within 20 seconds. This is typically due to an AdBlocker blocking the connection."}
+                              {liveAdPreviewFinalResult === "DOMAIN_RESTRICTED" && "This spot ID is not approved for this domain. Make sure the domain is approved in your OnClickA panel."}
+                              {liveAdPreviewFinalResult === "INVALID_SPOT" && "The server returned 404 Not Found or rejected the request, indicating an invalid spot or tag configuration."}
+                              {liveAdPreviewFinalResult === "INIT_FAILED" && "The script downloaded successfully but failed to initialize. Make sure the script is authentic."}
+                              {liveAdPreviewFinalResult === "GEO_RESTRICTED" && "The ad request was blocked due to geographic location rules of the spot or publisher settings."}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action Buttons Panel */}
+                      <div className="flex flex-wrap gap-3 p-1 bg-slate-950/50 rounded-xl border border-slate-800/80">
+                        <button
+                          type="button"
+                          onClick={startAdPreview}
+                          disabled={liveAdPreviewState === "RUNNING"}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-medium text-xs rounded-lg transition-all"
+                        >
+                          {liveAdPreviewState === "RUNNING" ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Play className="w-3.5 h-3.5" />
+                          )}
+                          Preview Ad
+                        </button>
+                        <button
+                          type="button"
+                          onClick={startAdPreview}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs rounded-lg transition-all"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Refresh Preview
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearLiveAdPreview}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs rounded-lg transition-all border border-slate-700"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Clear Preview
+                        </button>
+                        <button
+                          type="button"
+                          onClick={copyAdDebugReport}
+                          disabled={liveAdPreviewLogs.length === 0}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium text-xs rounded-lg transition-all border border-slate-700"
+                        >
+                          <ClipboardCheck className="w-3.5 h-3.5" />
+                          Copy Debug Report
+                        </button>
+                      </div>
+
+                      {/* REAL PREVIEW Box Stage */}
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-slate-300">
+                          🎯 Live Ad Delivery Stage (Real Sandbox)
+                        </label>
+                        <div className="bg-slate-950 rounded-xl border-2 border-dashed border-slate-800 p-4 min-h-[160px] flex flex-col items-center justify-center relative overflow-hidden">
+                          <div id="onclicka-inpage-ad-stage" className="w-full flex justify-center items-center">
+                            {/* Real SDK advertisement content is loaded & injected here by OnClickA */}
+                          </div>
+
+                          {liveAdPreviewState === "IDLE" && (
+                            <div className="text-center space-y-1 text-slate-500 max-w-sm pointer-events-none">
+                              <Tv className="w-8 h-8 mx-auto stroke-[1.5] opacity-40 mb-2" />
+                              <p className="font-semibold text-xs text-slate-400">Preview Box</p>
+                              <p className="text-[11px] text-slate-500">
+                                Click "Preview Ad" to run diagnostic audit. Real OnClickA elements will be rendered here.
+                              </p>
+                            </div>
+                          )}
+
+                          {liveAdPreviewState === "RUNNING" && (
+                            <div className="text-center space-y-2 text-slate-400 pointer-events-none">
+                              <Loader2 className="w-8 h-8 mx-auto stroke-[1.5] text-indigo-500 animate-spin" />
+                              <p className="font-semibold text-xs animate-pulse text-indigo-400">
+                                Launching Real OnClickA SDK...
+                              </p>
+                              <p className="text-[11px] text-slate-500">
+                                Listening for outgoing network traffic & DOM elements (Up to 20s timeout)
+                              </p>
+                            </div>
+                          )}
+
+                          {liveAdPreviewState === "COMPLETED" && liveAdPreviewFinalResult === "SUCCESS" && (
+                            <div className="absolute top-2 right-2 flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[10px] font-bold text-emerald-400 uppercase tracking-wide">
+                              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
+                              Ad Element Active
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Live Status Cards Dashboard */}
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-slate-300">
+                          📊 Realtime Audit Status Indicators
+                        </label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          {/* Script Loaded */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Script Loaded</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                liveAdPreviewStatus.scriptLoaded === "PASS"
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                  : liveAdPreviewStatus.scriptLoaded === "FAIL"
+                                  ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                                  : "bg-slate-800 text-slate-400 border border-slate-700"
+                              }`}>
+                                {liveAdPreviewStatus.scriptLoaded}
+                              </span>
+                              <FileCode className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+
+                          {/* SDK Initialized */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">SDK Initialized</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                liveAdPreviewStatus.sdkInitialized === "PASS"
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                  : "bg-slate-800 text-slate-400 border border-slate-700"
+                              }`}>
+                                {liveAdPreviewStatus.sdkInitialized}
+                              </span>
+                              <Activity className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+
+                          {/* Request Sent */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Request Sent</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                liveAdPreviewStatus.requestSent === "PASS"
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                  : "bg-slate-800 text-slate-400 border border-slate-700"
+                              }`}>
+                                {liveAdPreviewStatus.requestSent}
+                              </span>
+                              <Radio className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+
+                          {/* HTTP Status */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">HTTP Status</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className="text-[11px] font-bold text-white font-mono">
+                                {liveAdPreviewStatus.httpStatus}
+                              </span>
+                              <Layers className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+
+                          {/* Ad Rendered */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Ad Rendered</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                liveAdPreviewStatus.adRendered === "PASS"
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                  : liveAdPreviewStatus.adRendered === "FAIL"
+                                  ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                                  : "bg-slate-800 text-slate-400 border border-slate-700"
+                              }`}>
+                                {liveAdPreviewStatus.adRendered}
+                              </span>
+                              <Tv className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+
+                          {/* Fill Status */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Fill Status</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                liveAdPreviewStatus.fillStatus === "Yes"
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                  : liveAdPreviewStatus.fillStatus === "No"
+                                  ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                                  : "bg-slate-800 text-slate-400 border border-slate-700"
+                              }`}>
+                                {liveAdPreviewStatus.fillStatus}
+                              </span>
+                              <Target className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+
+                          {/* Current Domain */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 col-span-2 sm:col-span-1 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Current Domain</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className="text-[10px] font-mono text-slate-300 truncate max-w-[120px]" title={liveAdPreviewStatus.currentDomain}>
+                                {liveAdPreviewStatus.currentDomain}
+                              </span>
+                              <Globe className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+
+                          {/* Spot ID */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Spot ID</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className="text-[11px] font-mono font-bold text-indigo-400">
+                                {liveAdPreviewStatus.spotId}
+                              </span>
+                              <Zap className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+
+                          {/* Publisher ID */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Publisher ID</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className="text-[11px] font-mono font-bold text-slate-300">
+                                {liveAdPreviewStatus.publisherId}
+                              </span>
+                              <User className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Network Request Logger */}
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-slate-300">
+                          ⚡ Intercepted Network Traffic Logger
+                        </label>
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-950/80">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Traffic Capture</span>
+                            <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-mono font-bold uppercase tracking-widest">
+                              Live sniffer
+                            </span>
+                          </div>
+                          
+                          <div className="max-h-52 overflow-y-auto p-3 font-mono text-[10px] space-y-1.5 divide-y divide-slate-900">
+                            {liveAdPreviewNetworkLogs.length === 0 ? (
+                              <div className="text-center py-6 text-slate-500">
+                                No active ad network connections intercepted yet.
+                              </div>
+                            ) : (
+                              liveAdPreviewNetworkLogs.map((req, idx) => (
+                                <div key={req.id || idx} className="pt-1.5 first:pt-0">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px]">
+                                    <div className="flex items-center gap-1.5 truncate">
+                                      <span className={`font-bold px-1 py-0.5 rounded text-[8px] uppercase ${
+                                        req.method === 'POST' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-emerald-500/20 text-emerald-400'
+                                      }`}>
+                                        {req.method}
+                                      </span>
+                                      <span className="text-slate-300 truncate max-w-sm sm:max-w-md" title={req.url}>
+                                        {req.url}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <span className={`font-bold font-mono ${
+                                        String(req.status).startsWith('2') 
+                                          ? 'text-emerald-400' 
+                                          : req.status === 'pending' 
+                                          ? 'text-amber-400 animate-pulse' 
+                                          : 'text-rose-400'
+                                      }`}>
+                                        {req.status === 'pending' ? 'PENDING' : req.status}
+                                      </span>
+                                      <span className="text-slate-500 text-[10px]">
+                                        {req.duration ? `${req.duration}ms` : ''}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {req.responsePreview && (
+                                    <div className="mt-1 bg-slate-900/60 p-1.5 rounded text-[9px] text-slate-400 max-h-12 overflow-y-auto truncate font-mono">
+                                      {req.responsePreview}
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Live Trace Console */}
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-slate-300">
+                          📟 Console Logs & Trace Events
+                        </label>
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden font-mono">
+                          <div className="flex items-center gap-2 px-4 py-2 border-b border-slate-800 bg-slate-950/80">
+                            <Terminal className="w-3.5 h-3.5 text-indigo-400" />
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Debugger Terminal</span>
+                          </div>
+                          
+                          <div className="max-h-48 overflow-y-auto p-4 space-y-1 text-xs text-slate-300 min-h-[100px]">
+                            {liveAdPreviewLogs.length === 0 ? (
+                              <div className="text-slate-500 text-center py-8">
+                                Terminal inactive. Click "Preview Ad" to begin tracing.
+                              </div>
+                            ) : (
+                              liveAdPreviewLogs.map((logText, idx) => (
+                                <div key={idx} className="text-[11px] leading-relaxed break-all">
+                                  {logText.includes("❌") ? (
+                                    <span className="text-rose-400">{logText}</span>
+                                  ) : logText.includes("✅") || logText.includes("🎉") ? (
+                                    <span className="text-emerald-400">{logText}</span>
+                                  ) : logText.includes("[Network]") ? (
+                                    <span className="text-indigo-400">{logText}</span>
+                                  ) : logText.includes("⏳") || logText.includes("🔍") ? (
+                                    <span className="text-amber-400">{logText}</span>
+                                  ) : (
+                                    <span className="text-slate-300">{logText}</span>
+                                  )}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
