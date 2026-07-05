@@ -164,53 +164,78 @@ export async function handleUpdate(botToken: string, update: any) {
             if (msg.text && msg.text.startsWith("/start")) {
                  console.log("Matched /start command");
                  await processStart(botToken, chatId, user, msg.text);
+            } else if (userData?.registrationStep === 'name' && msg.text) {
+                const fullName = msg.text.trim();
+                if (fullName.length >= 2) {
+                    await setDoc(userDocRef, { 
+                        enteredName: fullName,
+                        registrationStep: 'mobile'
+                    }, { merge: true });
+                    await sendTelegramMessage(botToken, chatId, "📱 Please enter your Mobile Number.\n\nExample:\n9876543210");
+                } else {
+                    await sendTelegramMessage(botToken, chatId, "❌ Invalid name. Please enter your Full Name.");
+                }
             } else if (userData?.registrationStep === 'mobile' && msg.text) {
                 const mobile = msg.text.trim();
                 const isNumeric = /^\d+$/.test(mobile);
                 if (isNumeric && mobile.length === 10) {
                     await setDoc(userDocRef, { 
                         phone: mobile,
-                        registrationStep: 'name'
+                        mobile: mobile,
+                        registrationStep: 'invite_code'
                     }, { merge: true });
-                    await sendTelegramMessage(botToken, chatId, "👤 Please enter your Full Name.\n\nExample\nRitik Rai");
+
+                    // Check for automatic referral by link (pendingReferrerId)
+                    const latestDoc = await getDoc(userDocRef);
+                    const latestData = latestDoc.data();
+                    const pendingRefId = latestData?.pendingReferrerId;
+
+                    if (pendingRefId) {
+                        try {
+                            const referrerDoc = await getDoc(doc(db, "users", pendingRefId));
+                            if (referrerDoc.exists()) {
+                                const rData = referrerDoc.data();
+                                const referrerName = rData.enteredName || rData.firstName || rData.username || "Referrer";
+                                
+                                await completeRegistrationAndCreditReferrer(db, botToken, chatId, String(user.id), pendingRefId, rData.referralCode || "Link");
+                                await sendTelegramMessage(botToken, chatId, `✅ You joined using the referral link of:\n${referrerName}`);
+                                return;
+                            }
+                        } catch (e) {
+                            console.error("Error automatic referral linking:", e);
+                        }
+                    }
+
+                    // Show manual invite code prompt if no deep link referrer was found
+                    const message = `Please Enter Invite Code (Optional)
+
+Type your invite code below and send, or click Skip to continue.`;
+                    const inlineKeyboard = {
+                        inline_keyboard: [
+                            [{ text: "✅ Verify", callback_data: "invite_verify_msg" }, { text: "⏭️ Skip", callback_data: "invite_skip" }]
+                        ]
+                    };
+                    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
                 } else {
                     await sendTelegramMessage(botToken, chatId, "❌ Invalid mobile number.\n\nPlease enter a valid 10 digit number.");
                 }
-            } else if (userData?.registrationStep === 'name' && msg.text) {
-                const fullName = msg.text.trim();
-                const now = new Date().toISOString();
-                
-                await setDoc(userDocRef, { 
-                    enteredName: fullName,
-                    registrationStep: 'completed',
-                    membershipVerified: true,
-                    contactVerified: true,
-                    verified: true,
-                    registrationDate: now,
-                    lastActive: now
-                }, { merge: true });
+            } else if (userData?.registrationStep === 'invite_code' && msg.text) {
+                const typedCode = msg.text.trim();
+                const referrer = await findReferrerByCode(db, typedCode);
+                if (referrer) {
+                    const referrerId = referrer.id;
+                    const rData = referrer.data;
 
-                const successMsg = `✅ Registration Successful
-
-👤 Name:
-${fullName}
-
-📱 Mobile:
-${userData.phone || "Not set"}
-
-🆔 Telegram ID:
-${user.id}
-
-👤 Username:
-@${user.username || "None"}
-
-Welcome to Roy Share Earn ❤️`;
-
-                await sendTelegramMessage(botToken, chatId, successMsg, {
-                    reply_markup: {
-                        inline_keyboard: [[{ text: "🚀 Continue", callback_data: "registration_continue" }]]
+                    if (referrerId === String(user.id)) {
+                        await sendTelegramMessage(botToken, chatId, "❌ One Telegram account cannot refer itself.\n\nPlease enter a valid invite code or click Skip.");
+                    } else {
+                        await completeRegistrationAndCreditReferrer(db, botToken, chatId, String(user.id), referrerId, typedCode);
+                        const referrerName = rData.enteredName || rData.firstName || rData.username || "Referrer";
+                        await sendTelegramMessage(botToken, chatId, `✅ You were invited by:\n${referrerName}`);
                     }
-                });
+                } else {
+                    await sendTelegramMessage(botToken, chatId, "❌ Invalid Invite Code.\n\nPlease enter a valid invite code or click Skip.");
+                }
             } else if (msg.contact) {
                 // Disabled as per request
                 await sendTelegramMessage(botToken, chatId, "⚠️ Direct contact sharing is no longer supported. Please follow the registration flow.");
@@ -635,55 +660,213 @@ async function ensureSettings() {
     }
 }
 
+async function findReferrerByCode(db: any, code: string): Promise<any> {
+    if (!code) return null;
+    const cleanCode = code.trim();
+    
+    // 1. Try to find by Telegram ID directly
+    const directDoc = await getDoc(doc(db, "users", cleanCode));
+    if (directDoc.exists()) {
+        return { id: directDoc.id, data: directDoc.data() };
+    }
+
+    // 2. Try to find by referralCode field
+    const q1 = query(collection(db, "users"), where("referralCode", "==", cleanCode));
+    const snap1 = await getDocs(q1);
+    if (!snap1.empty) {
+        return { id: snap1.docs[0].id, data: snap1.docs[0].data() };
+    }
+
+    // 3. Try to find if code starts with ref_ and strip it
+    if (cleanCode.startsWith("ref_")) {
+        const stripped = cleanCode.substring(4);
+        const refDoc = await getDoc(doc(db, "users", stripped));
+        if (refDoc.exists()) {
+            return { id: refDoc.id, data: refDoc.data() };
+        }
+    }
+
+    return null;
+}
+
+async function completeRegistrationAndCreditReferrer(db: any, botToken: string, chatId: number, userId: string, referrerId: string | null, inviteCodeUsed: string = "None") {
+    const userDocRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userDocRef);
+    if (!userSnap.exists()) return;
+
+    const userData = userSnap.data();
+    if (userData.registrationStep === 'completed') {
+        return;
+    }
+
+    const now = new Date().toISOString();
+    const cleanReferredBy = referrerId ? String(referrerId) : null;
+
+    let rewardAmount = 10;
+    try {
+        const systemDoc = await getDoc(doc(db, "settings", "system"));
+        if (systemDoc.exists()) {
+            const rSettings = systemDoc.data()?.referralSettings;
+            if (rSettings && rSettings["Referral Reward"]) {
+                rewardAmount = parseFloat(rSettings["Referral Reward"]) || 10;
+            }
+        }
+    } catch (e) {
+        console.error("Error fetching referral reward amount from settings:", e);
+    }
+
+    let referrerName = "N/A";
+    if (cleanReferredBy) {
+        try {
+            const referrerDoc = await getDoc(doc(db, "users", cleanReferredBy));
+            if (referrerDoc.exists()) {
+                const rData = referrerDoc.data();
+                referrerName = rData.enteredName || rData.firstName || rData.username || "Referrer";
+                
+                // Prevent duplicate referral docs
+                const refDocRef = doc(db, "referrals", userId);
+                const refSnap = await getDoc(refDocRef);
+
+                if (!refSnap.exists()) {
+                    await setDoc(refDocRef, {
+                        referrerId: cleanReferredBy,
+                        referredUserId: userId,
+                        referrerName: referrerName,
+                        referredName: userData.enteredName || userData.firstName || "Referred Friend",
+                        referredUsername: userData.username || "",
+                        referredFirstName: userData.firstName || "",
+                        referredLastName: userData.lastName || "",
+                        joinDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+                        createdAt: now,
+                        status: "approved",
+                        rewardAmount: rewardAmount,
+                        rewardCredited: true
+                    });
+
+                    const currentReferrals = rData.referrals || 0;
+                    const currentBalance = rData.availableBalance || 0;
+                    const currentReferralEarnings = rData.referralEarnings || 0;
+                    const currentTotalEarnings = rData.totalEarnings || 0;
+
+                    const newReferralsCount = currentReferrals + 1;
+                    const newBalance = currentBalance + rewardAmount;
+                    const newReferralEarnings = currentReferralEarnings + rewardAmount;
+                    const newTotalEarnings = currentTotalEarnings + rewardAmount;
+
+                    await setDoc(doc(db, "users", cleanReferredBy), {
+                        referrals: newReferralsCount,
+                        availableBalance: newBalance,
+                        referralEarnings: newReferralEarnings,
+                        totalEarnings: newTotalEarnings
+                    }, { merge: true });
+
+                    const { dateStr, timeStr } = formatTransactionDateTime(new Date());
+                    const txData = {
+                        amount: rewardAmount,
+                        type: "Referral Commission",
+                        date: dateStr,
+                        time: timeStr,
+                        userId: cleanReferredBy,
+                        createdAt: now
+                    };
+                    await Promise.all([
+                        addDoc(collection(db, "transactionHistory"), txData),
+                        addDoc(collection(db, "transactions"), txData)
+                    ]);
+
+                    const refCurrency = rData.currency || "INR";
+                    const notificationMsg = `🎉 *New Referral Joined*
+
+👤 *Name:*
+${userData.enteredName || userData.firstName || "New Friend"}
+
+*Referral Count:*
+${newReferralsCount}
+
+*Reward:*
+${formatCurrency(rewardAmount, refCurrency)}`;
+
+                    await sendTelegramMessage(botToken, Number(cleanReferredBy), notificationMsg, { parse_mode: "Markdown" });
+                }
+            }
+        } catch (e) {
+            console.error("Error crediting referrer:", e);
+        }
+    }
+
+    await setDoc(userDocRef, {
+        registrationStep: 'completed',
+        membershipVerified: true,
+        contactVerified: true,
+        verified: true,
+        registrationDate: now,
+        lastActive: now,
+        referredBy: cleanReferredBy,
+        referrerName: referrerName,
+        inviteCodeUsed: inviteCodeUsed
+    }, { merge: true });
+
+    const successMsg = `✅ *Registration Successful*
+
+👤 *Name:*
+${userData.enteredName || "Not set"}
+
+📱 *Mobile:*
+${userData.phone || userData.mobile || "Not set"}
+
+🆔 *Telegram ID:*
+${userId}
+
+👤 *Username:*
+@${userData.username || "None"}
+
+Welcome to Roy Share Earn ❤️`;
+
+    await sendTelegramMessage(botToken, chatId, successMsg, {
+        parse_mode: "Markdown",
+        reply_markup: {
+            inline_keyboard: [[{ text: "🚀 Continue", callback_data: "registration_continue" }]]
+        }
+    });
+}
+
 async function processStart(botToken: string, chatId: number, user: any, startText?: string) {
     try {
         console.log(`[USER LOG] START RECEIVED: ${user.id}`);
-        console.log("CHANNEL CHECK START");
         const db = getDb();
         
         // Check deep link parameter
-        if (startText && startText.includes(" ref_")) {
-            const referrerId = startText.split(" ref_")[1]?.trim();
-            const referredUserId = String(user.id);
-            
-            try {
-                const userDocRef = doc(db, "users", referredUserId);
-                const userDoc = await getDoc(userDocRef);
-                const isExistingVerified = userDoc.exists() && userDoc.data()?.membershipVerified;
-                
-                if (referredUserId === referrerId) {
-                    console.log(`Referral Rejected: Self Referral (${referredUserId})`);
-                } else if (isExistingVerified) {
-                    console.log(`Referral Rejected: Existing Registered User (${referredUserId})`);
-                } else {
-                    const refDocRef = doc(db, "referrals", referredUserId);
-                    const refDoc = await getDoc(refDocRef);
-                    
-                    if (refDoc.exists()) {
-                        console.log(`Referral Rejected: User already linked`);
+        if (startText && startText.startsWith("/start")) {
+            const parts = startText.trim().split(/\s+/);
+            if (parts.length > 1) {
+                const rawCode = parts[1].trim();
+                if (rawCode) {
+                    console.log(`[USER LOG] Start parameter detected: ${rawCode}`);
+                    const referrer = await findReferrerByCode(db, rawCode);
+                    if (referrer) {
+                        const referrerId = referrer.id;
+                        const referredUserId = String(user.id);
+                        
+                        if (referredUserId === referrerId) {
+                            console.log(`Referral Rejected: Self Referral (${referredUserId})`);
+                        } else {
+                            const userDocRef = doc(db, "users", referredUserId);
+                            const userDoc = await getDoc(userDocRef);
+                            const isExistingCompleted = userDoc.exists() && userDoc.data()?.registrationStep === 'completed';
+                            
+                            if (isExistingCompleted) {
+                                console.log(`Referral Rejected: Existing Registered User (${referredUserId})`);
+                            } else {
+                                await setDoc(userDocRef, {
+                                    pendingReferrerId: referrerId
+                                }, { merge: true });
+                                console.log(`Saved pendingReferrerId: ${referrerId} for user ${referredUserId}`);
+                            }
+                        }
                     } else {
-                        await setDoc(refDocRef, {
-                            referrerId: String(referrerId),
-                            referredUserId: referredUserId,
-                            referredUsername: user.username || "",
-                            referredFirstName: user.first_name || "",
-                            referredLastName: user.last_name || "",
-                            joinDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
-                            status: "pending",
-                            pendingCommission: 0,
-                            approvedCommission: 0,
-                            totalCommission: 0
-                        });
-                        
-                        await setDoc(userDocRef, {
-                            referredBy: String(referrerId)
-                        }, { merge: true });
-                        
-                        console.log(`Referral Linked: ${referredUserId} referred by ${referrerId}`);
+                        console.log(`No referrer found for code: ${rawCode}`);
                     }
                 }
-            } catch (err) {
-                console.error("Error setting up referral:", err);
             }
         }
 
@@ -695,7 +878,6 @@ async function processStart(botToken: string, chatId: number, user: any, startTe
             }, { merge: true });
         }
 
-        // ALL VERIFIED -> DASHBOARD (STEP 5)
         const userDocRef = doc(db, "users", String(user.id));
         const userSnap = await getDoc(userDocRef);
         const userData = userSnap.data();
@@ -712,6 +894,24 @@ async function processStart(botToken: string, chatId: number, user: any, startTe
             } else {
                 await sendTelegramMessage(botToken, chatId, welcomeMsg, { reply_markup: getMainMenuKeyboard(user.id) });
             }
+            return;
+        }
+
+        // Resume flow if intermediate steps exist
+        if (userData?.registrationStep === 'name') {
+            await sendTelegramMessage(botToken, chatId, "👤 Please enter your Full Name.\n\nExample:\nRitik Rai");
+            return;
+        } else if (userData?.registrationStep === 'mobile') {
+            await sendTelegramMessage(botToken, chatId, "📱 Please enter your Mobile Number.\n\nExample:\n9876543210");
+            return;
+        } else if (userData?.registrationStep === 'invite_code') {
+            const message = `Please Enter Invite Code (Optional)\n\nType your invite code below and send, or click Skip to continue.`;
+            const inlineKeyboard = {
+                inline_keyboard: [
+                    [{ text: "✅ Verify", callback_data: "invite_verify_msg" }, { text: "⏭️ Skip", callback_data: "invite_skip" }]
+                ]
+            };
+            await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
             return;
         }
 
@@ -1267,70 +1467,76 @@ async function processReferAndEarn(botToken: string, chatId: number, user: any) 
     const db = getDb();
     const userId = String(user.id);
     const userDoc = await getDoc(doc(db, "users", userId));
-    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+    const userData = userDoc.exists() ? userDoc.data() : null;
+    const currency = userData?.currency || "INR";
+    const inviteCode = userData?.referralCode || `RS${userId.slice(-6).toUpperCase()}`;
     
-    // 1. Sync all referrals under this user to ensure we have the absolute latest state
+    // Get bot username dynamically if possible
+    let botUsername = "RoyShareEarnBot";
     try {
-        const refQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
-        const refSnap = await getDocs(refQuery);
-        for (const docSnap of refSnap.docs) {
-            await syncReferralsForUser(db, botToken, docSnap.id);
+        const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+        const bToken = settingsDoc.data()?.botToken;
+        if (bToken) {
+            const botMeRes = await fetch(`https://api.telegram.org/bot${bToken}/getMe`);
+            const botMeData = await botMeRes.json();
+            if (botMeData.ok && botMeData.result?.username) {
+                botUsername = botMeData.result.username;
+            }
         }
     } catch (e) {
-        console.error("Error updating referrals on processReferAndEarn:", e);
+        console.error("Error getting bot username inside processReferAndEarn:", e);
     }
 
-    // 2. Query referrals for this user
+    const referralLink = `https://t.me/${botUsername}?start=${inviteCode}`;
+
+    // Query referrals for this user
     const refQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
     const refSnap = await getDocs(refQuery);
 
-    const appUrl = getAppUrl();
-    const baseDomain = appUrl.replace(/\/$/, "");
-    const referralLink = `${baseDomain}/ref/${userId}`;
+    let totalReferrals = 0;
+    let todaysReferrals = 0;
+    let pendingReferrals = 0;
+    let successfulReferrals = 0;
 
-    let message = "";
-    if (refSnap.empty) {
-        message = `👥 Refer & Earn
+    const todayStr = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
-You have not referred anyone yet.
+    refSnap.forEach(docSnap => {
+        const data = docSnap.data();
+        totalReferrals++;
+        if (data.joinDate === todayStr) {
+            todaysReferrals++;
+        }
+        if (data.status === "approved") {
+            successfulReferrals++;
+        } else {
+            pendingReferrals++;
+        }
+    });
 
-Share your referral link and start earning commissions.`;
-    } else {
-        let totalReferrals = 0;
-        let totalCommission = 0;
-        let pendingCommission = 0;
-        let approvedCommission = 0;
+    const earnings = userData?.referralEarnings || 0;
 
-        refSnap.forEach(docSnap => {
-            const data = docSnap.data();
-            totalReferrals++;
-            pendingCommission += (data.pendingCommission || 0);
-            approvedCommission += (data.approvedCommission || 0);
-            totalCommission += (data.totalCommission || 0);
-        });
+    const message = `👥 *Refer & Earn Dashboard*
 
-        message = `👥 Refer & Earn
+🔑 *My Invite Code:* 
+\`${inviteCode}\`
 
-👥 Total Referrals: ${totalReferrals}
+🔗 *My Referral Link:* 
+\`${referralLink}\`
 
-💰 Total Commission: ${formatCurrency(totalCommission, currency)}
-
-⏳ Pending Commission: ${formatCurrency(pendingCommission, currency)}
-
-✅ Approved Commission: ${formatCurrency(approvedCommission, currency)}
-
-━━━━━━━━━━━━━━━
-
-🔗 Your Referral Link:
-
-${referralLink}`;
-    }
+📊 *Referral Stats:*
+━━━━━━━━━━━━━━━━━━━━
+👥 *Total Referrals:* ${totalReferrals}
+📅 *Today's Referrals:* ${todaysReferrals}
+⏳ *Pending Referrals:* ${pendingReferrals}
+✅ *Successful Referrals:* ${successfulReferrals}
+💰 *Referral Earnings:* ${formatCurrency(earnings, currency)}
+━━━━━━━━━━━━━━━━━━━━`;
 
     const inlineKeyboard = {
         inline_keyboard: [
             [
-                { text: "📋 Copy Referral Link", callback_data: `referral_copy_${userId}` },
-                { text: "📤 Share Referral Link", url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}` }
+                { text: "📋 Copy Referral Link", callback_data: `referral_copy_${inviteCode}` },
+                { text: "📤 Share Link", url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}` }
             ],
             [
                 { text: "📜 Referral History", callback_data: "referral_history" },
@@ -1339,7 +1545,7 @@ ${referralLink}`;
         ]
     };
 
-    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+    await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
 }
 
 async function processReferralHistory(botToken: string, chatId: number, user: any, callbackQueryId?: string) {
@@ -1350,13 +1556,14 @@ async function processReferralHistory(botToken: string, chatId: number, user: an
     const refSnap = await getDocs(refQuery);
 
     if (refSnap.empty) {
-        let message = `👥 Refer & Earn
+        const message = `👥 *Referral History*
 
 You have not referred anyone yet.
 
 Share your referral link and start earning commissions.`;
         
         await sendTelegramMessage(botToken, chatId, message, {
+            parse_mode: "Markdown",
             reply_markup: {
                 inline_keyboard: [
                     [{ text: "🔙 Back", callback_data: "referral_back" }]
@@ -1366,24 +1573,19 @@ Share your referral link and start earning commissions.`;
         return;
     }
 
-    let message = `📜 Referral History\n\n`;
+    let message = `📜 *Referral History*\n\n`;
     
     refSnap.forEach(docSnap => {
         const data = docSnap.data();
-        const firstName = data.referredFirstName || "User";
-        const lastName = data.referredLastName || "";
-        const fullName = lastName ? `${firstName} ${lastName}` : firstName;
-        const usernameStr = data.referredUsername ? `@${data.referredUsername}` : "N/A";
-        const rUserId = data.referredUserId || docSnap.id;
+        const referredName = data.referredName || data.referredFirstName || "User";
         const joinDate = data.joinDate || "N/A";
-        const statusVal = data.status === "approved" ? "✅ Approved" : "⏳ Pending";
+        const statusVal = data.status === "approved" ? "✅ Successful" : "⏳ Pending";
+        const rewardVal = data.rewardAmount ? `₹${data.rewardAmount}` : "₹0";
 
-        message += `👤 Name: ${fullName}
-📛 Username: ${usernameStr}
-🆔 User ID: ${rUserId}
-📅 Join Date: ${joinDate}
-Status:
-${statusVal}
+        message += `👤 *User Name:* ${referredName}
+📅 *Join Date:* ${joinDate}
+💰 *Reward:* ${rewardVal}
+⚡ *Status:* ${statusVal}
 
 ━━━━━━━━━━━━━━━\n\n`;
     });
@@ -1404,7 +1606,7 @@ ${statusVal}
         } catch (e) {}
     }
 
-    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+    await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
 }
 
 async function processAccount(botToken: string, chatId: number, user: any) {
@@ -4139,12 +4341,24 @@ async function processCallback(botToken: string, callbackQuery: any) {
                         body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "✅ Membership Verified!" })
                     });
 
-                    await setDoc(doc(db, "users", String(userId)), {
+                    const uData = {
+                        telegramId: String(userId),
+                        username: callbackQuery.from.username || "",
+                        firstName: callbackQuery.from.first_name || "",
+                        lastName: callbackQuery.from.last_name || "",
+                        referralCode: `RS${String(userId).slice(-6).toUpperCase()}`,
                         membershipVerified: true,
-                        registrationStep: 'mobile'
-                    }, { merge: true });
+                        registrationStep: 'name',
+                        availableBalance: 0,
+                        totalEarnings: 0,
+                        referralEarnings: 0,
+                        referrals: 0,
+                        level: "Bronze",
+                        status: "Active"
+                    };
+                    await setDoc(doc(db, "users", String(userId)), uData, { merge: true });
 
-                    await sendTelegramMessage(botToken, chatId, "📱 Please enter your Mobile Number.\n\nExample:\n9876543210");
+                    await sendTelegramMessage(botToken, chatId, "👤 Please enter your Full Name.\n\nExample:\nRitik Rai");
                 } else {
                     await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
                         method: "POST",
@@ -4170,6 +4384,29 @@ async function processCallback(botToken: string, callbackQuery: any) {
                 });
             } catch (e) {}
             await processStart(botToken, chatId, callbackQuery.from);
+            return;
+        } else if (data === "invite_skip") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ callback_query_id: callbackQuery.id, text: "⏭️ Skipped Invite Code" })
+                });
+            } catch (e) {}
+            await completeRegistrationAndCreditReferrer(db, botToken, chatId, String(userId), null);
+            return;
+        } else if (data === "invite_verify_msg") {
+            try {
+                await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        callback_query_id: callbackQuery.id, 
+                        text: "⌨️ Please type/paste your invite code as a chat message and send.",
+                        show_alert: true
+                    })
+                });
+            } catch (e) {}
             return;
         } else if (data === "verify_join") {
             // Keep legacy support or just ignore it, but the user wants to remove old stuff.
@@ -4259,7 +4496,9 @@ async function processCallback(botToken: string, callbackQuery: any) {
             const uDoc = await getDoc(doc(db, "users", String(userId)));
             const state = uDoc.data()?.pendingWithdrawal;
             if (state) {
-                await initiateHumanVerification(botToken, chatId, String(userId), state);
+                // Direct submission, no human verification / OTP required
+                await setDoc(doc(db, "users", String(userId)), { pendingWithdrawal: null }, { merge: true });
+                await submitWithdrawalRequest(botToken, chatId, String(userId), state);
             } else {
                 await sendTelegramMessage(botToken, chatId, "❌ Withdrawal session expired. Please start again using 💸 Withdraw.");
             }
@@ -5066,10 +5305,22 @@ https://youtube.com`;
             } catch (e) {}
             await processDashboard(botToken, chatId, callbackQuery.from);
         } else if (data.startsWith("referral_copy_")) {
-            const rUserId = data.replace("referral_copy_", "");
-            const appUrl = getAppUrl();
-            const baseDomain = appUrl.replace(/\/$/, "");
-            const referralLink = `${baseDomain}/ref/${rUserId}`;
+            const code = data.replace("referral_copy_", "");
+            let botUsername = "RoyShareEarnBot";
+            try {
+                const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
+                const bToken = settingsDoc.data()?.botToken;
+                if (bToken) {
+                    const botMeRes = await fetch(`https://api.telegram.org/bot${bToken}/getMe`);
+                    const botMeData = await botMeRes.json();
+                    if (botMeData.ok && botMeData.result?.username) {
+                        botUsername = botMeData.result.username;
+                    }
+                }
+            } catch (e) {
+                console.error("Error getting bot username inside copy callback:", e);
+            }
+            const referralLink = `https://t.me/${botUsername}?start=${code}`;
             
             try {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {

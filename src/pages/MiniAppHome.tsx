@@ -407,7 +407,8 @@ export const MiniAppHome: React.FC = () => {
   }
 
   if (currentView === "wallet" || currentView === "balance" || currentView === "withdraw" || currentView === "history") {
-    return <WalletPage onBack={() => setCurrentView("home")} />;
+    const initialTab = currentView === "balance" || currentView === "wallet" ? "wallet" : currentView;
+    return <WalletPage onBack={() => setCurrentView("home")} initialTab={initialTab} />;
   }
 
   if (currentView === "daily-bonus" || currentView === "spin-wheel") {

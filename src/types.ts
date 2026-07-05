@@ -10,6 +10,8 @@ export interface User {
   enteredName?: string;
   phone?: string;
   phoneVerifiedInMiniApp?: boolean;
+  upiId?: string;
+  mobile?: string;
   
   // Wallet
   balance: number; // ₹

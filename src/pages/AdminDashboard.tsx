@@ -2138,7 +2138,8 @@ export default function AdminDashboard() {
                             <td className="px-4 py-3 font-mono text-xs">{w.id.substring(0, 8)}...</td>
                             <td className="px-4 py-3">
                               <div className="font-medium text-white">{w.firstName} {w.lastName}</div>
-                              <div className="text-xs text-slate-500">@{w.username || 'unknown'}</div>
+                              <div className="text-xs text-slate-400">@{w.username || 'unknown'} | TG: {w.userId}</div>
+                              {w.mobile && <div className="text-xs text-slate-500">📞 {w.mobile}</div>}
                             </td>
                             <td className="px-4 py-3 font-bold text-emerald-400">${w.amount}</td>
                             <td className="px-4 py-3 font-medium">{w.method}</td>
@@ -6964,7 +6965,8 @@ export default function AdminDashboard() {
                   <div className="bg-slate-800/50 rounded-xl p-3 space-y-2">
                     <p className="text-xs text-slate-400">👤 Name: <span className="text-white ml-1">{selectedWithdrawal.firstName} {selectedWithdrawal.lastName}</span></p>
                     <p className="text-xs text-slate-400">📛 Username: <span className="text-white ml-1">@{selectedWithdrawal.username || 'N/A'}</span></p>
-                    <p className="text-xs text-slate-400">🆔 User ID: <span className="font-mono text-white ml-1">{selectedWithdrawal.userId}</span></p>
+                    <p className="text-xs text-slate-400">🆔 Telegram ID: <span className="font-mono text-white ml-1">{selectedWithdrawal.userId}</span></p>
+                    <p className="text-xs text-slate-400">📞 Mobile Number: <span className="text-white ml-1">{selectedWithdrawal.mobile || 'N/A'}</span></p>
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4">
@@ -8546,7 +8548,7 @@ export default function AdminDashboard() {
               ) : modalAction === 'view_user' && selectedUser ? (
                 <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
                   <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
-                    <h3 className="text-sm font-black text-indigo-400 uppercase tracking-widest border-b border-slate-700/50 pb-2 mb-2">👤 Identity Details</h3>
+                    <h3 className="text-sm font-black text-indigo-400 uppercase tracking-widest border-b border-slate-700/50 pb-2 mb-2">👤 Identity & Referral Details</h3>
                     <div className="grid grid-cols-2 gap-y-2">
                       <p className="text-[10px] text-slate-400">Entered Name: <span className="text-white font-bold ml-1">{selectedUser.enteredName || 'N/A'}</span></p>
                       <p className="text-[10px] text-slate-400">TG Username: <span className="text-indigo-400 ml-1">@{selectedUser.username || 'N/A'}</span></p>
@@ -8554,6 +8556,9 @@ export default function AdminDashboard() {
                       <p className="text-[10px] text-slate-400">TG Last Name: <span className="text-white ml-1">{selectedUser.lastName || 'N/A'}</span></p>
                       <p className="text-[10px] text-slate-400">Telegram ID: <span className="font-mono text-white ml-1">{selectedUser.telegramId || selectedUser.id}</span></p>
                       <p className="text-[10px] text-slate-400">Mobile Number: <span className="text-emerald-400 font-black ml-1">{selectedUser.phone || 'N/A'}</span></p>
+                      <p className="text-[10px] text-slate-400">User's Invite Code: <span className="text-yellow-400 font-bold ml-1">{selectedUser.referralCode || 'N/A'}</span></p>
+                      <p className="text-[10px] text-slate-400">Referred By ID: <span className="text-pink-400 ml-1">{selectedUser.referredBy || 'None'}</span></p>
+                      <p className="text-[10px] text-slate-400">Invite Code Used: <span className="text-sky-400 font-bold ml-1">{selectedUser.inviteCodeUsed || 'None'}</span></p>
                     </div>
                   </div>
 

@@ -484,7 +484,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       await setDoc(ref, { status: "Approved", approvedAt: new Date().toISOString() }, { merge: true });
       
       const data = snap.data();
-      await sendTgMessage(data.userId, `✅ <b>Withdrawal Approved</b>\n\nYour withdrawal request has been approved.`);
+      await sendTgMessage(data.userId, `✅ <b>Withdrawal Approved</b>\n\nAmount: ₹${data.amount}\nStatus: Approved\n\nThe payment has been approved and will be transferred shortly.`);
       res.json({ success: true });
     } catch (e: any) {
       console.error("Admin approve error:", e);
@@ -514,7 +514,7 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
   app.post("/api/admin/withdrawals/:id/reject", requireAdminDb, async (req, res) => {
     try {
       const { id } = req.params;
-      const { rejectReason, rejectionType } = req.body;
+      const { rejectReason } = req.body;
       const ref = doc(db, "withdrawals", id);
       const snap = await getDoc(ref);
       if (!snap.exists()) return res.status(404).json({ error: "Not found" });
@@ -524,41 +524,17 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
           return res.status(400).json({ error: "Withdrawal already processed" });
       }
 
-      // Fetch settings for tax
-      const settingsSnap = await getDoc(doc(db, "settings", "system"));
-      const settings = settingsSnap.data();
-      const taxSettings = settings?.withdrawalTaxSettings || {
-        upiTax: 5,
-        bankTax: 10,
-        usdtTax: 15
-      };
-
-      let taxPercent = 0;
-      let finalReason = rejectReason || "Rejected by administrator";
-
-      if (rejectionType === "upi") {
-          taxPercent = Number(taxSettings.upiTax || 5);
-      } else if (rejectionType === "bank") {
-          taxPercent = Number(taxSettings.bankTax || 10);
-      } else if (rejectionType === "usdt") {
-          taxPercent = Number(taxSettings.usdtTax || 15);
-      } else {
-          taxPercent = 0;
-      }
-
+      const finalReason = rejectReason || "Rejected by administrator";
       const requestedAmount = Number(wData.amount || 0);
-      const taxAmount = (requestedAmount * taxPercent) / 100;
-      const refundAmount = requestedAmount - taxAmount;
 
       // Update withdrawal doc
       await setDoc(ref, { 
           status: "Rejected", 
           rejectReason: finalReason, 
           adminRemark: finalReason,
-          taxPercent,
-          taxAmount,
-          refundAmount,
-          rejectionType: rejectionType || "other",
+          taxPercent: 0,
+          taxAmount: 0,
+          refundAmount: requestedAmount,
           rejectedAt: new Date().toISOString()
       }, { merge: true });
 
@@ -573,14 +549,11 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
           const USDT_RATE = 90; 
           
           const inrRequestedAmount = isUsdt ? (requestedAmount * USDT_RATE) : requestedAmount;
-          const inrTaxAmount = isUsdt ? (taxAmount * USDT_RATE) : taxAmount;
-          const inrRefundAmount = isUsdt ? (refundAmount * USDT_RATE) : refundAmount;
 
           const currentPending = Number(userData.pendingWithdrawals || 0);
           const currentBalance = Number(userData.balance || 0);
           
           const newPending = Math.max(0, currentPending - inrRequestedAmount);
-          const newBalance = currentBalance - inrTaxAmount; 
           
           // Recalculate availableBalance
           const fileEarnings = userData?.fileEarnings || 0;
@@ -590,11 +563,10 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
           const rewardBalance = userData?.rewardBalance || 0;
           const withdrawnAmount = userData?.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData?.totalWithdrawn || 0);
           
-          const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + newBalance - withdrawnAmount - newPending;
+          const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + currentBalance - withdrawnAmount - newPending;
 
           await setDoc(userRef, { 
               pendingWithdrawals: newPending, 
-              balance: newBalance,
               availableBalance,
               updatedAt: new Date().toISOString()
           }, { merge: true });
@@ -604,9 +576,9 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
               userId: wData.userId,
               type: "Withdrawal Rejected",
               requestedAmount: requestedAmount,
-              taxPercent: taxPercent,
-              taxAmount: taxAmount,
-              refundAmount: refundAmount,
+              taxPercent: 0,
+              taxAmount: 0,
+              refundAmount: requestedAmount,
               reason: finalReason,
               method: wData.method,
               currency: isUsdt ? "USDT" : "INR",
@@ -615,15 +587,10 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
           });
 
           // Notify User via Telegram
-          const currencySymbol = isUsdt ? "USDT" : "₹";
           const tgMessage = `❌ <b>Withdrawal Rejected</b>\n\n` +
-                          `<b>Reason:</b>\n${finalReason}\n\n` +
-                          `<b>Requested Amount:</b>\n${currencySymbol}${requestedAmount.toFixed(2)}\n\n` +
-                          `<b>Tax Applied:</b>\n${taxPercent}%\n\n` +
-                          `<b>Tax Deducted:</b>\n${currencySymbol}${taxAmount.toFixed(2)}\n\n` +
-                          `<b>Refunded Amount:</b>\n${currencySymbol}${refundAmount.toFixed(2)}\n\n` +
-                          `The refund has been added back to your Available Balance.\n\n` +
-                          `Please update your payment details before requesting another withdrawal.`;
+                          `Amount: ₹${requestedAmount}\n` +
+                          `Reason: ${finalReason}\n\n` +
+                          `The amount has been returned to your wallet.`;
           
           await sendTgMessage(wData.userId, tgMessage);
       }
@@ -5412,6 +5379,109 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     } catch (e: any) {
       console.error("[STATUS CHECK] Error:", e);
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/withdrawal/submit", async (req, res) => {
+    try {
+      const { userId, amount, upiId } = req.body;
+      if (!userId || !amount || !upiId) {
+        return res.status(400).json({ success: false, message: "Missing required parameters." });
+      }
+
+      const userDocRef = doc(db, "users", String(userId));
+      const userSnap = await getDoc(userDocRef);
+      if (!userSnap.exists()) {
+        return res.status(404).json({ success: false, message: "User not found." });
+      }
+
+      const userData = userSnap.data();
+      const userBalance = Number(userData.balance || 0);
+      const fileEarnings = Number(userData.fileEarnings || 0);
+      const linkEarnings = Number(userData.linkEarnings || 0);
+      const referralEarnings = Number(userData.referralEarnings || 0);
+      const bonusBalance = userData.bonusBalance !== undefined ? Number(userData.bonusBalance) : Number(userData.bonus || 0);
+      const rewardBalance = Number(userData.rewardBalance || 0);
+      const withdrawnAmount = userData.withdrawnAmount !== undefined ? Number(userData.withdrawnAmount) : Number(userData.totalWithdrawn || 0);
+      const pendingWithdrawals = Number(userData.pendingWithdrawals || 0);
+
+      const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + userBalance - withdrawnAmount - pendingWithdrawals;
+
+      // Get minimum withdrawal from system settings
+      const settingsSnap = await getDoc(doc(db, "settings", "system"));
+      let minWithdrawal = 100; // Default
+      if (settingsSnap.exists()) {
+        const settingsData = settingsSnap.data();
+        const minWithdrawalValue = settingsData?.withdrawalSettings?.["Minimum Withdrawal"];
+        if (minWithdrawalValue) {
+          minWithdrawal = parseFloat(String(minWithdrawalValue).replace(/[^0-9.]/g, "")) || 100;
+        }
+      }
+
+      const requestedAmount = Number(amount);
+      if (isNaN(requestedAmount) || requestedAmount <= 0) {
+        return res.status(400).json({ success: false, message: "Invalid withdrawal amount." });
+      }
+
+      if (requestedAmount < minWithdrawal) {
+        return res.status(400).json({ success: false, message: `Minimum withdrawal amount is ₹${minWithdrawal}.` });
+      }
+
+      if (requestedAmount > availableBalance) {
+        return res.status(400).json({ success: false, message: "Insufficient wallet balance." });
+      }
+
+      // Generate unique Request ID
+      let withdrawalId = "";
+      let isUnique = false;
+      while (!isUnique) {
+        const randomId = Math.floor(Math.random() * 900000) + 100000;
+        withdrawalId = `WD${randomId}`;
+        const existingDoc = await getDoc(doc(db, "withdrawals", withdrawalId));
+        if (!existingDoc.exists()) {
+          isUnique = true;
+        }
+      }
+
+      // Format current date & time
+      const now = new Date();
+      const currentDateTime = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+
+      const withdrawalDocData = {
+        id: withdrawalId,
+        withdrawalId,
+        userId: String(userId),
+        firstName: userData.firstName || "User",
+        lastName: userData.lastName || "",
+        username: userData.username || "",
+        mobile: userData.mobile || userData.phone || "",
+        amount: requestedAmount,
+        upiId: upiId.trim(),
+        method: "UPI ID",
+        status: "Pending",
+        createdAt: now.toISOString()
+      };
+
+      // 1. Create the withdrawal request
+      await setDoc(doc(db, "withdrawals", withdrawalId), withdrawalDocData);
+
+      // 2. Deduct available balance immediately by adding it to pendingWithdrawals on the user doc
+      // Also save UPI ID on the user profile so it acts as "Saved UPI ID"
+      await setDoc(userDocRef, {
+        pendingWithdrawals: pendingWithdrawals + requestedAmount,
+        upiId: upiId.trim(),
+        updatedAt: now.toISOString()
+      }, { merge: true });
+
+      // 3. Immediately send Telegram Bot notification
+      const tgMsg = `💸 <b>Withdrawal Request Submitted</b>\n\nAmount: ₹${requestedAmount}\nStatus: Pending\nRequest ID: ${withdrawalId}\nDate & Time: ${currentDateTime}\n\nYour request has been received successfully.\nPlease wait for admin approval.`;
+
+      await sendTgMessage(String(userId), tgMsg);
+
+      res.json({ success: true, withdrawalId });
+    } catch (e: any) {
+      console.error("Error submitting withdrawal:", e);
+      res.status(500).json({ success: false, message: "Internal server error." });
     }
   });
 
