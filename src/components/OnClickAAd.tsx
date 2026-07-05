@@ -110,29 +110,20 @@ export const OnClickAAd: React.FC<OnClickAAdProps> = ({ pageName, isDailyBonusSc
     // Since the page is allowed, remove the body class to display the ads
     document.body.classList.remove("ads-blocked");
 
-    // Perform initialization on window SDK object if available (compatibility check for TMA Inpage)
-    const initSDKOnPage = () => {
-      const wa = (window as any).wa || (window as any).onclicka || (window as any).OnClickA;
-      if (wa) {
-        if (typeof wa.init === "function") {
-          try { wa.init(); } catch (e) { console.error("[OnClickA] wa.init error:", e); }
-        }
-        if (typeof wa.trigger === "function") {
-          try { wa.trigger(); } catch (e) { console.error("[OnClickA] wa.trigger error:", e); }
-        }
-      }
-    };
-    initSDKOnPage();
-
     // Check script load status
     const isScriptPresent = !!document.head.querySelector('script[src*="onclicka"]') || 
                             !!document.head.querySelector('script[src*="onclckmn"]') ||
-                            !!(window as any).__onclickaScriptLoaded;
+                            !!(window as any).__onclickaScriptLoaded ||
+                            !!(window as any).ocMan ||
+                            !!(window as any).a3klsam;
 
     if (!isScriptPresent && adSettings) {
       // If script failed to load or is missing, consider it blocked/failed
       const checkTimeout = setTimeout(() => {
-        if (!document.head.querySelector('script[src*="onclicka"]') && !document.head.querySelector('script[src*="onclckmn"]')) {
+        if (!document.head.querySelector('script[src*="onclicka"]') && 
+            !document.head.querySelector('script[src*="onclckmn"]') &&
+            !(window as any).ocMan &&
+            !(window as any).a3klsam) {
           logEventOnce("Blocked");
         }
       }, 2000);
@@ -151,8 +142,16 @@ export const OnClickAAd: React.FC<OnClickAAdProps> = ({ pageName, isDailyBonusSc
                           !!document.head.querySelector('script[src*="onclckmn"]') ||
                           (window as any).__onclickaScriptLoaded;
 
+      const sdkFound = !!(window as any).ocMan || 
+                       !!(window as any).a3klsam || 
+                       !!(window as any).wa || 
+                       !!(window as any).onclicka || 
+                       !!(window as any).OnClickA;
+
       if (scriptFound) {
         logEventOnce("Script loaded");
+      }
+      if (sdkFound) {
         logEventOnce("SDK initialized");
       }
 

@@ -7355,12 +7355,16 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     }
   });
 
-  // Vite middleware disabled due to hangs
-  /*
+  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    // ...
+    debugLog("Setting up Vite development middleware...");
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
   } else {
-  */
     app.get('/', (req, res, next) => {
       debugLog("ROOT ROUTE HIT");
       next();
@@ -7372,7 +7376,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       debugLog(`Serving index from: ${indexPath}`);
       res.sendFile(indexPath);
     });
-  // }
+  }
 
   debugLog(`startServer: Attempting to listen on port ${PORT}...`);
   app.listen(PORT, "0.0.0.0", () => {
