@@ -78,10 +78,24 @@ export default function DailyBonusPage() {
     
     if (resolvedId) {
       setUserId(resolvedId);
+      try {
+        const saved = localStorage.getItem(`daily_bonus_active_view_${resolvedId}`);
+        if (saved && ['selection', 'wheel', 'box', 'scratch'].includes(saved)) {
+          setActiveView(saved as any);
+        }
+      } catch (e) {}
     } else {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (userId) {
+      try {
+        localStorage.setItem(`daily_bonus_active_view_${userId}`, activeView);
+      } catch (e) {}
+    }
+  }, [activeView, userId]);
 
   const fetchStatus = async () => {
     if (!userId) return;
@@ -270,9 +284,7 @@ export default function DailyBonusPage() {
           claimed: false
         });
         if (activeView === 'scratch') {
-          setTimeout(() => {
-            initScratchCard();
-          }, 150);
+          setScratchedPercent(100);
         } else if (activeView === 'box' && selectedBox === null) {
           setSelectedBox(0);
         }
