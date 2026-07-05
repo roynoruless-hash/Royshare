@@ -61,6 +61,18 @@ import { MiniAppHome } from "./pages/MiniAppHome";
 const ADMIN_AUTH_ENABLED = false;
 
 export default function App() {
+  if (window.location.pathname === "/ad-test") {
+    return (
+      <Suspense fallback={
+        <div className="min-h-screen bg-[#020617] flex items-center justify-center font-sans">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      }>
+        <AdTestPage />
+      </Suspense>
+    );
+  }
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
 
