@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
+import { db } from "../lib/firebase";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { 
   Zap, Play, CheckCircle2, AlertTriangle, Timer, Tv, 
   Target, ShieldAlert, Award, Clock, AlertCircle, Info,
@@ -130,8 +132,19 @@ export default function AdminDashboard() {
   const [fullAdPreview, setFullAdPreview] = useState(false);
   const [adView, setAdView] = useState<'ads' | 'analytics' | 'placement'>('ads');
   const [adForm, setAdForm] = useState<any>({
-    adName: "", adSource: "Adsterra", adType: "Banner Ad", targetPage: "All Pages", placement: "Header Banner", status: "🟢 Active", scriptCode: "", revenue: 0
+    adName: "", adSource: "OnClickA", adType: "InPage Ad", targetPage: "All Pages", placement: "Floating Overlay", status: "🟢 Active", scriptCode: "", revenue: 0
   });
+
+  const [adSettings, setAdSettings] = useState<any>({
+    network: "onclicka",
+    enabled: false,
+    verified: false,
+    script: ""
+  });
+  const [adSettingsLoading, setAdSettingsLoading] = useState(false);
+  const [adSettingsFeedback, setAdSettingsFeedback] = useState("");
+  const [adSettingsError, setAdSettingsError] = useState("");
+  const [adSettingsLastUpdated, setAdSettingsLastUpdated] = useState<any>(null);
 
   const [systemSettings, setSystemSettings] = useState<any>({
     botSettings: {},
@@ -1050,6 +1063,133 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchAdSettings = async () => {
+    setAdSettingsLoading(true);
+    setAdSettingsFeedback("");
+    setAdSettingsError("");
+    try {
+      const docRef = doc(db, "settings", "advertisement");
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setAdSettings({
+          network: data.network || "onclicka",
+          enabled: data.enabled ?? false,
+          verified: data.verified ?? false,
+          script: data.script || ""
+        });
+        if (data.updatedAt) {
+          const date = data.updatedAt.toDate ? data.updatedAt.toDate() : new Date(data.updatedAt);
+          setAdSettingsLastUpdated(date.toLocaleString());
+        } else {
+          setAdSettingsLastUpdated("Never");
+        }
+      } else {
+        setAdSettings({
+          network: "onclicka",
+          enabled: false,
+          verified: false,
+          script: ""
+        });
+        setAdSettingsLastUpdated("Never");
+      }
+    } catch (err: any) {
+      console.error("Error fetching ad settings:", err);
+      setAdSettingsError("Failed to load advertisement settings from Firestore.");
+    } finally {
+      setAdSettingsLoading(false);
+    }
+  };
+
+  const verifyScript = (scriptText: string) => {
+    setAdSettingsFeedback("");
+    setAdSettingsError("");
+
+    if (!scriptText || !scriptText.trim()) {
+      setAdSettingsError("❌ Validation failed: Script cannot be empty.");
+      return false;
+    }
+
+    // Contains a valid <script> tag
+    const scriptTagRegex = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+    const matches = scriptText.match(scriptTagRegex);
+    if (!matches || matches.length === 0) {
+      setAdSettingsError("❌ Validation failed: Must contain a valid <script> ... </script> tag.");
+      return false;
+    }
+
+    // Contains src attribute
+    if (!scriptText.includes("src=")) {
+      setAdSettingsError("❌ Validation failed: Script must contain a 'src' attribute.");
+      return false;
+    }
+
+    // Contains https://js.onclickmn.com/
+    if (!scriptText.includes("https://js.onclickmn.com/")) {
+      setAdSettingsError("❌ Validation failed: Script must contain 'https://js.onclickmn.com/' as the script source.");
+      return false;
+    }
+
+    // No duplicate script exists
+    if (matches.length > 1) {
+      setAdSettingsError("❌ Validation failed: Multiple script tags detected. Only one script block is allowed.");
+      return false;
+    }
+
+    const srcMatch = scriptText.match(/src=["']([^"']+)["']/);
+    if (srcMatch && srcMatch[1]) {
+      const srcUrl = srcMatch[1];
+      const existing = document.querySelectorAll(`script[src="${srcUrl}"]`);
+      if (existing.length > 1) {
+        setAdSettingsError("❌ Validation failed: Duplicate script already exists in application header.");
+        return false;
+      }
+    }
+
+    setAdSettingsFeedback("✅ Script Verified Successfully");
+    setAdSettings(prev => ({ ...prev, verified: true }));
+    return true;
+  };
+
+  const saveAdSettings = async (overrideSettings?: any) => {
+    setAdSettingsLoading(true);
+    setAdSettingsFeedback("");
+    setAdSettingsError("");
+
+    const settingsToSave = overrideSettings || adSettings;
+
+    // If enabling is set, script is required and must be verified.
+    if (settingsToSave.enabled && settingsToSave.network === "onclicka") {
+      if (!settingsToSave.verified) {
+        const isValid = verifyScript(settingsToSave.script);
+        if (!isValid) {
+          setAdSettingsLoading(false);
+          return;
+        }
+      }
+    }
+
+    try {
+      const docRef = doc(db, "settings", "advertisement");
+      const updatedData = {
+        network: settingsToSave.network,
+        enabled: settingsToSave.enabled,
+        verified: settingsToSave.verified,
+        script: settingsToSave.script,
+        updatedAt: serverTimestamp()
+      };
+      await setDoc(docRef, updatedData);
+      setAdSettings(settingsToSave);
+      setAdSettingsLastUpdated(new Date().toLocaleString());
+      setAdSettingsFeedback("✅ Advertisement settings saved successfully!");
+    } catch (err: any) {
+      console.error("Error saving ad settings:", err);
+      setAdSettingsError(`❌ Failed to save settings: ${err.message}`);
+    } finally {
+      setAdSettingsLoading(false);
+    }
+  };
+
   const fetchSystemSettings = async () => {
     setSystemSettingsLoading(true);
     try {
@@ -1674,6 +1814,8 @@ export default function AdminDashboard() {
       fetchMonetagStats();
     } else if (activeTab === '📥 Google Drive Accounts') {
       fetchGoogleDriveAccounts();
+    } else if (activeTab === '📢 Advertisement Settings') {
+      fetchAdSettings();
     }
 
     return () => {
@@ -1908,7 +2050,7 @@ export default function AdminDashboard() {
         <div className="space-y-8 max-w-7xl mx-auto">
           {/* Navigation Buttons */}
           <div className="flex flex-wrap gap-3">
-            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "🔗 Smart URL Shortener", "📥 Google Drive Accounts", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "⚙️ System Settings"].map((btn) => (
+            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "🔗 Smart URL Shortener", "📥 Google Drive Accounts", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "⚙️ System Settings", "📢 Advertisement Settings"].map((btn) => (
               <button 
                 key={btn} 
                 onClick={() => {
@@ -3452,7 +3594,7 @@ export default function AdminDashboard() {
                   <button onClick={() => setAdView('ads')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${adView === 'ads' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📋 View Ads</button>
                   <button onClick={() => setAdView('analytics')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${adView === 'analytics' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 Ad Analytics</button>
                   <button onClick={() => window.open('/ad-test', '_blank')} className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-purple-900/20">🧪 Debug Mode</button>
-                  <button onClick={() => { setShowAdPreview(false); setAdForm({ adName: "", adSource: "Adsterra", adType: "Banner Ad", targetPage: "All Pages", placement: "Header Banner", status: "🟢 Active", scriptCode: "", revenue: 0 }); setModalAction('create_ad'); }} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20">➕ Create Ad</button>
+                  <button onClick={() => { setShowAdPreview(false); setAdForm({ adName: "", adSource: "OnClickA", adType: "InPage Ad", targetPage: "All Pages", placement: "Floating Overlay", status: "🟢 Active", scriptCode: "", revenue: 0 }); setModalAction('create_ad'); }} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20">➕ Create Ad</button>
                   <button onClick={() => { fetchAds(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700">🔄 Refresh</button>
                 </div>
               </div>
@@ -3544,7 +3686,7 @@ export default function AdminDashboard() {
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-blue-500 font-bold"
                       >
                         <option value="All">All Networks</option>
-                        <option value="Adsterra">Adsterra</option>
+                        <option value="OnClickA">OnClickA</option>
                       </select>
                     </div>
                     <div>
@@ -6902,6 +7044,208 @@ export default function AdminDashboard() {
               )}
             </div>
           )}
+
+          {activeTab === '📢 Advertisement Settings' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    📢 Advertisement Settings
+                  </h2>
+                  <p className="text-slate-400 text-sm">Control advertisements globally across RoyShare Earn without redeploying code.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => saveAdSettings()} 
+                    disabled={adSettingsLoading} 
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 disabled:text-slate-400 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20"
+                  >
+                    💾 Save Settings
+                  </button>
+                  <button 
+                    onClick={() => fetchAdSettings()} 
+                    disabled={adSettingsLoading} 
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700"
+                  >
+                    🔄 Refresh
+                  </button>
+                </div>
+              </div>
+
+              {adSettingsLoading ? (
+                <div className="flex justify-center py-20">
+                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Left Controls Card */}
+                  <div className="lg:col-span-2 space-y-6">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+                      <h3 className="text-lg font-bold text-white border-b border-slate-800 pb-3">⚙️ Ad Configuration</h3>
+                      
+                      {/* 1. Ads Network Dropdown */}
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-slate-300">1. Ads Network</label>
+                        <select 
+                          value={adSettings.network} 
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setAdSettings({ 
+                              ...adSettings, 
+                              network: val, 
+                              enabled: val === "onclicka" ? adSettings.enabled : false 
+                            });
+                          }} 
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="onclicka">OnClickA</option>
+                          <option value="disabled">Disabled</option>
+                        </select>
+                        <p className="text-xs text-slate-500">Choose the active ad provider network. Select 'Disabled' to turn off all monetization.</p>
+                      </div>
+
+                      {/* 2. Ads Status Toggle Switch */}
+                      <div className="flex justify-between items-center bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <div>
+                          <label className="block text-sm font-semibold text-white">2. Ads Status</label>
+                          <p className="text-xs text-slate-500">Toggle all system advertisements ON or OFF globally.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setAdSettings({ ...adSettings, enabled: !adSettings.enabled })}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 shadow-md ${
+                            adSettings.enabled 
+                              ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-emerald-900/10' 
+                              : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                          }`}
+                        >
+                          {adSettings.enabled ? "ON" : "OFF"}
+                        </button>
+                      </div>
+
+                      {/* 3. Ads Script Textarea */}
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-slate-300">3. Ads Script Code</label>
+                        <textarea 
+                          value={adSettings.script} 
+                          onChange={(e) => setAdSettings({ ...adSettings, script: e.target.value, verified: false })} 
+                          placeholder="Paste the complete script from OnClickA (e.g. <script src='https://js.onclickmn.com/... '></script>)"
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white h-48 font-mono text-xs focus:outline-none focus:border-indigo-500"
+                        ></textarea>
+                        <p className="text-xs text-slate-500">Provide the official OnClickA script tag. Changing this script resets the verification status.</p>
+                      </div>
+
+                      {/* Feedback Indicators */}
+                      {adSettingsFeedback && (
+                        <div className="p-4 bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 shrink-0" />
+                          <span>{adSettingsFeedback}</span>
+                        </div>
+                      )}
+                      {adSettingsError && (
+                        <div className="p-4 bg-rose-950/40 border border-rose-500/30 text-rose-400 rounded-xl text-xs flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 shrink-0" />
+                          <span>{adSettingsError}</span>
+                        </div>
+                      )}
+
+                      {/* Verification and Core action buttons */}
+                      <div className="flex flex-wrap gap-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => verifyScript(adSettings.script)}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs rounded-xl transition-all shadow-md"
+                        >
+                          🔍 Verify Script
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => saveAdSettings()}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xl transition-all shadow-md"
+                        >
+                          💾 Save Script
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdSettings({ ...adSettings, script: "", verified: false });
+                            setAdSettingsFeedback("Script cleared. Click 'Save Script' to save this change.");
+                          }}
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs rounded-xl transition-all border border-slate-700"
+                        >
+                          🗑️ Clear Script
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = { ...adSettings, enabled: true };
+                            saveAdSettings(updated);
+                          }}
+                          className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white font-medium text-xs rounded-xl transition-all"
+                        >
+                          🟢 Enable Ads
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = { ...adSettings, enabled: false };
+                            saveAdSettings(updated);
+                          }}
+                          className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-xl transition-all"
+                        >
+                          🔴 Disable Ads
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Status Cards Panel */}
+                  <div className="space-y-6">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+                      <h3 className="text-lg font-bold text-white border-b border-slate-800 pb-3">ℹ️ Status Overview</h3>
+                      
+                      <div className="space-y-4">
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+                          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Ads Status</span>
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${adSettings.enabled ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
+                            {adSettings.enabled ? "ACTIVE" : "DISABLED"}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+                          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Network Name</span>
+                          <span className="text-sm font-bold text-indigo-400">
+                            {adSettings.network === "onclicka" ? "OnClickA" : "Disabled"}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+                          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Verification</span>
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${adSettings.verified ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+                            {adSettings.verified ? "VERIFIED" : "UNVERIFIED"}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+                          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Last Updated</span>
+                          <span className="text-xs text-slate-300 font-mono">
+                            {adSettingsLastUpdated || "Never"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-950/40 border border-slate-800/60 rounded-xl p-4 space-y-2 text-xs text-slate-400">
+                        <span className="font-bold text-white block">Instructions:</span>
+                        <p>1. Paste script snippet from OnClickA Dashboard.</p>
+                        <p>2. Verify script validity with <strong>Verify Script</strong> button.</p>
+                        <p>3. Save the active configurations with <strong>Save Settings</strong>.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -8348,11 +8692,11 @@ export default function AdminDashboard() {
                     <div>
                       <label className="block text-sm font-medium text-slate-400 mb-1">Ad Network</label>
                       <select 
-                        value={adForm.adSource || "Adsterra"}
+                        value={adForm.adSource || "OnClickA"}
                         onChange={(e) => setAdForm({...adForm, adSource: e.target.value})}
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
                       >
-                        <option value="Adsterra">Adsterra</option>
+                        <option value="OnClickA">OnClickA</option>
                       </select>
                     </div>
                     <div>

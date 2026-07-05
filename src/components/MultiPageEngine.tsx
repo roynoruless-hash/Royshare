@@ -3,6 +3,7 @@ import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, ShieldAlert, ArrowRight, Download, ExternalLink, CheckCircle2 } from "lucide-react";
 import AnimatedBackground from "./AnimatedBackground";
+import { OnClickAAd } from "./OnClickAAd";
 
 // ----------------- Error Boundary -----------------
 interface ErrorBoundaryProps {
@@ -500,6 +501,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   return (
     <div className="min-h-screen relative text-slate-200 font-sans flex flex-col justify-between overflow-hidden">
       <AnimatedBackground />
+      <OnClickAAd pageName={type} />
 
       {/* Header */}
       <header className="relative z-10 w-full max-w-7xl mx-auto px-6 py-4 flex items-center justify-between border-b border-white/5 bg-slate-950/20 backdrop-blur-sm">

@@ -33,6 +33,7 @@ import { collection, getDocs, query, where, doc, updateDoc } from "firebase/fire
 import { SurveyPage } from "./SurveyPage";
 import { WalletPage } from "./WalletPage";
 import DailyBonusPage from "./DailyBonusPage";
+import { OnClickAAd } from "../components/OnClickAAd";
 import DashboardPage from "./DashboardPage";
 import RewardTasksPage from "./RewardTasksPage";
 import { API_BASE } from "../config/api";
@@ -471,6 +472,7 @@ export const MiniAppHome: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#020617] text-white overflow-x-hidden pb-12 font-sans">
+      <OnClickAAd pageName={currentView === "daily-bonus" ? "forbidden" : currentView} />
       <AnimatePresence mode="wait">
         {currentView === "home" && (
           <motion.div
