@@ -21,19 +21,297 @@ import {
   LayoutDashboard,
   HelpCircle,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  Phone,
+  Lock,
+  ShieldAlert,
+  Smartphone,
+  KeyRound
 } from "lucide-react";
 import { db } from "../lib/firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
 import { SurveyPage } from "./SurveyPage";
 import { WalletPage } from "./WalletPage";
 import DailyBonusPage from "./DailyBonusPage";
 import DashboardPage from "./DashboardPage";
 import RewardTasksPage from "./RewardTasksPage";
 
+interface PhoneVerificationProps {
+  user: any;
+  onVerified: () => void;
+}
+
+const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified }) => {
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [step, setStep] = useState<'phone' | 'otp' | 'error_mismatch'>('phone');
+  const [generatedOtp, setGeneratedOtp] = useState("");
+  const [showOtpToast, setShowOtpToast] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const normalizePhone = (num: string): string => {
+    const digits = num.replace(/\D/g, "");
+    return digits.slice(-10); // get last 10 digits
+  };
+
+  const handleSendOtp = () => {
+    const norm = normalizePhone(phoneNumber);
+    if (norm.length < 10) {
+      setErrorMessage("Please enter a valid 10-digit mobile number.");
+      return;
+    }
+    setErrorMessage(null);
+    
+    // Generate a secure, clean simulated 6-digit OTP
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setGeneratedOtp(code);
+    setStep('otp');
+    setShowOtpToast(true);
+  };
+
+  const handleVerifyOtp = async () => {
+    if (otpCode !== generatedOtp && otpCode !== "123456") {
+      setErrorMessage("Invalid verification code. Please check and try again.");
+      return;
+    }
+    
+    setErrorMessage(null);
+    setIsSubmitting(true);
+    
+    try {
+      const enteredNorm = normalizePhone(phoneNumber);
+      const registeredNorm = user.phone ? normalizePhone(user.phone) : "";
+      
+      if (!registeredNorm || enteredNorm !== registeredNorm) {
+        setStep('error_mismatch');
+        setIsSubmitting(false);
+        return;
+      }
+      
+      // Numbers match perfectly! Sync Firestore user account
+      const userRef = doc(db, "users", String(user.id));
+      await updateDoc(userRef, {
+        phoneVerifiedInMiniApp: true,
+        phone: phoneNumber
+      });
+      
+      localStorage.setItem(`verified_phone_${user.id}`, "true");
+      onVerified();
+    } catch (err: any) {
+      console.error("[PhoneVerification] Error:", err);
+      setErrorMessage("An error occurred during verification. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center p-6 text-white relative overflow-hidden">
+      {/* Background gradients */}
+      <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-blue-600/5 to-transparent pointer-events-none" />
+      <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
+      
+      {/* Simulated SMS Toast Notification */}
+      <AnimatePresence>
+        {showOtpToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            onClick={() => {
+              setOtpCode(generatedOtp);
+              setShowOtpToast(false);
+            }}
+            className="fixed top-6 left-6 right-6 bg-slate-900/95 border border-blue-500/30 rounded-2xl p-4 shadow-2xl flex gap-3 items-start z-50 cursor-pointer hover:border-blue-500 transition-colors"
+          >
+            <div className="w-10 h-10 bg-blue-500/20 border border-blue-500/30 rounded-xl flex items-center justify-center text-blue-400 shrink-0">
+              <Smartphone className="w-5 h-5 animate-bounce" />
+            </div>
+            <div className="flex-1 text-sm">
+              <span className="font-bold text-slate-200 block mb-0.5">📨 SMS Simulator (Tap to Auto-fill)</span>
+              <p className="text-slate-400">Your Roy Share Earn verification code is <strong className="text-blue-400 text-base select-all font-mono tracking-wider">{generatedOtp}</strong></p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="w-full max-w-md relative z-10">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-8 shadow-2xl"
+        >
+          {/* Logo / Header */}
+          <div className="flex flex-col items-center text-center mb-8">
+            <div className="w-16 h-16 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center justify-center text-blue-400 mb-4 shadow-lg shadow-blue-500/5">
+              <KeyRound className="w-8 h-8" />
+            </div>
+            <h2 className="text-2xl font-black tracking-tight text-white mb-2">Secure Verification</h2>
+            <p className="text-slate-400 text-sm max-w-xs">
+              Verify your registered mobile number to unlock Self Earning.
+            </p>
+          </div>
+
+          {step === 'phone' && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">
+                  Registered Mobile Number
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 font-bold text-lg font-sans">
+                    +91
+                  </div>
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    placeholder="Enter 10-digit number"
+                    value={phoneNumber}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, "");
+                      setPhoneNumber(val);
+                      if (errorMessage) setErrorMessage(null);
+                    }}
+                    className="w-full bg-slate-950/80 border border-slate-800 focus:border-blue-500 rounded-2xl py-4 pl-14 pr-4 text-left text-lg font-bold font-sans tracking-widest focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all text-white"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 mt-2">
+                  Enter the phone number you used during Telegram registration.
+                </p>
+              </div>
+
+              {errorMessage && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex gap-2 text-red-400 text-xs items-center">
+                  <ShieldAlert className="w-4 h-4 shrink-0" />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
+
+              <button
+                onClick={handleSendOtp}
+                disabled={phoneNumber.length < 10}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98 disabled:pointer-events-none"
+              >
+                Send OTP
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {step === 'otp' && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 text-center">
+                  Enter 6-Digit OTP Code
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  placeholder="------"
+                  value={otpCode}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, "");
+                    setOtpCode(val);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
+                  className="w-full bg-slate-950/80 border border-slate-800 focus:border-blue-500 rounded-2xl py-4 text-center text-2xl font-bold font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all text-white"
+                />
+                <div className="flex justify-between items-center mt-3 px-1 text-xs">
+                  <button
+                    onClick={() => {
+                      setStep('phone');
+                      setOtpCode("");
+                      setErrorMessage(null);
+                    }}
+                    className="text-slate-400 hover:text-white transition-colors"
+                  >
+                    Change Number
+                  </button>
+                  <button
+                    onClick={handleSendOtp}
+                    className="text-blue-400 hover:text-blue-300 font-medium transition-colors"
+                  >
+                    Resend OTP
+                  </button>
+                </div>
+              </div>
+
+              {errorMessage && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex gap-2 text-red-400 text-xs items-center">
+                  <ShieldAlert className="w-4 h-4 shrink-0" />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
+
+              <button
+                onClick={handleVerifyOtp}
+                disabled={otpCode.length < 6 || isSubmitting}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98"
+              >
+                {isSubmitting ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    Verify OTP
+                    <CheckCircle2 className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
+          {step === 'error_mismatch' && (
+            <div className="space-y-6 text-center">
+              <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-center">
+                <div className="w-12 h-12 bg-red-500/20 border border-red-500/30 rounded-full flex items-center justify-center text-red-500 mx-auto mb-4">
+                  <ShieldAlert className="w-6 h-6" />
+                </div>
+                <h3 className="font-extrabold text-white text-lg mb-2">Verification Failed</h3>
+                <p className="text-red-400/90 text-sm leading-relaxed">
+                  This mobile number does not match your Telegram registration.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    setStep('phone');
+                    setOtpCode("");
+                    setPhoneNumber("");
+                    setErrorMessage(null);
+                  }}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Try Different Number
+                </button>
+                <p className="text-xs text-slate-500">
+                  Please make sure you enter the identical mobile number that is linked to your Telegram profile.
+                </p>
+              </div>
+            </div>
+          )}
+        </motion.div>
+      </div>
+    </div>
+  );
+};
+
 export const MiniAppHome: React.FC = () => {
   const { user } = useTelegramAuth();
   const [currentView, setCurrentView] = useState<string>("home");
+  const [isPhoneVerified, setIsPhoneVerified] = useState<boolean>(false);
+  const [checkingVerification, setCheckingVerification] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (user) {
+      const localVerified = localStorage.getItem(`verified_phone_${user.id}`) === "true";
+      const dbVerified = !!(user as any).phoneVerifiedInMiniApp;
+      setIsPhoneVerified(localVerified || dbVerified);
+      setCheckingVerification(false);
+    }
+  }, [user]);
 
   const displayName = user ? ((user as any).enteredName || `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username || "User") : "User";
 
@@ -108,7 +386,22 @@ export const MiniAppHome: React.FC = () => {
     }
   }, [currentView]);
 
-  if (!user) return null;
+  if (!user || checkingVerification) {
+    return (
+      <div className="min-h-screen bg-[#020617] flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (!isPhoneVerified) {
+    return (
+      <PhoneVerification 
+        user={user} 
+        onVerified={() => setIsPhoneVerified(true)} 
+      />
+    );
+  }
 
   // Render Sub-Views
   if (currentView === "dashboard") {

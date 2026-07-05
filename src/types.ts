@@ -9,6 +9,7 @@ export interface User {
   isPremium: boolean;
   enteredName?: string;
   phone?: string;
+  phoneVerifiedInMiniApp?: boolean;
   
   // Wallet
   balance: number; // ₹
