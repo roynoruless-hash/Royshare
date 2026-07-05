@@ -1119,31 +1119,41 @@ export default function AdminDashboard() {
     }
 
     // Contains src attribute
-    if (!scriptText.includes("src=")) {
+    if (!scriptText.toLowerCase().includes("src=")) {
       setAdSettingsError("❌ Validation failed: Script must contain a 'src' attribute.");
       return false;
     }
 
-    // Contains https://js.onclickmn.com/
-    if (!scriptText.includes("https://js.onclickmn.com/")) {
-      setAdSettingsError("❌ Validation failed: Script must contain 'https://js.onclickmn.com/' as the script source.");
+    // Contains "onclicka.js"
+    if (!scriptText.includes("onclicka.js")) {
+      setAdSettingsError("❌ Validation failed: Script must contain 'onclicka.js'.");
       return false;
     }
 
-    // No duplicate script exists
+    // Contains "data-admpid"
+    if (!scriptText.includes("data-admpid")) {
+      setAdSettingsError("❌ Validation failed: Script must contain a 'data-admpid' attribute.");
+      return false;
+    }
+
+    // Contains a valid HTTPS URL in src attribute
+    const srcMatch = scriptText.match(/src\s*=\s*["'](https:\/\/[^"']+)["']/i);
+    if (!srcMatch || !srcMatch[1]) {
+      setAdSettingsError("❌ Validation failed: Script must contain a valid HTTPS URL in the 'src' attribute.");
+      return false;
+    }
+
+    // No duplicate script block within the input
     if (matches.length > 1) {
       setAdSettingsError("❌ Validation failed: Multiple script tags detected. Only one script block is allowed.");
       return false;
     }
 
-    const srcMatch = scriptText.match(/src=["']([^"']+)["']/);
-    if (srcMatch && srcMatch[1]) {
-      const srcUrl = srcMatch[1];
-      const existing = document.querySelectorAll(`script[src="${srcUrl}"]`);
-      if (existing.length > 1) {
-        setAdSettingsError("❌ Validation failed: Duplicate script already exists in application header.");
-        return false;
-      }
+    const srcUrl = srcMatch[1];
+    const existing = document.querySelectorAll(`script[src="${srcUrl}"]`);
+    if (existing.length > 1) {
+      setAdSettingsError("❌ Validation failed: Duplicate script already exists in application header.");
+      return false;
     }
 
     setAdSettingsFeedback("✅ Script Verified Successfully");
