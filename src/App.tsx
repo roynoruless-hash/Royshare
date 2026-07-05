@@ -17,6 +17,8 @@ import CTA from "./components/CTA";
 import Footer from "./components/Footer";
 import AdminLogin from "./components/AdminLogin";
 import MultiPageEngine from "./components/MultiPageEngine";
+import { db } from "./lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const DailyBonusPage = lazy(() => import("./pages/DailyBonusPage"));
@@ -79,8 +81,79 @@ export default function App() {
         console.error(err);
         setLoadingConfig(false);
       });
-    
-    // ... admin auth logic omitted for brevity as it's not the focus
+
+    // Centralized OnClickA loader script - Load ONLY ONCE during startup
+    const initAdScript = async () => {
+      try {
+        const docRef = doc(db, "settings", "advertisement");
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const enabled = data.enabled ?? false;
+          const verified = data.verified ?? false;
+          const scriptCode = data.script || "";
+
+          if (enabled && verified && scriptCode) {
+            let src = "https://js.onclckmn.com/static/onclicka.js"; // Official default CDN
+            const attributes: { [key: string]: string } = {};
+
+            try {
+              const parser = new DOMParser();
+              const docObj = parser.parseFromString(scriptCode, "text/html");
+              const parsedScript = docObj.querySelector("script");
+              if (parsedScript) {
+                src = parsedScript.getAttribute("src") || src;
+                for (let i = 0; i < parsedScript.attributes.length; i++) {
+                  const attr = parsedScript.attributes[i];
+                  if (attr.name !== "src") {
+                    attributes[attr.name] = attr.value;
+                  }
+                }
+              }
+            } catch (e) {
+              console.error("[OnClickA] Failed to parse script attributes:", e);
+            }
+
+            // Ensure we never inject duplicate script tags
+            const existingScript = document.querySelector(`script[src="${src}"]`);
+            if (!existingScript) {
+              console.log("[OnClickA] Centralized script injection initiated...");
+              const scriptEl = document.createElement("script");
+              scriptEl.src = src;
+              Object.keys(attributes).forEach((key) => {
+                scriptEl.setAttribute(key, attributes[key]);
+              });
+              scriptEl.setAttribute("data-cfasync", "false");
+              scriptEl.async = true;
+
+              scriptEl.onload = () => {
+                (window as any).__onclickaScriptLoaded = true;
+                (window as any).__onclickaSDKInitialized = true;
+                console.log("Script loaded");
+                console.log("SDK initialized");
+              };
+
+              scriptEl.onerror = () => {
+                (window as any).__onclickaScriptLoaded = false;
+                (window as any).__onclickaBlocked = true;
+                console.log("Blocked");
+              };
+
+              document.head.appendChild(scriptEl);
+            } else {
+              console.log("[OnClickA] Loader script is already loaded globally.");
+            }
+          } else {
+            (window as any).__onclickaBlocked = true;
+            console.log("Blocked");
+          }
+        }
+      } catch (err) {
+        console.error("[OnClickA] Error loading startup ad configuration:", err);
+      }
+    };
+
+    initAdScript();
   }, []);
 
   const renderContent = () => {

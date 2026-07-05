@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { db } from "../lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
 
@@ -40,16 +40,25 @@ const FORBIDDEN_PAGES = [
 
 export const OnClickAAd: React.FC<OnClickAAdProps> = ({ pageName, isDailyBonusScratchActive = false }) => {
   const [adSettings, setAdSettings] = useState<{ enabled: boolean; verified: boolean; script: string } | null>(null);
+  
+  // Track events printed for the current page session
+  const loggedEvents = useRef<Set<string>>(new Set());
 
   // Determine if we should show the ad on this page based on static rules
   const isAllowed = ALLOWED_PAGES.includes(pageName.toLowerCase()) && 
                     !FORBIDDEN_PAGES.includes(pageName.toLowerCase()) &&
                     !(pageName.toLowerCase() === "daily-bonus" && isDailyBonusScratchActive);
 
-  // Fetch centralized ad settings from Firestore settings/advertisement
+  const logEventOnce = (event: string) => {
+    if (!loggedEvents.current.has(event)) {
+      console.log(event);
+      loggedEvents.current.add(event);
+    }
+  };
+
+  // Fetch centralized ad settings
   useEffect(() => {
     let active = true;
-
     const fetchSettings = async () => {
       try {
         const docRef = doc(db, "settings", "advertisement");
@@ -65,7 +74,7 @@ export const OnClickAAd: React.FC<OnClickAAdProps> = ({ pageName, isDailyBonusSc
           setAdSettings({ enabled: false, verified: false, script: "" });
         }
       } catch (err) {
-        console.error("Error loading centralized advertisement settings:", err);
+        console.error("[OnClickA] Error loading settings:", err);
         if (active) {
           setAdSettings({ enabled: false, verified: false, script: "" });
         }
@@ -76,78 +85,132 @@ export const OnClickAAd: React.FC<OnClickAAdProps> = ({ pageName, isDailyBonusSc
     return () => {
       active = false;
     };
-  }, []);
+  }, [pageName]);
 
-  // Handle global script injection and page-specific visibility
+  // Monitor ad loading and rendering status on allowed pages
   useEffect(() => {
-    if (!adSettings) return;
+    // Reset logged events whenever page changes
+    loggedEvents.current.clear();
 
-    const { enabled, verified, script } = adSettings;
-
-    // If disabled, unverified, or empty script, strictly block ads
-    if (!enabled || !verified || !script) {
+    if (!isAllowed) {
+      logEventOnce("Blocked");
       document.body.classList.add("ads-blocked");
       return;
     }
 
-    // Parse OnClickA script tag dynamically
-    let src = "";
-    const attributes: { [key: string]: string } = {};
+    if (adSettings) {
+      const { enabled, verified } = adSettings;
+      if (!enabled || !verified) {
+        logEventOnce("Blocked");
+        document.body.classList.add("ads-blocked");
+        return;
+      }
+    }
 
-    try {
-      const parser = new DOMParser();
-      const docObj = parser.parseFromString(script, "text/html");
-      const parsedScript = docObj.querySelector("script");
-      if (parsedScript) {
-        src = parsedScript.getAttribute("src") || "";
-        for (let i = 0; i < parsedScript.attributes.length; i++) {
-          const attr = parsedScript.attributes[i];
-          if (attr.name !== "src") {
-            attributes[attr.name] = attr.value;
-          }
+    // Since the page is allowed, remove the body class to display the ads
+    document.body.classList.remove("ads-blocked");
+
+    // Perform initialization on window SDK object if available (compatibility check for TMA Inpage)
+    const initSDKOnPage = () => {
+      const wa = (window as any).wa || (window as any).onclicka || (window as any).OnClickA;
+      if (wa) {
+        if (typeof wa.init === "function") {
+          try { wa.init(); } catch (e) { console.error("[OnClickA] wa.init error:", e); }
+        }
+        if (typeof wa.trigger === "function") {
+          try { wa.trigger(); } catch (e) { console.error("[OnClickA] wa.trigger error:", e); }
         }
       }
-    } catch (e) {
-      console.error("Failed to parse ad script HTML:", e);
+    };
+    initSDKOnPage();
+
+    // Check script load status
+    const isScriptPresent = !!document.head.querySelector('script[src*="onclicka"]') || 
+                            !!document.head.querySelector('script[src*="onclckmn"]') ||
+                            !!(window as any).__onclickaScriptLoaded;
+
+    if (!isScriptPresent && adSettings) {
+      // If script failed to load or is missing, consider it blocked/failed
+      const checkTimeout = setTimeout(() => {
+        if (!document.head.querySelector('script[src*="onclicka"]') && !document.head.querySelector('script[src*="onclckmn"]')) {
+          logEventOnce("Blocked");
+        }
+      }, 2000);
+      return () => clearTimeout(checkTimeout);
     }
 
-    // If no valid source is found, do not proceed and block
-    if (!src) {
-      document.body.classList.add("ads-blocked");
-      return;
-    }
+    // Monitor resource timing and DOM elements
+    let checkCount = 0;
+    const maxChecks = 12; // Check for up to 6 seconds (500ms intervals)
+    
+    const monitorInterval = setInterval(() => {
+      checkCount++;
 
-    // Inject the script if not already present in document
-    const existingScript = document.querySelector(`script[src="${src}"]`);
-    if (!existingScript) {
-      console.log(`[OnClickA] Injecting centralized script: ${src}`);
-      const scriptEl = document.createElement("script");
-      scriptEl.src = src;
-      // Copy other dynamic attributes (like data-wa-zone)
-      Object.keys(attributes).forEach((key) => {
-        scriptEl.setAttribute(key, attributes[key]);
-      });
-      scriptEl.setAttribute("data-cfasync", "false");
-      scriptEl.async = true;
-      document.head.appendChild(scriptEl);
-    } else {
-      console.log(`[OnClickA] Script already loaded, reusing: ${src}`);
-    }
+      // 1. Script loaded & SDK initialized
+      const scriptFound = !!document.head.querySelector('script[src*="onclicka"]') || 
+                          !!document.head.querySelector('script[src*="onclckmn"]') ||
+                          (window as any).__onclickaScriptLoaded;
 
-    // Control visibility classes on document body
-    if (isAllowed) {
-      console.log(`[OnClickA] Ad is ALLOWED on page: ${pageName}`);
-      document.body.classList.remove("ads-blocked");
-    } else {
-      console.log(`[OnClickA] Ad is FORBIDDEN on page: ${pageName}`);
-      document.body.classList.add("ads-blocked");
-    }
+      if (scriptFound) {
+        logEventOnce("Script loaded");
+        logEventOnce("SDK initialized");
+      }
 
-    // Clean up visibility class on component unmount/page change
+      // 2. Ad request sent
+      try {
+        const resources = window.performance.getEntriesByType("resource") as any[];
+        const hasAdRequest = resources.some(r => 
+          (r.name.includes("onclicka") || r.name.includes("clickadu") || r.name.includes("onclickmn") || r.name.includes("groleeguls") || r.name.includes("wa-")) &&
+          !r.name.endsWith("onclicka.js") // Avoid treating the main loader script download as an ad-content request
+        );
+
+        if (hasAdRequest) {
+          logEventOnce("Ad request sent");
+        }
+      } catch (err) {
+        // Fallback or ignore timing error
+      }
+
+      // 3. Ad rendered
+      const adContainer = document.querySelector('.onclicka-ad-container iframe, iframe[src*="onclicka"], iframe[src*="clickadu"], [id^="wa-"] iframe, [class^="wa-"] iframe');
+      const hasAdRendered = !!adContainer || (document.querySelectorAll('.onclicka-ad-container > *').length > 0);
+
+      if (hasAdRendered) {
+        logEventOnce("Ad rendered");
+      }
+
+      // 4. No fill (Wait enough time, if request sent but no ad element was created)
+      if (checkCount >= maxChecks) {
+        clearInterval(monitorInterval);
+        const requestSent = loggedEvents.current.has("Ad request sent");
+        const rendered = loggedEvents.current.has("Ad rendered");
+        if (requestSent && !rendered) {
+          logEventOnce("No fill");
+        } else if (!requestSent && !rendered) {
+          // If no requests were sent and nothing rendered, it's also no fill or blocked
+          logEventOnce("No fill");
+        }
+      }
+    }, 500);
+
+    // Clean up visibility on unmount but DO NOT remove script tag or duplicate it!
     return () => {
+      clearInterval(monitorInterval);
       document.body.classList.add("ads-blocked");
     };
-  }, [adSettings, pageName, isAllowed]);
+  }, [adSettings, isAllowed, pageName]);
+
+  // Return a centered ad container div when allowed, ensuring 100% compatibility with TMA Inpage ads
+  if (isAllowed) {
+    return (
+      <div 
+        className="onclicka-ad-container my-4 min-h-[50px] w-full max-w-md flex items-center justify-center text-xs text-slate-500 font-mono transition-all"
+        id="onclicka-inpage-ad-stage"
+      >
+        {/* Placeholder container where OnClickA SDK will inject TMA Inpage ad */}
+      </div>
+    );
+  }
 
   return null;
 };
