@@ -23,6 +23,17 @@ export const SurveyPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     );
   }
 
+  const displayBalance = (
+    (user.fileEarnings || 0) + 
+    (user.linkEarnings || 0) + 
+    (user.referralEarnings || 0) + 
+    (user.bonusBalance !== undefined ? user.bonusBalance : ((user as any).bonus || 0)) + 
+    (user.rewardBalance || 0) + 
+    (user.balance || 0) - 
+    (user.withdrawnAmount !== undefined ? user.withdrawnAmount : ((user as any).totalWithdrawn || 0)) - 
+    (user.pendingWithdrawals || 0)
+  );
+
   return (
     <div className="min-h-screen bg-[#020617] text-white">
       <header className="p-4 flex items-center justify-between border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
@@ -37,7 +48,7 @@ export const SurveyPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         </div>
         <div className="flex items-center gap-2 px-3 py-1 bg-blue-500/10 rounded-full border border-blue-500/20">
           <Award className="w-3.5 h-3.5 text-blue-400" />
-          <span className="text-xs font-bold text-blue-400">₹{user.balance}</span>
+          <span className="text-xs font-bold text-blue-400">₹{displayBalance.toLocaleString()}</span>
         </div>
       </header>
 

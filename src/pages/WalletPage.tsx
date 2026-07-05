@@ -8,13 +8,22 @@ export const WalletPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   if (!user) return null;
 
-  const displayBalance = user.availableBalance !== undefined ? user.availableBalance : (user.balance || 0);
-  const displayWithdrawn = user.withdrawnAmount !== undefined ? user.withdrawnAmount : 0;
-  const displayTotalEarnings = user.totalEarnings !== undefined ? user.totalEarnings : (
+  const displayBalance = (
     (user.fileEarnings || 0) + 
     (user.linkEarnings || 0) + 
     (user.referralEarnings || 0) + 
-    (user.bonusBalance || 0) + 
+    (user.bonusBalance !== undefined ? user.bonusBalance : ((user as any).bonus || 0)) + 
+    (user.rewardBalance || 0) + 
+    (user.balance || 0) - 
+    (user.withdrawnAmount !== undefined ? user.withdrawnAmount : ((user as any).totalWithdrawn || 0)) - 
+    (user.pendingWithdrawals || 0)
+  );
+  const displayWithdrawn = user.withdrawnAmount !== undefined ? user.withdrawnAmount : ((user as any).totalWithdrawn || 0);
+  const displayTotalEarnings = (
+    (user.fileEarnings || 0) + 
+    (user.linkEarnings || 0) + 
+    (user.referralEarnings || 0) + 
+    (user.bonusBalance !== undefined ? user.bonusBalance : ((user as any).bonus || 0)) + 
     (user.rewardBalance || 0)
   );
 

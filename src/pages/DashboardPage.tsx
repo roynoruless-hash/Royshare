@@ -209,6 +209,25 @@ const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
     status: "Active" as const
   };
 
+  const displayBalance = user ? (
+    (user.fileEarnings || 0) + 
+    (user.linkEarnings || 0) + 
+    (user.referralEarnings || 0) + 
+    (user.bonusBalance !== undefined ? user.bonusBalance : ((user as any).bonus || 0)) + 
+    (user.rewardBalance || 0) + 
+    (user.balance || 0) - 
+    (user.withdrawnAmount !== undefined ? user.withdrawnAmount : ((user as any).totalWithdrawn || 0)) - 
+    (user.pendingWithdrawals || 0)
+  ) : activeUser.balance;
+
+  const displayTotalEarnings = user ? (
+    (user.fileEarnings || 0) + 
+    (user.linkEarnings || 0) + 
+    (user.referralEarnings || 0) + 
+    (user.bonusBalance !== undefined ? user.bonusBalance : ((user as any).bonus || 0)) + 
+    (user.rewardBalance || 0)
+  ) : activeUser.totalEarnings;
+
   const displayName = activeUser.enteredName || `${activeUser.firstName || ""} ${activeUser.lastName || ""}`.trim() || activeUser.username || "User";
   const formattedMemberSince = activeUser.createdAt ? new Date(activeUser.createdAt).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "Recently";
 
@@ -284,7 +303,7 @@ const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
           <StatCard title="Total Files" value={user ? dbStats.files : USER_DATA.stats.files} icon={FileText} delay={0.1} />
           <StatCard title="Total Downloads" value={user ? dbStats.downloads : USER_DATA.stats.downloads} icon={Download} delay={0.2} />
-          <StatCard title="Total Earnings" value={user ? `₹${activeUser.balance.toLocaleString()}` : USER_DATA.stats.earnings} icon={DollarSign} delay={0.3} />
+          <StatCard title="Total Earnings" value={user ? `₹${displayTotalEarnings.toLocaleString()}` : USER_DATA.stats.earnings} icon={DollarSign} delay={0.3} />
           <StatCard title="Smart Links" value={user ? dbStats.links : USER_DATA.stats.links} icon={LinkIcon} delay={0.4} />
         </div>
 
@@ -339,7 +358,7 @@ const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
                   </div>
                   <div className="flex justify-between items-center py-1.5 border-b border-white/5">
                     <span className="text-sm font-medium text-slate-400">Wallet Balance</span>
-                    <span className="text-sm font-bold text-emerald-400">₹{user.balance.toLocaleString()}</span>
+                    <span className="text-sm font-bold text-emerald-400">₹{displayBalance.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between items-center py-1.5 border-b border-white/5">
                     <span className="text-sm font-medium text-slate-400">Referral Code</span>

@@ -315,6 +315,25 @@ export const MiniAppHome: React.FC = () => {
 
   const displayName = user ? ((user as any).enteredName || `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username || "User") : "User";
 
+  const displayBalance = user ? (
+    (user.fileEarnings || 0) + 
+    (user.linkEarnings || 0) + 
+    (user.referralEarnings || 0) + 
+    (user.bonusBalance !== undefined ? user.bonusBalance : ((user as any).bonus || 0)) + 
+    (user.rewardBalance || 0) + 
+    (user.balance || 0) - 
+    (user.withdrawnAmount !== undefined ? user.withdrawnAmount : ((user as any).totalWithdrawn || 0)) - 
+    (user.pendingWithdrawals || 0)
+  ) : 0;
+
+  const displayTotalEarnings = user ? (
+    (user.fileEarnings || 0) + 
+    (user.linkEarnings || 0) + 
+    (user.referralEarnings || 0) + 
+    (user.bonusBalance !== undefined ? user.bonusBalance : ((user as any).bonus || 0)) + 
+    (user.rewardBalance || 0)
+  ) : 0;
+
   // Leaderboard State
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
@@ -539,7 +558,7 @@ export const MiniAppHome: React.FC = () => {
                 <div className="flex justify-between items-start mb-6">
                   <div>
                     <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Wallet Balance</p>
-                    <h3 className="text-3xl font-black tracking-tight">₹{user.balance.toLocaleString()}</h3>
+                    <h3 className="text-3xl font-black tracking-tight">₹{displayBalance.toLocaleString()}</h3>
                   </div>
                   <div className="w-12 h-12 bg-emerald-600/20 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform shadow-lg">
                     <Wallet className="w-6 h-6" />
@@ -552,7 +571,7 @@ export const MiniAppHome: React.FC = () => {
                   </div>
                   <div>
                     <p className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mb-0.5">Total Earnings</p>
-                    <p className="text-blue-400 font-bold text-sm">₹{user.totalEarnings}</p>
+                    <p className="text-blue-400 font-bold text-sm">₹{displayTotalEarnings.toLocaleString()}</p>
                   </div>
                 </div>
               </motion.div>
