@@ -66,7 +66,7 @@ const policySections = [
       "Google Analytics (for usage monitoring)",
       "Google Drive API (for file management)",
       "Telegram Integration (for bot notifications)",
-      "Monetag/AdSense (for monetization features)"
+      "Firebase Authentication (for session security)"
     ]
   },
   {

@@ -3,7 +3,6 @@ import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Gift, Disc, AlertTriangle, ArrowLeft, Star, Package, CreditCard, ChevronRight, Trophy } from "lucide-react";
 import confetti from "canvas-confetti";
-import AdRenderer from "../components/AdRenderer";
 
 // --- Types ---
 interface RewardItem {

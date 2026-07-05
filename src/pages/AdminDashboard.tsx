@@ -8,7 +8,7 @@ import {
   Copy, ExternalLink, Eye, EyeOff, RotateCcw, UserPlus, Trash2,
   Search, User, Filter, Download, Users
 } from "lucide-react";
-import AdScriptRenderer from "../components/AdScriptRenderer";
+
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('Overview');
@@ -1908,7 +1908,7 @@ export default function AdminDashboard() {
         <div className="space-y-8 max-w-7xl mx-auto">
           {/* Navigation Buttons */}
           <div className="flex flex-wrap gap-3">
-            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "📢 Ads Manager", "🔗 Smart URL Shortener", "📥 Google Drive Accounts", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "💰 Monetag Postback", "⚙️ System Settings"].map((btn) => (
+            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "🔗 Smart URL Shortener", "📥 Google Drive Accounts", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "⚙️ System Settings"].map((btn) => (
               <button 
                 key={btn} 
                 onClick={() => {
@@ -7885,22 +7885,15 @@ export default function AdminDashboard() {
                       <select 
                         value={taskForm.adNetwork || ""}
                         onChange={(e) => {
-                          const val = e.target.value;
                           setTaskForm({
                             ...taskForm,
-                            adNetwork: val,
+                            adNetwork: "",
                             selectedAdIds: [] 
                           });
-                          if (val === "Monetag Mini App") {
-                            setAiTaskType("Watch Ads");
-                            handleGenerateAiTask(undefined, "Watch Ads", val);
-                          }
                         }}
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 font-bold"
                       >
-                        <option value="">-- No Ad Network --</option>
-                        <option value="Adsterra">Adsterra</option>
-                        <option value="Monetag Mini App">Monetag Mini App</option>
+                        <option value="">-- No Ad Network (Ad-Free) --</option>
                       </select>
                     </div>
                   </div>
@@ -8444,46 +8437,7 @@ export default function AdminDashboard() {
                             ×
                           </button>
                           {(adForm as any).scriptCode ? (
-                            <AdScriptRenderer 
-                              scriptCode={(adForm as any).scriptCode} 
-                              adType={adForm.adType}
-                              onStatusChange={(status, msg) => {
-                                console.log("Ad Preview Status:", status, msg);
-                                const el = document.getElementById('ad-preview-status');
-                                if (el) {
-                                  if (adForm.adType === "VAST Video Ad" || adForm.adType === "VAST Video") {
-                                    el.innerHTML = `
-                                      <div class="space-y-1 font-mono text-xs">
-                                        <div class="flex items-center gap-2">
-                                          <span class="${msg.includes('Video Loaded') || msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
-                                            ${msg.includes('Video Loaded') || msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Video Loaded
-                                          </span>
-                                        </div>
-                                        <div class="flex items-center gap-2">
-                                          <span class="${msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
-                                            ${msg.includes('Video Playing') || msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Video Playing
-                                          </span>
-                                        </div>
-                                        <div class="flex items-center gap-2">
-                                          <span class="${msg.includes('Ad Started') || msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
-                                            ${msg.includes('Ad Started') || msg.includes('Ad Completed') ? '🟢' : '⚫'} Ad Started
-                                          </span>
-                                        </div>
-                                        <div class="flex items-center gap-2">
-                                          <span class="${msg.includes('Ad Completed') ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
-                                            ${msg.includes('Ad Completed') ? '🟢' : '⚫'} Ad Completed
-                                          </span>
-                                        </div>
-                                      </div>
-                                    `;
-                                  } else {
-                                    el.innerHTML = status === 'Loaded' 
-                                      ? '<span class="text-emerald-500 font-bold">🟢 Loaded successfully in preview</span>' 
-                                      : `<span class="text-red-500 font-bold">🔴 Render failed: ${msg || 'Unknown error'}</span>`;
-                                  }
-                                }
-                              }} 
-                            />
+                            <div className="text-sm text-slate-500 font-mono">Ad preview is disabled in the ad-free version.</div>
                           ) : (
                             "Empty Script"
                           )}
@@ -8580,13 +8534,7 @@ export default function AdminDashboard() {
                               🔗 Open Direct Link URL
                             </a>
                           ) : (
-                            <AdScriptRenderer 
-                              scriptCode={adForm.scriptCode} 
-                              adType={adForm.adType}
-                              onStatusChange={(status, msg) => {
-                                console.log("Modal Ad Preview Status:", status, msg);
-                              }}
-                            />
+                            <div className="text-xs text-slate-500 font-mono">Ad preview is disabled in the ad-free version.</div>
                           )}
                         </div>
                       ) : (
@@ -8900,44 +8848,7 @@ export default function AdminDashboard() {
                       <span className="absolute top-2 right-2 bg-slate-800/80 text-[10px] text-slate-400 px-2 py-1 rounded font-bold uppercase tracking-wider z-10 pointer-events-none">Ad Sandbox</span>
                       {adForm.scriptCode ? (
                         <div className="w-full overflow-hidden flex justify-center items-center">
-                          <AdScriptRenderer 
-                            scriptCode={adForm.scriptCode} 
-                            adType={adForm.adType}
-                            onStatusChange={(status, msg, diag) => {
-                              const el = document.getElementById('ad-preview-status-full');
-                              if (el) {
-                                if (status === 'Loaded') {
-                                  el.innerHTML = `
-                                    <div class="text-emerald-500 font-bold mb-1">🟢 Ad Loaded Successfully</div>
-                                    <div class="text-slate-400">Script Injected = <span class="text-white">${diag?.scriptInjected || 'Yes'}</span></div>
-                                    <div class="text-slate-400">Iframe Created = <span class="text-white">${diag?.iframeCreated || 'Yes'}</span></div>
-                                    <div class="text-slate-400">Content Rendered = <span class="text-white">${diag?.contentRendered || 'Yes'}</span></div>
-                                    <div class="text-slate-400">Initialization Count = <span class="text-white font-bold">${diag?.initCount || 1}</span></div>
-                                    <div class="text-slate-400">Container Size = <span class="text-white">${diag?.containerWidth || 0}x${diag?.containerHeight || 0}</span></div>
-                                    <div class="text-slate-400">DOM Elements = <span class="text-white">${diag?.domElementsCreated || 0}</span></div>
-                                  `;
-                                } else if (status === 'Pending') {
-                                  el.innerHTML = `
-                                    <div class="text-yellow-500 font-bold mb-1">⏳ Executing Script...</div>
-                                    <div class="text-slate-400">Script Injected = <span class="text-white">${diag?.scriptInjected || 'Yes'}</span></div>
-                                    <div class="text-slate-400">Iframe Created = <span class="text-white">${diag?.iframeCreated || 'No'}</span></div>
-                                    <div class="text-slate-400">Content Rendered = <span class="text-white">${diag?.contentRendered || 'No'}</span></div>
-                                    <div class="text-slate-400">Initialization Count = <span class="text-white font-bold">${diag?.initCount || 1}</span></div>
-                                    <div class="text-slate-400">Elements = <span class="text-white">${diag?.domElementsCreated || 0}</span></div>
-                                  `;
-                                } else {
-                                  el.innerHTML = `
-                                    <div class="text-red-500 font-bold mb-1">🔴 Render Failed</div>
-                                    <div class="text-red-400 font-bold mb-1">Reason: ${msg || 'No Ad Content Returned'}</div>
-                                    <div class="text-slate-400">Script Injected = <span class="text-white">${diag?.scriptInjected || 'Yes'}</span></div>
-                                    <div class="text-slate-400">Iframe Created = <span class="text-white">${diag?.iframeCreated || 'No'}</span></div>
-                                    <div class="text-slate-400">Content Rendered = <span class="text-white">${diag?.contentRendered || 'No'}</span></div>
-                                    <div class="text-slate-400">Initialization Count = <span class="text-white font-bold">${diag?.initCount || 1}</span></div>
-                                  `;
-                                }
-                              }
-                            }}
-                          />
+                          <div className="text-xs text-slate-500 font-mono">Ad preview is disabled in the ad-free version.</div>
                         </div>
                       ) : (
                         <span className="text-slate-500 text-sm">No script provided</span>

@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, User, Award, AlertTriangle, CheckCircle2, ExternalLink, ShieldAlert, AlertCircle, Play, Zap } from "lucide-react";
-import AdRenderer from "../components/AdRenderer";
 
 // Types
 interface Task {
@@ -66,9 +65,6 @@ export default function EarnRewardsPage() {
   // Completion State
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [isCompletedSuccess, setIsCompletedSuccess] = useState<boolean>(false);
-  const [isMonetagAdRunning, setIsMonetagAdRunning] = useState<boolean>(false);
-  const [monetagError, setMonetagError] = useState<string | null>(null);
-  const [adWatchedSuccessfully, setAdWatchedSuccessfully] = useState<boolean>(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState<boolean>(false);
   const [isTelegramApp, setIsTelegramApp] = useState<boolean>(false);
   const [showRewardAlreadyClaimed, setShowRewardAlreadyClaimed] = useState<boolean>(false);
@@ -143,8 +139,8 @@ export default function EarnRewardsPage() {
           return;
         }
 
-        setTimerDuration(data.timerDuration || 30);
-        setTimer(data.timerDuration || 30);
+        setTimerDuration(0);
+        setTimer(0);
         setCurrency(data.currency || "INR");
         setUserName(data.userName || "User");
         setCompletedTaskIds(data.completedTaskIds || []);
@@ -220,147 +216,6 @@ export default function EarnRewardsPage() {
     if (!adClicked && !adTimerActive) {
       setAdTimer(5);
       setAdTimerActive(true);
-    }
-  };
-
-  // Automatically poll for completion once ad is watched
-  useEffect(() => {
-    let interval: any;
-    if (adWatchedSuccessfully && !isCompletedSuccess && !submitting) {
-      interval = setInterval(async () => {
-        try {
-          const res = await fetch(`${API_BASE}/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
-          const data = await res.json();
-          if (data.completed) {
-            setIsCompletedSuccess(true);
-            clearInterval(interval);
-          }
-        } catch (e) {
-          console.error("Polling error:", e);
-        }
-      }, 5000); // Check every 5 seconds
-    }
-    return () => clearInterval(interval);
-  }, [adWatchedSuccessfully, isCompletedSuccess, submitting, userId, taskId]);
-
-  const handleWatchMonetagAd = async () => {
-    if (isMonetagAdRunning || adWatchedSuccessfully || submitting) return;
-
-    if (!isTelegramApp) {
-      setMonetagError("This reward task is only available inside the Telegram Mini App.");
-      return;
-    }
-
-    // 1. Log SDK loaded status
-    const sdkLoaded = typeof (window as any).show_11210088 === 'function';
-    console.log("[MONETAG_FLOW] SDK loaded check:", sdkLoaded ? "LOADED" : "NOT_LOADED");
-
-    if (!sdkLoaded) {
-      console.log("[MONETAG_FLOW] Final UI decision: Cannot run ad because SDK is not loaded.");
-      setMonetagError("Monetag Ad SDK is still loading or could not be loaded. Please ensure you are inside the Telegram Mini App and have a stable internet connection.");
-      return;
-    }
-
-    const tg = (window as any).Telegram?.WebApp;
-    const telegramId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : String(userId);
-
-    if (!telegramId || telegramId === "null" || telegramId === "undefined") {
-      setMonetagError("Telegram User ID missing. Please ensure you open this page inside the Telegram bot.");
-      return;
-    }
-
-    setIsMonetagAdRunning(true);
-    setMonetagError(null);
-    try {
-      const uniqueYmid = `${telegramId}_${taskId}_${Date.now()}`;
-      const adOptions = { 
-        ymid: uniqueYmid,
-        request_var: taskId,
-        ext_id: telegramId,
-        subid: telegramId,
-        subid1: taskId
-      };
-
-      // 2. Log show() called
-      console.log("[MONETAG_FLOW] Calling show_11210088 with options:", JSON.stringify(adOptions));
-      
-      const result = await (window as any).show_11210088(adOptions);
-      
-      // 3. Log callback result
-      console.log("[MONETAG_FLOW] Callback result received (resolved):", result, "Type:", typeof result);
-      
-      // 4. Log callback status
-      let callbackStatus = "unknown";
-      if (result === true) {
-        callbackStatus = "completed";
-      } else if (result === false) {
-        callbackStatus = "skipped_or_closed";
-      } else if (result && typeof result === 'object') {
-        callbackStatus = result.status || result.event || "resolved_object";
-      } else if (typeof result === 'string') {
-        callbackStatus = result;
-      }
-      console.log("[MONETAG_FLOW] Parsed callback status:", callbackStatus);
-
-      // Determine if skipped or closed explicitly
-      const isSkippedOrClosed = 
-        result === false || 
-        callbackStatus === "skipped" || 
-        callbackStatus === "closed" || 
-        callbackStatus === "skipped_or_closed" || 
-        callbackStatus === "dismissed";
-
-      if (isSkippedOrClosed) {
-        // 5. Final UI decision on explicit skip/close
-        console.log("[MONETAG_FLOW] Final UI decision: User skipped or closed the ad. Showing watch complete error.");
-        setMonetagError("Please watch the complete advertisement to unlock your reward.");
-      } else {
-        // 5. Final UI decision on success
-        console.log("[MONETAG_FLOW] Final UI decision: Ad watched successfully.");
-        setAdWatchedSuccessfully(true);
-        setShowSuccessPopup(true);
-        setTimeout(() => setShowSuccessPopup(false), 3000);
-      }
-    } catch (err: any) {
-      // 3. Log callback result in catch
-      console.error("[MONETAG_FLOW] SDK Error caught:", err);
-      
-      // Check if error message explicitly points to skip or close
-      const errStr = String(err).toLowerCase();
-      const isExplicitSkipOrClose = errStr.includes("skip") || errStr.includes("close") || errStr.includes("dismiss") || errStr.includes("cancel");
-
-      if (isExplicitSkipOrClose) {
-        console.log("[MONETAG_FLOW] Final UI decision: Caught explicit skip/close in error. Showing watch complete error.");
-        setMonetagError("Please watch the complete advertisement to unlock your reward.");
-      } else {
-        console.log("[MONETAG_FLOW] Final UI decision: General error occurred.");
-        setMonetagError(err.message || "Failed to launch advertisement.");
-      }
-    } finally {
-      setIsMonetagAdRunning(false);
-    }
-  };
-
-  const handleClaimMonetagReward = async () => {
-    if (!adWatchedSuccessfully || isCompletedSuccess || submitting) return;
-    
-    // Instead of directly crediting, we check if the postback has arrived
-    setSubmitting(true);
-    setMonetagError(null);
-    
-    try {
-      const res = await fetch(`${API_BASE}/api/earn-rewards/check-status?userId=${userId}&taskId=${taskId}`);
-      const data = await res.json();
-      
-      if (data.completed) {
-        setIsCompletedSuccess(true);
-      } else {
-        setMonetagError(`Verification pending: ${data.reason || "Waiting for Monetag postback"}`);
-      }
-    } catch (err) {
-      setMonetagError("Failed to check verification status.");
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -542,347 +397,73 @@ export default function EarnRewardsPage() {
     );
   }
 
-  if (currentTask?.adNetwork === 'Monetag Mini App') {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1118] text-white p-6 text-center">
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-blue-600/10 blur-[120px] rounded-full pointer-events-none"></div>
-        
-        <motion.div 
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="max-w-md w-full space-y-12 relative"
-        >
-          {/* Task Info */}
-          <div className="space-y-4">
-             <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-[11px] font-black uppercase tracking-widest mx-auto">
-              <CheckCircle2 size={14} className="text-blue-400" />
-              <span>Premium Task</span>
-            </div>
-            <h1 className="text-4xl font-black text-white tracking-tight leading-tight">
-              {currentTask?.name || "Earn Rewards"}
-            </h1>
-            <p className="text-gray-400 text-lg leading-relaxed px-4">
-              {currentTask?.description || "Complete this dynamic task to claim your reward coins instantly."}
-            </p>
-          </div>
-
-          {/* Reward Amount */}
-          <div className="bg-slate-900/60 border border-slate-800 rounded-[3rem] p-12 shadow-2xl relative overflow-hidden group">
-             <p className="text-slate-500 font-bold uppercase tracking-[0.25em] text-[10px] mb-4">You will earn</p>
-             <p className="text-7xl font-black text-amber-400 drop-shadow-md">
-               {formatValue(currentTask.amount)}
-             </p>
-          </div>
-
-          {/* Claim Button */}
-          <div className="pt-4 px-2">
-            <button
-              onClick={submitTaskCompletion}
-              disabled={submitting}
-              className={`w-full py-6 rounded-[2.5rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-2xl active:scale-95 group relative overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white shadow-blue-900/40`}
-            >
-              {submitting ? (
-                <>
-                  <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin mb-1" />
-                  <span>Claiming Reward...</span>
-                </>
-              ) : (
-                <>
-                  <motion.div
-                    animate={{ scale: [1, 1.2, 1] }}
-                    transition={{ repeat: Infinity, duration: 1.5 }}
-                    className="flex justify-center"
-                  >
-                    <Award size={36} className="text-blue-400" />
-                  </motion.div>
-                  <span>Claim Reward</span>
-                </>
-              )}
-            </button>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
-
-  const activeAd = AD_LINKS[(currentPage - 1) % AD_LINKS.length];
-  const secondaryAd = AD_LINKS[currentPage % AD_LINKS.length];
-
   return (
-    <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col justify-between py-6 px-4 relative">
-      
-      {/* HEADER SECTION */}
-      <div className="max-w-lg w-full mx-auto bg-slate-900/60 border border-slate-800 backdrop-blur-sm rounded-2xl p-4 mb-4 shadow-md">
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <div className="flex flex-col items-center justify-center border-r border-slate-800 py-1">
-            <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1 font-medium">
-              <User size={13} className="text-blue-400" />
-              <span>User Name</span>
-            </div>
-            <span className="text-sm font-bold truncate max-w-[120px] text-gray-100">{userName}</span>
+    <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col justify-center py-6 px-4 relative">
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-amber-500/10 blur-[100px] rounded-full pointer-events-none"></div>
+
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="max-w-md w-full mx-auto space-y-10 text-center relative"
+      >
+        {/* Task Info */}
+        <div className="space-y-4">
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full text-amber-500 text-[10px] font-bold uppercase tracking-widest mx-auto">
+            <Zap size={12} className="fill-current" />
+            <span>Premium Task</span>
           </div>
-
-          <div className="flex flex-col items-center justify-center border-r border-slate-800 py-1">
-            <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1 font-medium">
-              <AlertCircle size={13} className="text-indigo-400" />
-              <span>Task Number</span>
-            </div>
-            <span className="text-sm font-bold text-gray-100">{currentTask?.name}</span>
-          </div>
-
-          <div className="flex flex-col items-center justify-center py-1">
-            <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1 font-medium">
-              <Award size={13} className="text-amber-400" />
-              <span>Reward Amount</span>
-            </div>
-            <span className="text-sm font-bold text-amber-400">{currentTask ? formatValue(currentTask.amount) : "—"}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* MAIN CONTENT AREA */}
-      <div className="max-w-lg w-full mx-auto flex-1 flex flex-col justify-center space-y-4">
-
-        {/* 🖼 Top Banner Ad */}
-        <div id="ad-top-banner">
-          <AdRenderer targetPage="Earn Rewards Page"
-            placementKey="Header Banner"
-            fallback={
-              <div 
-                onClick={() => handleAdClick("https://www.hostinger.com")}
-                className="bg-gradient-to-r from-blue-900/30 to-indigo-900/30 border border-blue-500/20 rounded-xl p-4 cursor-pointer hover:border-blue-500/40 transition-all shadow-md group relative overflow-hidden"
-              >
-                <span className="absolute top-1.5 right-2 bg-slate-800/80 text-[9px] text-slate-400 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider">Ad</span>
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-blue-600/20 flex items-center justify-center text-blue-400 shrink-0 font-bold text-xs border border-blue-500/30">
-                    HOST
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-blue-400 flex items-center gap-1 group-hover:underline">
-                      Hostinger Premium Hosting <ExternalLink size={11} />
-                    </h4>
-                    <p className="text-[11px] text-gray-400 mt-1 leading-snug">
-                      Web hosting starting at ₹149/mo. 70% Off + Free domain, SSL and backups included. 30-day refund guarantee!
-                    </p>
-                  </div>
-                </div>
-              </div>
-            }
-          />
-        </div>
-
-        {/* ⏱ Countdown Timer */}
-        <div className="flex flex-col items-center justify-center py-6 bg-slate-900/30 border border-slate-900 rounded-3xl backdrop-blur-sm shadow-inner relative">
-          <div className="relative flex items-center justify-center w-28 h-28 rounded-full border-4 border-slate-800 mb-3 shadow-lg">
-            {/* Pulsing ring during ticking */}
-            {!isTimerFinished && (
-              <div className="absolute inset-0 rounded-full border-4 border-amber-500/30 animate-ping"></div>
-            )}
-            
-            <div className="flex flex-col items-center">
-              <Clock size={20} className={isTimerFinished ? "text-emerald-500" : "text-amber-500 mb-0.5 animate-pulse"} />
-              <span className={`text-3xl font-black tracking-tighter ${isTimerFinished ? "text-emerald-400" : "text-amber-400"}`}>
-                {timer}
-              </span>
-              <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">seconds</span>
-            </div>
-          </div>
-
-          <p className="text-xs text-slate-400 font-medium">
-            {isTimerFinished ? "Verification active" : `Page ${currentPage} of 3 • Please wait...`}
+          <h1 className="text-4xl font-black text-white tracking-tight leading-tight">
+            {currentTask?.name || "Premium Reward Task"}
+          </h1>
+          <p className="text-slate-400 text-base leading-relaxed px-4">
+            {currentTask?.description || "Claim your reward coins instantly with zero advertisements."}
           </p>
-
-          {/* Verification / Active Loading Indicator */}
-          {adTimerActive && (
-            <div className="absolute top-2 right-4 bg-amber-500/10 border border-amber-500/30 rounded-full px-3 py-1 flex items-center gap-1 text-[10px] text-amber-400 font-semibold">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-              Verifying visit: {adTimer}s
-            </div>
-          )}
-          {adClicked && !adTimerActive && (
-            <div className="absolute top-2 right-4 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-3 py-1 flex items-center gap-1 text-[10px] text-emerald-400 font-semibold">
-              <CheckCircle2 size={11} /> Visit Verified
-            </div>
-          )}
         </div>
 
-        {/* 📢 Native Ad */}
-        <div id="ad-native-1">
-          <AdRenderer targetPage="Earn Rewards Page"
-            placementKey="Native Slot 1"
-            fallback={
-              <div 
-                onClick={() => handleAdClick(activeAd.url)}
-                className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 cursor-pointer hover:border-slate-700 hover:bg-slate-900/80 transition-all shadow-md group relative"
-              >
-                <span className="absolute top-2 right-3 bg-slate-800 text-[9px] text-slate-400 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Sponsored</span>
-                <div className="flex items-center gap-3 mb-2.5">
-                  <div className="w-11 h-11 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-center text-amber-500 font-black text-sm">
-                    AD
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-200 group-hover:text-amber-400 flex items-center gap-1">
-                      {activeAd.title} <ExternalLink size={12} className="opacity-70" />
-                    </h3>
-                    <p className="text-[10px] text-slate-500">Secure Partner Network</p>
-                  </div>
-                </div>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  {activeAd.desc}
-                </p>
-                <div className="mt-4 flex justify-end">
-                  <span className="text-xs font-bold text-amber-500 group-hover:underline flex items-center gap-1">
-                    {activeAd.cta} &rarr;
-                  </span>
-                </div>
+        {/* Reward Amount */}
+        <div className="bg-slate-900/40 border border-slate-800 rounded-[2.5rem] p-10 relative overflow-hidden group shadow-2xl">
+          <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
+            <Award size={120} />
+          </div>
+          <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] mb-3">Total Reward Points</p>
+          <p className="text-6xl font-black text-amber-400 drop-shadow-sm">
+            {currentTask ? formatValue(currentTask.amount) : "—"}
+          </p>
+          <div className="mt-4 flex items-center justify-center gap-1.5 text-emerald-400 text-xs font-bold">
+            <CheckCircle2 size={14} />
+            <span>Ad-free Verification Enabled</span>
+          </div>
+        </div>
+
+        {/* Footer & Claim Controls */}
+        <div className="space-y-4 pt-4">
+          <button
+            disabled={submitting}
+            onClick={submitTaskCompletion}
+            className={`w-full py-5 rounded-[2rem] font-black transition-all shadow-2xl flex flex-col items-center justify-center gap-2 text-xl active:scale-95 bg-gradient-to-br from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-amber-950/20`}
+            id="btn-verify-continue"
+          >
+            {submitting ? (
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
+                <span>Verifying...</span>
               </div>
-            }
-          />
-        </div>
-
-        {/* 🖼 Banner Ad */}
-        <div id="ad-banner-middle">
-          <AdRenderer targetPage="Earn Rewards Page"
-            placementKey="Banner Slot"
-            fallback={
-              <div 
-                onClick={() => handleAdClick("https://stake.com")}
-                className="bg-gradient-to-r from-purple-950/20 to-slate-900 border border-purple-500/20 rounded-xl p-4 cursor-pointer hover:border-purple-500/40 transition-all shadow-sm group relative overflow-hidden"
-              >
-                <span className="absolute top-1.5 right-2 bg-slate-800/80 text-[9px] text-slate-400 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider font-mono">Ad</span>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-purple-600/20 flex items-center justify-center text-purple-400 font-extrabold text-xs border border-purple-500/30">
-                    🎰
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="text-xs font-bold text-purple-400 flex items-center gap-1 group-hover:underline">
-                      STAKE Casino & Betting <ExternalLink size={11} />
-                    </h4>
-                    <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">
-                      Safe crypto casino & sportsbook. Play now!
-                    </p>
-                  </div>
-                </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <CheckCircle2 size={20} />
+                <span>Claim Reward Coins</span>
               </div>
-            }
-          />
+            )}
+          </button>
+
+          <button
+            onClick={handleBackToBot}
+            className="w-full py-4 text-slate-400 hover:text-white font-bold transition-colors text-sm"
+          >
+            ↩️ Return to Telegram Bot
+          </button>
         </div>
-
-        {/* 📢 Native Ad */}
-        <div id="ad-native-2">
-          <AdRenderer targetPage="Earn Rewards Page"
-            placementKey="Native Slot 2"
-            fallback={
-              <div 
-                onClick={() => handleAdClick(secondaryAd.url)}
-                className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 cursor-pointer hover:border-slate-700 hover:bg-slate-900/80 transition-all shadow-md group relative"
-              >
-                <span className="absolute top-2 right-3 bg-slate-800 text-[9px] text-slate-400 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Sponsored</span>
-                <div className="flex items-center gap-3 mb-2.5">
-                  <div className="w-11 h-11 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center justify-center text-indigo-400 font-black text-sm">
-                    AD
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-200 group-hover:text-indigo-400 flex items-center gap-1">
-                      {secondaryAd.title} <ExternalLink size={12} className="opacity-70" />
-                    </h3>
-                    <p className="text-[10px] text-slate-500">Premium Partner Network</p>
-                  </div>
-                </div>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  {secondaryAd.desc}
-                </p>
-                <div className="mt-4 flex justify-end">
-                  <span className="text-xs font-bold text-indigo-400 group-hover:underline flex items-center gap-1">
-                    {secondaryAd.cta} &rarr;
-                  </span>
-                </div>
-              </div>
-            }
-          />
-        </div>
-
-        {/* 🖼 Footer Banner Ad */}
-        <div id="ad-footer-banner">
-          <AdRenderer targetPage="Earn Rewards Page"
-            placementKey="Footer Banner"
-            fallback={
-              <div 
-                onClick={() => handleAdClick("https://royshare.online")}
-                className="bg-slate-900/50 border border-slate-800 rounded-xl p-3 cursor-pointer hover:border-slate-700 hover:bg-slate-900/70 transition-all shadow-sm group relative"
-              >
-                <span className="absolute top-1.5 right-2 bg-slate-800 text-[8px] text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase tracking-widest">Ad</span>
-                <p className="text-[11px] text-gray-300 leading-relaxed font-medium flex items-center gap-1.5">
-                  <span>🚀 <strong>RoyShare Shortener:</strong> Shorten files or web URLs & get highest CPM rates! Join now.</span>
-                  <ExternalLink size={10} className="text-slate-500 group-hover:text-slate-300 shrink-0" />
-                </p>
-              </div>
-            }
-          />
-        </div>
-
-      </div>
-
-      {/* FOOTER & VERIFY SECTION */}
-      <div className="max-w-lg w-full mx-auto mt-4 space-y-4">
-        
-        {/* ⚠️ Task Instructions */}
-        <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 shadow-sm">
-          <h3 className="text-sm font-bold text-amber-500 flex items-center gap-1.5 mb-2">
-            <AlertTriangle size={15} /> ⚠️ Task Instructions
-          </h3>
-          <ul className="text-xs text-slate-400 space-y-1.5 list-disc pl-4 font-medium leading-relaxed">
-            <li>Open any advertisement.</li>
-            <li>Stay on the advertisement page for at least 5 seconds.</li>
-            <li>Then return back to continue.</li>
-            <li>Complete all pages to receive your reward.</li>
-          </ul>
-        </div>
-
-        {/* Action Button */}
-        <AnimatePresence mode="wait">
-          {isTimerFinished ? (
-            <motion.button
-              key="verify-btn"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              disabled={submitting}
-              onClick={handleVerifyAndContinue}
-              className={`w-full py-4 rounded-2xl font-bold shadow-lg text-lg transition-all duration-200 active:scale-98 flex items-center justify-center gap-2 ${
-                submitting 
-                  ? "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed" 
-                  : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/20"
-              }`}
-              id="btn-verify-continue"
-            >
-              {submitting ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-slate-500 border-t-transparent rounded-full animate-spin"></div>
-                  <span>Verifying...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 size={18} />
-                  <span>{currentPage === 3 ? "Verify & Complete Task" : "Verify & Continue"}</span>
-                </>
-              )}
-            </motion.button>
-          ) : (
-            <motion.div
-              key="disabled-btn-placeholder"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="w-full py-4 bg-slate-900 border border-slate-800 text-slate-500 rounded-2xl font-bold flex items-center justify-center gap-2 cursor-not-allowed text-base select-none"
-            >
-              <Clock size={16} />
-              <span>Complete timer to unlock verification</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-      </div>
-
+      </motion.div>
     </div>
   );
 }

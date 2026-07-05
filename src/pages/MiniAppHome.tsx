@@ -35,6 +35,7 @@ import { WalletPage } from "./WalletPage";
 import DailyBonusPage from "./DailyBonusPage";
 import DashboardPage from "./DashboardPage";
 import RewardTasksPage from "./RewardTasksPage";
+import { API_BASE } from "../config/api";
 
 interface PhoneVerificationProps {
   user: any;
@@ -44,9 +45,7 @@ interface PhoneVerificationProps {
 const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified }) => {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [otpCode, setOtpCode] = useState("");
-  const [step, setStep] = useState<'phone' | 'otp' | 'error_mismatch'>('phone');
-  const [generatedOtp, setGeneratedOtp] = useState("");
-  const [showOtpToast, setShowOtpToast] = useState(false);
+  const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -55,24 +54,42 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
     return digits.slice(-10); // get last 10 digits
   };
 
-  const handleSendOtp = () => {
+  const handleSendOtp = async () => {
     const norm = normalizePhone(phoneNumber);
     if (norm.length < 10) {
       setErrorMessage("Please enter a valid 10-digit mobile number.");
       return;
     }
     setErrorMessage(null);
-    
-    // Generate a secure, clean simulated 6-digit OTP
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedOtp(code);
-    setStep('otp');
-    setShowOtpToast(true);
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/send-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mobile: phoneNumber,
+          telegramId: user.id
+        })
+      });
+
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setStep('otp');
+      } else {
+        setErrorMessage(data.error || "Failed to send OTP. Please check your number or try again later.");
+      }
+    } catch (err: any) {
+      console.error("[PhoneVerification] Send OTP error:", err);
+      setErrorMessage("Could not send OTP. Check your connection or if you have started the bot.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleVerifyOtp = async () => {
-    if (otpCode !== generatedOtp && otpCode !== "123456") {
-      setErrorMessage("Invalid verification code. Please check and try again.");
+    if (otpCode.length < 6) {
+      setErrorMessage("Please enter a valid 6-digit verification code.");
       return;
     }
     
@@ -80,26 +97,25 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
     setIsSubmitting(true);
     
     try {
-      const enteredNorm = normalizePhone(phoneNumber);
-      const registeredNorm = user.phone ? normalizePhone(user.phone) : "";
-      
-      if (!registeredNorm || enteredNorm !== registeredNorm) {
-        setStep('error_mismatch');
-        setIsSubmitting(false);
-        return;
-      }
-      
-      // Numbers match perfectly! Sync Firestore user account
-      const userRef = doc(db, "users", String(user.id));
-      await updateDoc(userRef, {
-        phoneVerifiedInMiniApp: true,
-        phone: phoneNumber
+      const response = await fetch(`${API_BASE}/api/auth/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mobile: phoneNumber,
+          otp: otpCode,
+          telegramId: user.id
+        })
       });
-      
-      localStorage.setItem(`verified_phone_${user.id}`, "true");
-      onVerified();
+
+      const data = await response.json();
+      if (response.ok && data.success) {
+        localStorage.setItem(`verified_phone_${user.id}`, "true");
+        onVerified();
+      } else {
+        setErrorMessage(data.error || "Invalid verification code. Please check and try again.");
+      }
     } catch (err: any) {
-      console.error("[PhoneVerification] Error:", err);
+      console.error("[PhoneVerification] Verify OTP error:", err);
       setErrorMessage("An error occurred during verification. Please try again.");
     } finally {
       setIsSubmitting(false);
@@ -111,30 +127,6 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
       {/* Background gradients */}
       <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-blue-600/5 to-transparent pointer-events-none" />
       <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
-      
-      {/* Simulated SMS Toast Notification */}
-      <AnimatePresence>
-        {showOtpToast && (
-          <motion.div
-            initial={{ opacity: 0, y: -50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -50 }}
-            onClick={() => {
-              setOtpCode(generatedOtp);
-              setShowOtpToast(false);
-            }}
-            className="fixed top-6 left-6 right-6 bg-slate-900/95 border border-blue-500/30 rounded-2xl p-4 shadow-2xl flex gap-3 items-start z-50 cursor-pointer hover:border-blue-500 transition-colors"
-          >
-            <div className="w-10 h-10 bg-blue-500/20 border border-blue-500/30 rounded-xl flex items-center justify-center text-blue-400 shrink-0">
-              <Smartphone className="w-5 h-5 animate-bounce" />
-            </div>
-            <div className="flex-1 text-sm">
-              <span className="font-bold text-slate-200 block mb-0.5">📨 SMS Simulator (Tap to Auto-fill)</span>
-              <p className="text-slate-400">Your Roy Share Earn verification code is <strong className="text-blue-400 text-base select-all font-mono tracking-wider">{generatedOtp}</strong></p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <div className="w-full max-w-md relative z-10">
         <motion.div
@@ -149,149 +141,132 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
             </div>
             <h2 className="text-2xl font-black tracking-tight text-white mb-2">Secure Verification</h2>
             <p className="text-slate-400 text-sm max-w-xs">
-              Verify your registered mobile number to unlock Self Earning.
+              Verify your mobile number to unlock Self Earning.
             </p>
           </div>
 
-          {step === 'phone' && (
-            <div className="space-y-6">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">
-                  Registered Mobile Number
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 font-bold text-lg font-sans">
-                    +91
+          <div className="space-y-6">
+            {step === 'phone' ? (
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">
+                    Mobile Number
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 font-bold text-lg font-sans">
+                      +91
+                    </div>
+                    <input
+                      type="tel"
+                      maxLength={10}
+                      placeholder="Enter 10-digit number"
+                      value={phoneNumber}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, "");
+                        setPhoneNumber(val);
+                        if (errorMessage) setErrorMessage(null);
+                      }}
+                      className="w-full bg-slate-950/80 border border-slate-800 focus:border-blue-500 rounded-2xl py-4 pl-14 pr-4 text-left text-lg font-bold font-sans tracking-widest focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all text-white"
+                    />
                   </div>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Enter your mobile number to receive a verification OTP.
+                  </p>
+                </div>
+
+                {errorMessage && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex gap-2 text-red-400 text-xs items-center">
+                    <ShieldAlert className="w-4 h-4 shrink-0" />
+                    <span>{errorMessage}</span>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleSendOtp}
+                  disabled={phoneNumber.length < 10 || isSubmitting}
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98 disabled:pointer-events-none"
+                >
+                  {isSubmitting ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      Send OTP
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">
+                    Mobile Number
+                  </label>
+                  <div className="text-slate-300 font-bold font-sans text-lg mb-4 flex justify-between items-center bg-slate-950/40 p-3 rounded-xl border border-slate-800/40">
+                    <span>+91 {phoneNumber}</span>
+                    <button
+                      onClick={() => {
+                        setStep('phone');
+                        setOtpCode("");
+                        setErrorMessage(null);
+                      }}
+                      disabled={isSubmitting}
+                      className="text-xs text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                    >
+                      Change
+                    </button>
+                  </div>
+
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 text-center">
+                    Enter 6-Digit OTP Code
+                  </label>
                   <input
-                    type="tel"
-                    maxLength={10}
-                    placeholder="Enter 10-digit number"
-                    value={phoneNumber}
+                    type="text"
+                    maxLength={6}
+                    placeholder="------"
+                    value={otpCode}
                     onChange={(e) => {
                       const val = e.target.value.replace(/\D/g, "");
-                      setPhoneNumber(val);
+                      setOtpCode(val);
                       if (errorMessage) setErrorMessage(null);
                     }}
-                    className="w-full bg-slate-950/80 border border-slate-800 focus:border-blue-500 rounded-2xl py-4 pl-14 pr-4 text-left text-lg font-bold font-sans tracking-widest focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all text-white"
+                    className="w-full bg-slate-950/80 border border-slate-800 focus:border-blue-500 rounded-2xl py-4 text-center text-2xl font-bold font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all text-white"
                   />
+                  <div className="flex justify-end items-center mt-3 px-1 text-xs">
+                    <button
+                      onClick={handleSendOtp}
+                      disabled={isSubmitting}
+                      className="text-blue-400 hover:text-blue-300 font-medium transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Resend OTP
+                    </button>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500 mt-2">
-                  Enter the phone number you used during Telegram registration.
-                </p>
-              </div>
 
-              {errorMessage && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex gap-2 text-red-400 text-xs items-center">
-                  <ShieldAlert className="w-4 h-4 shrink-0" />
-                  <span>{errorMessage}</span>
-                </div>
-              )}
-
-              <button
-                onClick={handleSendOtp}
-                disabled={phoneNumber.length < 10}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98 disabled:pointer-events-none"
-              >
-                Send OTP
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-
-          {step === 'otp' && (
-            <div className="space-y-6">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 text-center">
-                  Enter 6-Digit OTP Code
-                </label>
-                <input
-                  type="text"
-                  maxLength={6}
-                  placeholder="------"
-                  value={otpCode}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, "");
-                    setOtpCode(val);
-                    if (errorMessage) setErrorMessage(null);
-                  }}
-                  className="w-full bg-slate-950/80 border border-slate-800 focus:border-blue-500 rounded-2xl py-4 text-center text-2xl font-bold font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all text-white"
-                />
-                <div className="flex justify-between items-center mt-3 px-1 text-xs">
-                  <button
-                    onClick={() => {
-                      setStep('phone');
-                      setOtpCode("");
-                      setErrorMessage(null);
-                    }}
-                    className="text-slate-400 hover:text-white transition-colors"
-                  >
-                    Change Number
-                  </button>
-                  <button
-                    onClick={handleSendOtp}
-                    className="text-blue-400 hover:text-blue-300 font-medium transition-colors"
-                  >
-                    Resend OTP
-                  </button>
-                </div>
-              </div>
-
-              {errorMessage && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex gap-2 text-red-400 text-xs items-center">
-                  <ShieldAlert className="w-4 h-4 shrink-0" />
-                  <span>{errorMessage}</span>
-                </div>
-              )}
-
-              <button
-                onClick={handleVerifyOtp}
-                disabled={otpCode.length < 6 || isSubmitting}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98"
-              >
-                {isSubmitting ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    Verify OTP
-                    <CheckCircle2 className="w-4 h-4" />
-                  </>
+                {errorMessage && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex gap-2 text-red-400 text-xs items-center">
+                    <ShieldAlert className="w-4 h-4 shrink-0" />
+                    <span>{errorMessage}</span>
+                  </div>
                 )}
-              </button>
-            </div>
-          )}
 
-          {step === 'error_mismatch' && (
-            <div className="space-y-6 text-center">
-              <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-center">
-                <div className="w-12 h-12 bg-red-500/20 border border-red-500/30 rounded-full flex items-center justify-center text-red-500 mx-auto mb-4">
-                  <ShieldAlert className="w-6 h-6" />
-                </div>
-                <h3 className="font-extrabold text-white text-lg mb-2">Verification Failed</h3>
-                <p className="text-red-400/90 text-sm leading-relaxed">
-                  This mobile number does not match your Telegram registration.
-                </p>
-              </div>
-
-              <div className="space-y-3">
                 <button
-                  onClick={() => {
-                    setStep('phone');
-                    setOtpCode("");
-                    setPhoneNumber("");
-                    setErrorMessage(null);
-                  }}
-                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all"
+                  onClick={handleVerifyOtp}
+                  disabled={otpCode.length < 6 || isSubmitting}
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-98"
                 >
-                  <ArrowLeft className="w-4 h-4" />
-                  Try Different Number
+                  {isSubmitting ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      Verify OTP
+                      <CheckCircle2 className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
-                <p className="text-xs text-slate-500">
-                  Please make sure you enter the identical mobile number that is linked to your Telegram profile.
-                </p>
-              </div>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </motion.div>
       </div>
     </div>
@@ -307,7 +282,7 @@ export const MiniAppHome: React.FC = () => {
   useEffect(() => {
     if (user) {
       const localVerified = localStorage.getItem(`verified_phone_${user.id}`) === "true";
-      const dbVerified = !!(user as any).phoneVerifiedInMiniApp;
+      const dbVerified = !!(user as any).phoneVerifiedInMiniApp || !!(user as any).phone || !!(user as any).mobile;
       setIsPhoneVerified(localVerified || dbVerified);
       setCheckingVerification(false);
     }

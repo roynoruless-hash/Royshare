@@ -2590,11 +2590,9 @@ async function processEarnRewards(botToken: string, chatId: number, user: any) {
 
     for (const t of nonCompletedTasks) {
         const formattedAmount = formatCurrency(t.amount, currency);
-        const isMonetag = t.adNetwork === "Monetag Mini App";
-        
         message += `${t.name} - ${formattedAmount}\n`;
 
-        const btnText = isMonetag ? `🎁 Open ${t.name}` : `🌐 Open ${t.name} In Chrome`;
+        const btnText = `🎁 Open ${t.name}`;
         const webAppUrl = `${appUrl}/earn-rewards?userId=${user.id}&taskId=${t.id}`;
         
         buttons.push([{ text: btnText, web_app: { url: webAppUrl } }]);

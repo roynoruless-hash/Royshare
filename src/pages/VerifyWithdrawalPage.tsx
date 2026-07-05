@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../config/api';
 import { motion } from 'framer-motion';
-import AdRenderer from '../components/AdRenderer';
 
 export default function VerifyWithdrawalPage({ userId }: { userId: string }) {
   const [loading, setLoading] = useState(true);
@@ -76,25 +75,7 @@ export default function VerifyWithdrawalPage({ userId }: { userId: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white p-4 flex flex-col items-center">
-      {/* Top Banner Ad placeholder */}
-      <AdRenderer targetPage="Withdraw Verification Page"
-        placementKey="Header Banner"
-        fallback={
-          <div className="w-full max-w-md h-24 bg-slate-800/50 rounded-xl border border-slate-700/50 flex items-center justify-center mb-4 overflow-hidden">
-             <span className="text-slate-500 text-xs">Header Banner Ad</span>
-          </div>
-        }
-      />
-      <AdRenderer targetPage="Withdraw Verification Page"
-        placementKey="Secondary Banner"
-        fallback={
-          <div className="w-full max-w-md h-16 bg-slate-800/50 rounded-xl border border-slate-700/50 flex items-center justify-center mb-8 overflow-hidden">
-             <span className="text-slate-500 text-xs">Secondary Banner Ad</span>
-          </div>
-        }
-      />
-
+    <div className="min-h-screen bg-[#020617] text-white p-4 flex flex-col items-center justify-center">
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -166,43 +147,6 @@ export default function VerifyWithdrawalPage({ userId }: { userId: string }) {
           </div>
         )}
       </motion.div>
-
-      {/* Bottom Ads */}
-      <AdRenderer targetPage="Withdraw Verification Page"
-        placementKey="Native Slot 1"
-        fallback={
-          <div className="w-full max-w-md h-32 bg-slate-800/50 rounded-xl border border-slate-700/50 flex items-center justify-center mt-8 overflow-hidden">
-             <span className="text-slate-500 text-xs">Native Ad</span>
-          </div>
-        }
-      />
-      <AdRenderer targetPage="Withdraw Verification Page"
-        placementKey="Banner Slot"
-        fallback={
-          <div className="w-full max-w-md h-24 bg-slate-800/50 rounded-xl border border-slate-700/50 flex items-center justify-center mt-4 overflow-hidden">
-             <span className="text-slate-500 text-xs">Banner Ad</span>
-          </div>
-        }
-      />
-      <AdRenderer targetPage="Withdraw Verification Page"
-        placementKey="Native Slot 2"
-        fallback={
-          <div className="w-full max-w-md h-32 bg-slate-800/50 rounded-xl border border-slate-700/50 flex items-center justify-center mt-4 overflow-hidden">
-             <span className="text-slate-500 text-xs">Native Ad</span>
-          </div>
-        }
-      />
-
-      <div className="w-full max-w-md mt-auto pt-8">
-        <AdRenderer targetPage="Withdraw Verification Page"
-          placementKey="Footer Banner"
-          fallback={
-            <div className="w-full h-16 bg-slate-800/50 rounded-xl border border-slate-700/50 flex items-center justify-center overflow-hidden">
-               <span className="text-slate-500 text-xs">Footer Banner Ad</span>
-            </div>
-          }
-        />
-      </div>
     </div>
   );
 }

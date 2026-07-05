@@ -4337,87 +4337,71 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
   app.post("/api/auth/send-otp", requireAdminDb, async (req, res) => {
     try {
-      const { mobile, fingerprint } = req.body;
+      const { mobile, telegramId } = req.body;
       if (!mobile) {
         return res.status(400).json({ error: "Mobile number is required" });
       }
-
-      // Check for lockout
-      const failuresRef = doc(db, "otp_failures", mobile.trim());
-      const failureSnap = await getDoc(failuresRef);
-      if (failureSnap.exists) {
-        const fdata = failureSnap.data();
-        if (fdata.attempts >= 3) {
-          const lastFail = new Date(fdata.lastAttempt).getTime();
-          const waitTime = 15 * 60 * 1000;
-          const remaining = (lastFail + waitTime) - Date.now();
-          if (remaining > 0) {
-            return res.status(429).json({ 
-              error: "Account locked due to too many failed attempts. Try again later.",
-              lockoutMinutes: Math.ceil(remaining / 60000)
-            });
-          } else {
-            // Reset after lockout period passed
-            await deleteDoc(failuresRef);
-          }
-        }
+      if (!telegramId) {
+        return res.status(400).json({ error: "Telegram User ID is required" });
       }
 
-      // 1. Check if mobile is registered in RoyShare
-      const qMobile = await getDocs(query(collection(db, "users"), where("mobile", "==", mobile.trim())));
-      
-      if (qMobile.empty) {
-        return res.status(404).json({ error: "❌ Mobile Number Not Registered in RoyShare." });
+      const cleanMobile = mobile.trim();
+      const tgIdStr = String(telegramId).trim();
+
+      // Look up user in Firestore to get their name
+      const userRef = doc(db, "users", tgIdStr);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        return res.status(404).json({ error: "User profile not found in database." });
       }
 
-      const userData = qMobile.docs[0].data();
-      const telegramId = String(userData.telegramId);
+      const userData = userSnap.data();
       const username = userData.firstName || userData.username || "User";
 
       const now = new Date();
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
-      // 2. Rate Limiting: Max 5 OTPs per hour per TG ID
+      // Rate Limiting: Max 5 OTPs per hour per TG ID
       const rateSnap = await getDocs(query(collection(db, "otpRequests"), 
-        where("telegramId", "==", telegramId), 
+        where("telegramId", "==", tgIdStr), 
         where("createdAt", ">=", oneHourAgo.toISOString())));
       
       if (rateSnap.size >= 5) {
         return res.status(429).json({ error: "Maximum OTP requests (5/hour) exceeded. Please try again later." });
       }
 
-      // 3. Generate 4-digit OTP
-      const otpCode = Math.floor(1000 + Math.random() * 9000).toString();
+      // Generate secure 6-digit OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       const hashedOtp = hashOTP(otpCode);
       const expiresAt = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
 
-      // 4. Invalidate previous OTPs for this user
+      // Invalidate previous OTPs for this user
       const oldSnap = await getDocs(query(collection(db, "otps"), 
-        where("telegramId", "==", telegramId), 
+        where("telegramId", "==", tgIdStr), 
         where("used", "==", false)));
         
       for (const oldDoc of oldSnap.docs) {
         await updateDoc(oldDoc.ref, { used: true });
       }
 
-      // 5. Store new OTP attempt
+      // Store new OTP attempt linked to telegramId and mobile
       await addDoc(collection(db, "otps"), {
-        telegramId,
-        mobile,
+        telegramId: tgIdStr,
+        mobile: cleanMobile,
         hashedOtp,
         expiresAt: expiresAt.toISOString(),
         createdAt: now.toISOString(),
         used: false
       });
 
-      // 6. Log Request
+      // Log Request
       await addDoc(collection(db, "otpRequests"), {
-        telegramId,
-        mobile,
+        telegramId: tgIdStr,
+        mobile: cleanMobile,
         createdAt: now.toISOString()
       });
 
-      // 7. Send OTP via Bot ONLY
+      // Send OTP via Telegram Bot
       const botToken = await getBotToken();
       if (!botToken) throw new Error("Bot token missing");
 
@@ -4427,13 +4411,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chat_id: telegramId,
+          chat_id: tgIdStr,
           text: msg,
           parse_mode: "HTML"
         })
       });
 
-      console.log(`[OTP] 4-digit code sent to ${telegramId} (${username})`);
+      console.log(`[OTP] Redesigned 6-digit code sent to telegramId ${tgIdStr} (${username})`);
       res.json({ success: true, message: "OTP sent to your Telegram bot." });
 
     } catch (e: any) {
@@ -4444,102 +4428,54 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
   app.post("/api/auth/verify-otp", requireAdminDb, async (req, res) => {
     try {
-      const { mobile, otp, fingerprint } = req.body;
-      if (!mobile || !otp) {
-        return res.status(400).json({ error: "Mobile and OTP required" });
+      const { mobile, otp, telegramId } = req.body;
+      if (!mobile || !otp || !telegramId) {
+        return res.status(400).json({ error: "Mobile, OTP and Telegram ID are required" });
       }
 
-      // Check lockout first
-      const failuresRef = doc(db, "otp_failures", mobile.trim());
-      const failureSnap = await getDoc(failuresRef);
-      if (failureSnap.exists()) {
-        const fdata = failureSnap.data();
-        if (fdata.attempts >= 3) {
-          const lastFail = new Date(fdata.lastAttempt).getTime();
-          const waitTime = 15 * 60 * 1000;
-          if (Date.now() < lastFail + waitTime) {
-            return res.status(429).json({ error: "Account locked for 15 minutes." });
-          }
-        }
-      }
-
+      const cleanMobile = mobile.trim();
+      const tgIdStr = String(telegramId).trim();
       const hashedInput = hashOTP(otp);
       const now = new Date().toISOString();
 
       // Find valid OTP
       const otpSnap = await getDocs(query(collection(db, "otps"), 
-        where("mobile", "==", mobile.trim()), 
+        where("telegramId", "==", tgIdStr),
+        where("mobile", "==", cleanMobile), 
         where("hashedOtp", "==", hashedInput), 
         where("used", "==", false), 
         where("expiresAt", ">=", now)));
       
       if (otpSnap.empty) {
-        // Increment failures
-        if (failureSnap.exists()) {
-          await updateDoc(failuresRef, {
-            attempts: increment(1),
-            lastAttempt: now
-          });
-        } else {
-          await setDoc(failuresRef, {
-            attempts: 1,
-            lastAttempt: now
-          });
-        }
         return res.status(400).json({ error: "Invalid or expired OTP code." });
       }
 
-      // Success - reset failures
-      await deleteDoc(failuresRef);
-
       // Mark OTP as used
       const otpDoc = otpSnap.docs[0];
-      const telegramId = otpDoc.data().telegramId;
       await updateDoc(otpDoc.ref, { used: true });
 
-      // Generate 30-day session token
-      const sessionToken = crypto.randomBytes(32).toString("hex");
-      const sessionExpiresAt = new Date();
-      sessionExpiresAt.setDate(sessionExpiresAt.getDate() + 30);
-
-      await addDoc(collection(db, "sessions"), {
-        userId: telegramId,
-        token: sessionToken,
-        fingerprint: fingerprint || "legacy",
-        createdAt: now,
-        expiresAt: sessionExpiresAt.toISOString(),
-        userAgent: req.headers["user-agent"] || "unknown",
-        ip: req.ip || "unknown"
-      });
-
-      // Get User Data
-      const userRef = doc(db, "users", telegramId);
+      // Link the verified mobile number permanently to the user's Telegram ID
+      const userRef = doc(db, "users", tgIdStr);
       const userSnap = await getDoc(userRef);
       
       if (!userSnap.exists()) {
-        return res.status(404).json({ error: "User profile lost. Please register again." });
+        return res.status(404).json({ error: "User profile not found. Please register again." });
       }
 
-      const userData = userSnap.data();
       await updateDoc(userRef, { 
         lastLogin: now,
         isVerified: true,
-        verifiedAt: now 
+        verifiedAt: now,
+        phoneVerifiedInMiniApp: true,
+        phone: cleanMobile,
+        mobile: cleanMobile
       });
+
+      console.log(`[OTP] Successfully verified mobile ${cleanMobile} for telegramId ${tgIdStr}`);
 
       res.json({ 
         success: true, 
-        message: "Verification successful!",
-        sessionToken,
-        user: {
-          telegramId: userData.telegramId,
-          username: userData.username || "no_username",
-          firstName: userData.firstName || "User",
-          mobile: userData.mobile,
-          isVerified: true,
-          status: userData.status || "active",
-          photoUrl: userData.photoUrl || ""
-        }
+        message: "Verification successful!"
       });
 
     } catch (e: any) {

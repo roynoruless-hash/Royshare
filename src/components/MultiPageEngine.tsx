@@ -3,8 +3,6 @@ import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, ShieldAlert, ArrowRight, Download, ExternalLink, CheckCircle2 } from "lucide-react";
 import AnimatedBackground from "./AnimatedBackground";
-import AdScriptRenderer from "./AdScriptRenderer";
-import AdRenderer from "./AdRenderer";
 
 // ----------------- Error Boundary -----------------
 interface ErrorBoundaryProps {
@@ -95,6 +93,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [pagesConfig, setPagesConfig] = useState<PageConfig[]>([]);
+  const currentPageConfig = pagesConfig.find((p) => p.pageNumber === currentPage);
   
   // Timer & interactive states
   const [timer, setTimer] = useState(10);
@@ -127,30 +126,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const [securityChecked, setSecurityChecked] = useState(false);
   const [securityBlockReason, setSecurityBlockReason] = useState<string | null>(null);
 
-  // Available Ads Cache
-  const [allAds, setAllAds] = useState<any[]>([]);
-
-  // Find current page ads and keep the exact selection order
-  const currentPageConfig = pagesConfig.find((p) => p.pageNumber === currentPage);
-  const currentPageAds = (currentPageConfig?.selectedAdIds || [])
-    .map((id) => allAds.find((ad) => ad.id === id))
-    .filter(Boolean) as any[];
-
-  useEffect(() => {
-    // 1. Fetch active ads for custom placement ID matching
-    const fetchAds = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/admin/ads`);
-        if (res.ok) {
-          const data = await res.json();
-          setAllAds(data || []);
-        }
-      } catch (e) {
-        console.error("Error fetching ads in MultiPageEngine:", e);
-      }
-    };
-    fetchAds();
-  }, []);
+  const currentPageAds: any[] = [];
 
   // Initialize session and fetch target item details
   useEffect(() => {
@@ -264,61 +240,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
     }
     return () => clearInterval(interval);
   }, [isTimerActive, timer]);
-
-  // Execute non-visual ads (e.g. Popunder, Interstitial, Social Bar) directly on the parent window context
-  useEffect(() => {
-    if (currentPageAds.length === 0) return;
-
-    const nonVisualAds = currentPageAds.filter(ad => {
-      const type = (ad.adType || "").toLowerCase();
-      // Executed globally if it's NOT a standard Banner or Native ad
-      return !type.includes("banner") && !type.includes("native");
-    });
-
-    if (nonVisualAds.length === 0) return;
-
-    const createdElements: HTMLDivElement[] = [];
-
-    nonVisualAds.forEach((ad) => {
-      try {
-        const container = document.createElement("div");
-        container.setAttribute("data-ad-id", ad.id);
-        container.className = "hidden-ad-container hidden";
-        document.body.appendChild(container);
-        createdElements.push(container);
-
-        // Safely parse and inject script tags into parent top context
-        const range = document.createRange();
-        const documentFragment = range.createContextualFragment(ad.scriptCode);
-        
-        const scripts = documentFragment.querySelectorAll("script");
-        scripts.forEach((oldScript) => {
-          const newScript = document.createElement("script");
-          Array.from(oldScript.attributes).forEach((attr) => {
-            newScript.setAttribute(attr.name, attr.value);
-          });
-          if (oldScript.innerHTML) {
-            newScript.innerHTML = oldScript.innerHTML;
-          }
-          oldScript.parentNode?.replaceChild(newScript, oldScript);
-        });
-
-        container.appendChild(documentFragment);
-      } catch (err) {
-        console.error("Error executing non-visual ad:", err);
-      }
-    });
-
-    return () => {
-      createdElements.forEach((el) => {
-        try {
-          if (el.parentNode) {
-            el.parentNode.removeChild(el);
-          }
-        } catch (e) {}
-      });
-    };
-  }, [currentPage, currentPageAds]);
 
   // Generate simple math captcha for human verification
   const generateCaptcha = () => {
@@ -590,13 +511,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
         </div>
       </header>
 
-      {/* Header Banner Ad */}
-      {!isFinalStep && (
-        <div className="relative z-10 w-full max-w-xl mx-auto px-6 mt-4">
-          <AdRenderer targetPage={type === "download" ? "Download Page" : "URL Shortener"} placementKey="Header Banner" />
-        </div>
-      )}
-
       {/* Main Content Arena */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6">
         <div className="w-full max-w-xl bg-slate-900/80 backdrop-blur-md rounded-2xl p-8 border border-white/10 shadow-2xl space-y-6">
@@ -728,49 +642,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                   )}
                 </div>
 
-                {/* Selected Page Ads Display */}
-                {(() => {
-                  const isVisualAd = (ad: any) => {
-                    const type = (ad.adType || "").toLowerCase();
-                    return type.includes("banner") || type.includes("native") || type.includes("direct") || type.includes("link");
-                  };
-                  const visualPageAds = currentPageAds.filter(isVisualAd);
 
-                  return (
-                    <>
-                      {visualPageAds.length > 0 && (
-                        <div className="space-y-4 pt-2">
-                          {visualPageAds.map((ad, i) => (
-                            <div key={ad.id || i} className="bg-slate-950/40 rounded-xl p-4 border border-white/5">
-                              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2 text-center">
-                                Sponsored Link ({ad.adSource} - {ad.adType})
-                              </p>
-                              <div className="flex justify-center items-center overflow-hidden w-full">
-                                {ad.adType === "Direct Link" || ad.adType === "Direct Link Ad" ? (
-                                  <a
-                                    href={ad.scriptCode}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-2 bg-gradient-to-r from-teal-500/20 to-indigo-500/20 hover:from-teal-500/30 hover:to-indigo-500/30 text-teal-300 font-semibold py-2.5 px-5 rounded-lg text-xs transition-all border border-teal-500/20 shadow-md"
-                                  >
-                                    🚀 Click here to visit Sponsor Link <ExternalLink size={12} />
-                                  </a>
-                                ) : (
-                                  <AdScriptRenderer scriptCode={ad.scriptCode} adType={ad.adType} />
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Secondary/Backup Ads */}
-                      {visualPageAds.length === 0 && (
-                        <AdRenderer targetPage={type === "download" ? "Download Page" : "URL Shortener"} placementKey="Secondary Banner" />
-                      )}
-                    </>
-                  );
-                })()}
 
                 {/* Progression Control */}
                 {isPageComplete && (type !== "shortener" || currentPage < totalPages) && (
@@ -852,9 +724,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                   </div>
                 )}
 
-                {/* Secondary/Backup Ads */}
-                <AdRenderer targetPage={type === "download" ? "Download Page" : "URL Shortener"} placementKey="Secondary Banner" />
-
                 {/* Final Trigger CTA */}
                 <div className="pt-2">
                   {type === "download" ? (
@@ -916,13 +785,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
           </AnimatePresence>
         </div>
       </main>
-
-      {/* Footer Banner Ad */}
-      {!isFinalStep && (
-        <div className="relative z-10 w-full max-w-xl mx-auto px-6 mb-4">
-          <AdRenderer targetPage={type === "download" ? "Download Page" : "URL Shortener"} placementKey="Footer Banner" />
-        </div>
-      )}
 
       {/* Footer */}
       <footer className="relative z-10 w-full max-w-7xl mx-auto px-6 py-4 border-t border-white/5 text-center text-xs text-slate-500">
