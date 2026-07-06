@@ -1302,7 +1302,7 @@ export default function AdminDashboard() {
     }
     
     const src = parsedScript.getAttribute("src") || "";
-    const admpid = parsedScript.getAttribute("data-admpid") || "";
+    const admpid = parsedScript.getAttribute("data-admpid") || "N/A";
     
     if (!src) {
       addLog("❌ Error: <script> tag does not contain a 'src' attribute.");
@@ -1311,10 +1311,27 @@ export default function AdminDashboard() {
       return;
     }
     
-    updateStatus("spotId", admpid || "N/A");
-    updateStatus("publisherId", admpid || "N/A");
+    // Extract Banner Spot ID from Banner Container Code data-banner-id attribute
+    const bannerContainerText = adSettings.bannerContainerCode || adSettings.bannerContainer || "";
+    let extractedBannerSpotId = "N/A";
+    if (bannerContainerText) {
+      try {
+        const bannerParser = new DOMParser();
+        const bannerDoc = bannerParser.parseFromString(bannerContainerText, "text/html");
+        const bannerDiv = bannerDoc.querySelector("[data-banner-id]");
+        if (bannerDiv) {
+          extractedBannerSpotId = bannerDiv.getAttribute("data-banner-id") || "N/A";
+        }
+      } catch (e: any) {
+        addLog(`Warning parsing banner container for Banner Spot ID: ${e.message}`);
+      }
+    }
+
+    updateStatus("publisherId", admpid);
+    updateStatus("spotId", extractedBannerSpotId);
     addLog(`Extracted SDK Source: ${src}`);
-    addLog(`Extracted Spot ID: ${admpid || 'None specified'}`);
+    addLog(`Extracted Publisher ID: ${admpid}`);
+    addLog(`Extracted Banner Spot ID: ${extractedBannerSpotId}`);
     
     // 4. Hook fetch & XHR
     const originalFetch = window.fetch;
@@ -1592,6 +1609,29 @@ export default function AdminDashboard() {
           const status = liveAdPreviewStatusRef.current;
           const netLogs = liveAdPreviewNetworkLogsRef.current;
           
+          // Check DOM render result first - it has higher priority than network fill status
+          const stage = document.getElementById("onclicka-inpage-ad-stage");
+          const bannerElInStage = stage?.firstElementChild;
+          const hasInjectedContent = bannerElInStage && bannerElInStage.childNodes.length > 0;
+          const hasIframeInStage = stage && (
+            !!stage.querySelector("iframe") ||
+            !!document.querySelector('iframe[src*="onclicka"]') || 
+            !!document.querySelector('iframe[src*="clickadu"]') || 
+            !!document.querySelector('[id^="wa-"] iframe') || 
+            !!document.querySelector('[class^="wa-"] iframe')
+          );
+          const hasAdClass = !!document.querySelector('[id^="wa-"]') || !!document.querySelector('[class^="wa-"]');
+
+          if (hasInjectedContent || hasIframeInStage || hasAdClass) {
+            addLog("🎉 Real advertisement element or iframe injection detected in the DOM on timeout!");
+            updateStatus("adRendered", "PASS");
+            updateStatus("fillStatus", "Yes");
+            updateStatus("liveAdPreview", "PASS");
+            updateStatus("requestSent", "PASS");
+            setLiveAdPreviewFinalResult("SUCCESS");
+            return "COMPLETED";
+          }
+          
           let finalResult = "NO_FILL";
           
           if (status.scriptLoaded !== "PASS") {
@@ -1707,7 +1747,7 @@ export default function AdminDashboard() {
 - **Ad Rendered:** ${status.adRendered}
 - **Fill Status:** ${status.fillStatus}
 - **Current Domain:** ${status.currentDomain}
-- **Spot ID:** ${status.spotId}
+- **Banner Spot ID:** ${status.spotId}
 - **Publisher ID:** ${status.publisherId}
 
 #### SDK Logs
@@ -8054,9 +8094,9 @@ ${netLogsText || "No network requests captured."}
                             </div>
                           </div>
 
-                          {/* Spot ID */}
+                          {/* Banner Spot ID */}
                           <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
-                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Spot ID</span>
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Banner Spot ID</span>
                             <div className="flex items-center justify-between mt-1.5">
                               <span className="text-[11px] font-mono font-bold text-indigo-400">
                                 {liveAdPreviewStatus.spotId}

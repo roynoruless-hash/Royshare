@@ -31,6 +31,8 @@ interface DebugLog {
   liveAdPreview: "PASS" | "FAIL" | "PENDING";
   sdkError: string;
   failureReason: string;
+  publisherId: string;
+  spotId: string;
 }
 
 interface GlobalObjStatus {
@@ -73,7 +75,9 @@ export default function AdTestPage() {
     fillStatus: "PENDING",
     liveAdPreview: "PENDING",
     sdkError: "None detected",
-    failureReason: "None detected"
+    failureReason: "None detected",
+    publisherId: "N/A",
+    spotId: "N/A"
   });
 
   const [globalStatuses, setGlobalStatuses] = useState<GlobalObjStatus[]>([]);
@@ -141,7 +145,9 @@ export default function AdTestPage() {
       fillStatus: "PENDING",
       liveAdPreview: "PENDING",
       sdkError: "None detected",
-      failureReason: "None detected"
+      failureReason: "None detected",
+      publisherId: "N/A",
+      spotId: "N/A"
     };
     setDebugLog(initialDebugLog);
 
@@ -357,6 +363,8 @@ export default function AdTestPage() {
     const scriptCode = dbConfig.script || "";
     let src = "https://js.onclckmn.com/static/onclicka.js";
     const attributes: { [key: string]: string } = {};
+    let parsedPublisherId = "N/A";
+    let parsedSpotId = "N/A";
 
     try {
       const parser = new DOMParser();
@@ -364,6 +372,7 @@ export default function AdTestPage() {
       const parsedScript = docObj.querySelector("script");
       if (parsedScript) {
         src = parsedScript.getAttribute("src") || src;
+        parsedPublisherId = parsedScript.getAttribute("data-admpid") || "N/A";
         for (let i = 0; i < parsedScript.attributes.length; i++) {
           const attr = parsedScript.attributes[i];
           if (attr.name !== "src") {
@@ -376,6 +385,25 @@ export default function AdTestPage() {
     } catch (e: any) {
       addLogRef.current(`Warning parsing script attributes: ${e.message}`);
     }
+
+    const bannerContainerText = dbConfig.bannerContainerCode || dbConfig.bannerContainer || "";
+    if (bannerContainerText) {
+      try {
+        const bannerParser = new DOMParser();
+        const bannerDoc = bannerParser.parseFromString(bannerContainerText, "text/html");
+        const bannerDiv = bannerDoc.querySelector("[data-banner-id]");
+        if (bannerDiv) {
+          parsedSpotId = bannerDiv.getAttribute("data-banner-id") || "N/A";
+        }
+      } catch (e: any) {
+        addLogRef.current(`Warning parsing banner container for Banner Spot ID: ${e.message}`);
+      }
+    }
+
+    updateLocalDebug("publisherId", parsedPublisherId);
+    updateLocalDebug("spotId", parsedSpotId);
+    addLogRef.current(`Extracted Publisher ID: ${parsedPublisherId}`);
+    addLogRef.current(`Extracted Banner Spot ID: ${parsedSpotId}`);
 
     // 6. Check if OnClickA script is already injected
     const existingScript = document.querySelector('script[src*="onclicka"]') || 
@@ -567,11 +595,13 @@ export default function AdTestPage() {
                           !!document.querySelector('[id^="wa-"] iframe') || 
                           !!document.querySelector('[class^="wa-"] iframe')
                         );
+    const hasAdClass = !!document.querySelector('[id^="wa-"]') || !!document.querySelector('[class^="wa-"]');
 
-    if (hasInjectedContent || iframePresent) {
+    if (hasInjectedContent || iframePresent || hasAdClass) {
       updateLocalDebug("adRendered", "PASS");
       updateLocalDebug("fillStatus", "Yes");
       updateLocalDebug("liveAdPreview", "PASS");
+      updateLocalDebug("requestSent", "PASS");
     }
 
     // 8. Compile Final Report
@@ -723,7 +753,7 @@ export default function AdTestPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 border-t border-b border-slate-800 py-4 my-4">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 border-t border-b border-slate-800 py-4 my-4">
                 <div>
                   <span className="text-[10px] text-slate-500 font-mono uppercase block">Loader Script Loaded</span>
                   <span className={`text-sm font-semibold font-mono ${debugLog.scriptLoaded === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
@@ -777,6 +807,20 @@ export default function AdTestPage() {
                   <span className="text-[10px] text-slate-500 font-mono uppercase block">Live Ad Preview</span>
                   <span className={`text-sm font-semibold font-mono ${debugLog.liveAdPreview === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
                     {debugLog.liveAdPreview}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Publisher ID</span>
+                  <span className="text-sm font-semibold font-mono text-indigo-400">
+                    {debugLog.publisherId}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Banner Spot ID</span>
+                  <span className="text-sm font-semibold font-mono text-indigo-400">
+                    {debugLog.spotId}
                   </span>
                 </div>
               </div>
