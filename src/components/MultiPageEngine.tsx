@@ -7,14 +7,53 @@ import AnimatedBackground from "./AnimatedBackground";
 // ----------------- OnClickA Banner -----------------
 interface OnClickABannerProps {
   adSpotId: number | string;
+  sdkScript?: string;
+  size?: string;
 }
 
-export function OnClickABanner({ adSpotId }: OnClickABannerProps) {
+export function OnClickABanner({ adSpotId, sdkScript, size = "728x90" }: OnClickABannerProps) {
+  if (!adSpotId) return null;
+
+  const [widthStr, heightStr] = (size || "728x90").split("x");
+  const width = Number(widthStr);
+  const height = Number(heightStr);
+  const w = isNaN(width) ? 728 : width;
+  const h = isNaN(height) ? 90 : height;
+
+  const iframeHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <style>
+          html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: transparent;
+          }
+        </style>
+      </head>
+      <body>
+        <div data-banner-id="${adSpotId}" style="width: ${w}px; height: ${h}px; display: flex; justify-content: center; align-items: center;"></div>
+        ${sdkScript || `<script async src="https://js.onclckmn.com/static/onclicka.js" data-admpid="${adSpotId}"></script>`}
+      </body>
+    </html>
+  `;
+
   return (
-    <div className="w-full flex justify-center items-center my-4 overflow-hidden min-h-[90px] bg-slate-950/20 border border-white/5 rounded-xl p-2">
-      <div 
-        data-banner-id={String(adSpotId)} 
-        className="flex justify-center items-center w-full max-w-[728px] overflow-hidden" 
+    <div className="w-full flex justify-center items-center my-4 overflow-hidden" style={{ minHeight: `${h}px` }}>
+      <iframe
+        title={`OnClickA Ad Spot ${adSpotId}`}
+        srcDoc={iframeHtml}
+        width={w}
+        height={h}
+        style={{ border: "none", overflow: "hidden", maxWidth: "100%" }}
+        scrolling="no"
       />
     </div>
   );
@@ -173,16 +212,36 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const renderBannersForPosition = (pos: "Header" | "Above Verify" | "Below Verify" | "Footer") => {
     if (!onclickaEnabled || !bannerAdsEnabled) return null;
 
-    const activeBanners = (onclickaBanners || []).filter(
-      (b: any) => b.enabled !== false && b.spotId && String(b.position).toLowerCase() === pos.toLowerCase()
+    // Retrieve all active and enabled banners across the configuration to establish overall numbering
+    const allActiveBanners = (onclickaBanners || []).filter(
+      (b: any) => b.enabled !== false && b.spotId
     );
 
-    if (activeBanners.length > 0) {
+    // Filter to active banners for this specific position
+    const activeBannersInPos = allActiveBanners.filter(
+      (b: any) => String(b.position).toLowerCase() === pos.toLowerCase()
+    );
+
+    if (activeBannersInPos.length > 0) {
       return (
         <div className={`w-full flex flex-col items-center gap-4 ${pos === "Header" ? "mb-6" : pos === "Footer" ? "mt-6" : "my-4"}`}>
-          {activeBanners.map((b: any, index: number) => (
-            <OnClickABanner key={`${pos}-banner-${b.spotId}-${index}`} adSpotId={b.spotId} />
-          ))}
+          {activeBannersInPos.map((b: any) => {
+            // Find global 1-based index among all active banners
+            const globalIdx = allActiveBanners.findIndex(item => item === b);
+            const bannerNumber = globalIdx !== -1 ? globalIdx + 1 : 1;
+            
+            // Log as requested: "Rendering Banner 1", etc. and display the Spot ID being rendered
+            console.log(`Rendering Banner ${bannerNumber} (Position: ${pos}) - Spot ID: ${b.spotId}`);
+            
+            return (
+              <OnClickABanner 
+                key={`${pos}-banner-${b.spotId}-${globalIdx}`} 
+                adSpotId={b.spotId} 
+                sdkScript={onclickaSdkScript}
+                size={b.size}
+              />
+            );
+          })}
         </div>
       );
     }
@@ -194,9 +253,12 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
         if (topIds.length === 0) return null;
         return (
           <div className="w-full flex flex-col items-center gap-4 mb-6">
-            {topIds.map((spotId, index) => (
-              <OnClickABanner key={`top-banner-fallback-${spotId}-${index}`} adSpotId={spotId} />
-            ))}
+            {topIds.map((spotId, index) => {
+              console.log(`Rendering Fallback Banner ${index + 1} (Position: Header) - Spot ID: ${spotId}`);
+              return (
+                <OnClickABanner key={`top-banner-fallback-${spotId}-${index}`} adSpotId={spotId} sdkScript={onclickaSdkScript} />
+              );
+            })}
           </div>
         );
       }
@@ -205,9 +267,12 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
         if (bottomIds.length === 0) return null;
         return (
           <div className="w-full flex flex-col items-center gap-4 mt-6">
-            {bottomIds.map((spotId, index) => (
-              <OnClickABanner key={`bottom-banner-fallback-${spotId}-${index}`} adSpotId={spotId} />
-            ))}
+            {bottomIds.map((spotId, index) => {
+              console.log(`Rendering Fallback Banner ${index + 3} (Position: Footer) - Spot ID: ${spotId}`);
+              return (
+                <OnClickABanner key={`bottom-banner-fallback-${spotId}-${index}`} adSpotId={spotId} sdkScript={onclickaSdkScript} />
+              );
+            })}
           </div>
         );
       }
