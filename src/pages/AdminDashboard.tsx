@@ -1104,7 +1104,14 @@ export default function AdminDashboard() {
           onclickaSdkScript: data.onclickaSdkScript || "",
           onclickaSdkSpotId: data.onclickaSdkSpotId || "",
           onclickaBannerSize: data.onclickaBannerSize || "728x90",
-          onclickaSpots: data.onclickaSpots || []
+          onclickaSpots: data.onclickaSpots || [],
+          onclickaVideoEnabled: data.onclickaVideoEnabled ?? false,
+          onclickaVideoTimeout: data.onclickaVideoTimeout ?? 8,
+          onclickaVideoRetryAttempts: data.onclickaVideoRetryAttempts ?? 2,
+          onclickaVideoSpots: data.onclickaVideoSpots || [],
+          onclickaVideoAutoRotation: data.onclickaVideoAutoRotation ?? true,
+          onclickaVideoFallbackToBanner: data.onclickaVideoFallbackToBanner ?? true,
+          onclickaVideoShowDebugLogs: data.onclickaVideoShowDebugLogs ?? true
         });
         if (data.updatedAt) {
           const date = data.updatedAt.toDate ? data.updatedAt.toDate() : new Date(data.updatedAt);
@@ -1124,7 +1131,14 @@ export default function AdminDashboard() {
           onclickaSdkScript: "",
           onclickaSdkSpotId: "",
           onclickaBannerSize: "728x90",
-          onclickaSpots: []
+          onclickaSpots: [],
+          onclickaVideoEnabled: false,
+          onclickaVideoTimeout: 8,
+          onclickaVideoRetryAttempts: 2,
+          onclickaVideoSpots: [],
+          onclickaVideoAutoRotation: true,
+          onclickaVideoFallbackToBanner: true,
+          onclickaVideoShowDebugLogs: true
         });
         setAdSettingsLastUpdated("Never");
       }
@@ -1217,6 +1231,13 @@ export default function AdminDashboard() {
         onclickaSdkSpotId: settingsToSave.onclickaSdkSpotId || "",
         onclickaBannerSize: settingsToSave.onclickaBannerSize || "728x90",
         onclickaSpots: settingsToSave.onclickaSpots || [],
+        onclickaVideoEnabled: settingsToSave.onclickaVideoEnabled ?? false,
+        onclickaVideoTimeout: settingsToSave.onclickaVideoTimeout ?? 8,
+        onclickaVideoRetryAttempts: settingsToSave.onclickaVideoRetryAttempts ?? 2,
+        onclickaVideoSpots: settingsToSave.onclickaVideoSpots || [],
+        onclickaVideoAutoRotation: settingsToSave.onclickaVideoAutoRotation ?? true,
+        onclickaVideoFallbackToBanner: settingsToSave.onclickaVideoFallbackToBanner ?? true,
+        onclickaVideoShowDebugLogs: settingsToSave.onclickaVideoShowDebugLogs ?? true,
         updatedAt: serverTimestamp()
       };
       await setDoc(docRef, updatedData);
@@ -1228,7 +1249,14 @@ export default function AdminDashboard() {
         onclickaSdkScript: settingsToSave.onclickaSdkScript || "",
         onclickaSdkSpotId: settingsToSave.onclickaSdkSpotId || "",
         onclickaBannerSize: settingsToSave.onclickaBannerSize || "728x90",
-        onclickaSpots: settingsToSave.onclickaSpots || []
+        onclickaSpots: settingsToSave.onclickaSpots || [],
+        onclickaVideoEnabled: settingsToSave.onclickaVideoEnabled ?? false,
+        onclickaVideoTimeout: settingsToSave.onclickaVideoTimeout ?? 8,
+        onclickaVideoRetryAttempts: settingsToSave.onclickaVideoRetryAttempts ?? 2,
+        onclickaVideoSpots: settingsToSave.onclickaVideoSpots || [],
+        onclickaVideoAutoRotation: settingsToSave.onclickaVideoAutoRotation ?? true,
+        onclickaVideoFallbackToBanner: settingsToSave.onclickaVideoFallbackToBanner ?? true,
+        onclickaVideoShowDebugLogs: settingsToSave.onclickaVideoShowDebugLogs ?? true
       });
       setAdSettingsLastUpdated(new Date().toLocaleString());
       setAdSettingsFeedback("✅ Advertisement settings saved successfully!");
@@ -8030,6 +8058,185 @@ export default function AdminDashboard() {
                             })}
                           </div>
                         )}
+                      </div>
+
+                      {/* OnClickA Video Settings Section */}
+                      <div className="space-y-4 pt-6 border-t border-slate-800">
+                        <div>
+                          <h4 className="text-md font-bold text-slate-200 flex items-center gap-1.5">
+                            <span>🎥</span> OnClickA Video Settings
+                          </h4>
+                          <p className="text-xs text-slate-500">Configure OnClickA Video/VAST settings for shorteners and landing pages.</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* Enable/Disable Video Ads */}
+                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex justify-between items-center">
+                            <div>
+                              <span className="block text-xs font-semibold text-white">Enable Video Ads</span>
+                              <span className="text-[10px] text-slate-500">Enable or disable OnClickA Video Ads</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setAdSettings({ ...adSettings, onclickaVideoEnabled: !adSettings.onclickaVideoEnabled })}
+                              className={`px-3.5 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-200 cursor-pointer ${
+                                adSettings.onclickaVideoEnabled 
+                                  ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm shadow-emerald-900/25' 
+                                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                              }`}
+                            >
+                              {adSettings.onclickaVideoEnabled ? "Enabled" : "Disabled"}
+                            </button>
+                          </div>
+
+                          {/* Video Timeout */}
+                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="block text-xs font-semibold text-white">Video Timeout (seconds)</span>
+                              <span className="text-[10px] text-slate-500">Default: 8 seconds</span>
+                            </div>
+                            <input
+                              type="number"
+                              min={1}
+                              max={60}
+                              value={adSettings.onclickaVideoTimeout !== undefined ? adSettings.onclickaVideoTimeout : 8}
+                              onChange={(e) => setAdSettings({ ...adSettings, onclickaVideoTimeout: Math.max(1, Number(e.target.value)) })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-bold font-mono"
+                            />
+                          </div>
+
+                          {/* Retry Attempts */}
+                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="block text-xs font-semibold text-white">Retry Attempts</span>
+                              <span className="text-[10px] text-slate-500">Consecutive failures skip</span>
+                            </div>
+                            <input
+                              type="number"
+                              min={1}
+                              max={10}
+                              value={adSettings.onclickaVideoRetryAttempts !== undefined ? adSettings.onclickaVideoRetryAttempts : 2}
+                              onChange={(e) => setAdSettings({ ...adSettings, onclickaVideoRetryAttempts: Math.max(1, Number(e.target.value)) })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-bold font-mono"
+                            />
+                          </div>
+
+                          {/* Enable Auto Rotation */}
+                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex justify-between items-center">
+                            <div>
+                              <span className="block text-xs font-semibold text-white">Enable Auto Rotation</span>
+                              <span className="text-[10px] text-slate-500">Automatically rotate spots until ad fills</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setAdSettings({ ...adSettings, onclickaVideoAutoRotation: adSettings.onclickaVideoAutoRotation === undefined ? false : !adSettings.onclickaVideoAutoRotation })}
+                              className={`px-3.5 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-200 cursor-pointer ${
+                                (adSettings.onclickaVideoAutoRotation !== false) 
+                                  ? 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-sm shadow-indigo-900/25' 
+                                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                              }`}
+                            >
+                              {(adSettings.onclickaVideoAutoRotation !== false) ? "ON" : "OFF"}
+                            </button>
+                          </div>
+
+                          {/* Fallback to Banner */}
+                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex justify-between items-center">
+                            <div>
+                              <span className="block text-xs font-semibold text-white">Fallback to Banner</span>
+                              <span className="text-[10px] text-slate-500">Show banners immediately if video fails</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setAdSettings({ ...adSettings, onclickaVideoFallbackToBanner: adSettings.onclickaVideoFallbackToBanner === undefined ? false : !adSettings.onclickaVideoFallbackToBanner })}
+                              className={`px-3.5 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-200 cursor-pointer ${
+                                (adSettings.onclickaVideoFallbackToBanner !== false) 
+                                  ? 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-sm shadow-indigo-900/25' 
+                                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                              }`}
+                            >
+                              {(adSettings.onclickaVideoFallbackToBanner !== false) ? "ON" : "OFF"}
+                            </button>
+                          </div>
+
+                          {/* Show Debug Logs */}
+                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex justify-between items-center">
+                            <div>
+                              <span className="block text-xs font-semibold text-white">Show Debug Logs</span>
+                              <span className="text-[10px] text-slate-500">Output detailed diagnostics in console</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setAdSettings({ ...adSettings, onclickaVideoShowDebugLogs: adSettings.onclickaVideoShowDebugLogs === undefined ? false : !adSettings.onclickaVideoShowDebugLogs })}
+                              className={`px-3.5 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-200 cursor-pointer ${
+                                (adSettings.onclickaVideoShowDebugLogs !== false) 
+                                  ? 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-sm shadow-indigo-900/25' 
+                                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                              }`}
+                            >
+                              {(adSettings.onclickaVideoShowDebugLogs !== false) ? "ON" : "OFF"}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Video Spot List (Add More Button) */}
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-3">
+                          <div className="flex justify-between items-center border-b border-slate-850 pb-2">
+                            <div>
+                              <span className="block text-xs font-semibold text-white">Video Spot IDs</span>
+                              <span className="text-[10px] text-slate-500">List of OnClickA Spot IDs for Video Ads rotation</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const currentSpots = adSettings.onclickaVideoSpots || [];
+                                setAdSettings({
+                                  ...adSettings,
+                                  onclickaVideoSpots: [...currentSpots, ""]
+                                });
+                              }}
+                              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded-lg transition duration-200 shadow-sm flex items-center gap-1 cursor-pointer"
+                            >
+                              ➕ Add Video Spot
+                            </button>
+                          </div>
+
+                          {(!adSettings.onclickaVideoSpots || adSettings.onclickaVideoSpots.length === 0) ? (
+                            <div className="text-center py-3 text-slate-500 text-[10px]">
+                              No video spots configured. Click "Add Video Spot" to add at least one Spot ID.
+                            </div>
+                          ) : (
+                            <div className="space-y-2.5">
+                              {(adSettings.onclickaVideoSpots || []).map((spot: string, idx: number) => (
+                                <div key={idx} className="flex gap-2 items-center">
+                                  <span className="text-[10px] text-slate-500 font-bold font-mono w-6">#{idx + 1}</span>
+                                  <input
+                                    type="text"
+                                    value={spot}
+                                    placeholder="Enter Video Spot ID (e.g. 447812)"
+                                    onChange={(e) => {
+                                      const updated = [...(adSettings.onclickaVideoSpots || [])];
+                                      updated[idx] = e.target.value;
+                                      setAdSettings({ ...adSettings, onclickaVideoSpots: updated });
+                                    }}
+                                    className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = (adSettings.onclickaVideoSpots || []).filter((_: any, i: number) => i !== idx);
+                                      setAdSettings({ ...adSettings, onclickaVideoSpots: updated });
+                                    }}
+                                    className="p-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-950 rounded-lg transition duration-150 cursor-pointer"
+                                    title="Delete Video Spot"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {/* Feedback Indicators */}

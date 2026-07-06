@@ -5546,6 +5546,32 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // SMART URL SHORTENER PUBLIC & ADMIN APIs
   // ==========================================
 
+  app.get("/api/onclicka/vast", async (req, res) => {
+    const { spotId } = req.query;
+    if (!spotId) {
+      return res.status(400).json({ success: false, error: "Missing spotId" });
+    }
+    try {
+      const url = `https://syndication.onclckmn.com/vast?spotId=${spotId}`;
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/xml, text/xml, */*"
+        }
+      });
+      if (!response.ok) {
+        return res.status(response.status).json({ success: false, error: `Ad server returned status ${response.status}` });
+      }
+      const xmlText = await response.text();
+      res.set("Content-Type", "application/xml");
+      res.set("Access-Control-Allow-Origin", "*");
+      return res.send(xmlText);
+    } catch (err: any) {
+      console.error(`[OnClickA VAST Proxy] Error fetching spot ${spotId}:`, err);
+      return res.status(500).json({ success: false, error: err.message || "Network Error" });
+    }
+  });
+
   app.post("/api/smart-links/session/init", async (req, res) => {
     try {
       const { type, id, browser, device, country } = req.body;
@@ -5869,6 +5895,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         onclickaSdkSpotId: adSettings.onclickaSdkSpotId || "",
         onclickaBannerSize: adSettings.onclickaBannerSize || "728x90",
         onclickaSpots: adSettings.onclickaSpots || [],
+        onclickaVideoEnabled: adSettings.onclickaVideoEnabled ?? false,
+        onclickaVideoTimeout: adSettings.onclickaVideoTimeout ?? 8,
+        onclickaVideoRetryAttempts: adSettings.onclickaVideoRetryAttempts ?? 2,
+        onclickaVideoSpots: adSettings.onclickaVideoSpots || [],
+        onclickaVideoAutoRotation: adSettings.onclickaVideoAutoRotation ?? true,
+        onclickaVideoFallbackToBanner: adSettings.onclickaVideoFallbackToBanner ?? true,
+        onclickaVideoShowDebugLogs: adSettings.onclickaVideoShowDebugLogs ?? true,
         data: publicItemData
       });
 

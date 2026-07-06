@@ -185,6 +185,373 @@ export function OnClickABanner({
   );
 }
 
+// ----------------- OnClickA Video Ad Player -----------------
+interface OnClickAVideoAdPlayerProps {
+  enabled: boolean;
+  videoSpots: string[];
+  timeoutSeconds?: number;
+  retryAttempts?: number;
+  autoRotation?: boolean;
+  fallbackToBanner?: boolean;
+  showDebugLogs?: boolean;
+  onVideoStateChange?: (state: "idle" | "playing" | "completed" | "failed") => void;
+  onLogMessage?: (msg: string) => void;
+}
+
+export function OnClickAVideoAdPlayer({
+  enabled,
+  videoSpots = [],
+  timeoutSeconds = 8,
+  retryAttempts = 2,
+  autoRotation = true,
+  fallbackToBanner = true,
+  showDebugLogs = true,
+  onVideoStateChange,
+  onLogMessage
+}: OnClickAVideoAdPlayerProps) {
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [clickThroughUrl, setClickThroughUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [currentSpotId, setCurrentSpotId] = useState<string>("");
+  const [attempt, setAttempt] = useState(1);
+  const [skipTimer, setSkipTimer] = useState(5); // Show skip button after 5 seconds
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [logs, setLogs] = useState<string[]>([]);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const timeoutRef = useRef<any>(null);
+  const activeRequestRef = useRef<boolean>(false);
+
+  // Helper to add log and trigger callbacks
+  const log = (msg: string) => {
+    const formatted = `[Video Ad] ${msg}`;
+    if (showDebugLogs) {
+      console.log(formatted);
+    }
+    setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+    if (onLogMessage) onLogMessage(msg);
+  };
+
+  useEffect(() => {
+    if (!enabled || videoSpots.length === 0) return;
+
+    // Filter spots to those that haven't failed 2 consecutive times in this session
+    const getEligibleSpot = (): string | null => {
+      for (const spot of videoSpots) {
+        if (!spot) continue;
+        const failKey = `onclicka_failures_${spot}`;
+        const consecutiveFails = Number(sessionStorage.getItem(failKey) || "0");
+        if (consecutiveFails < 2) {
+          return spot;
+        } else {
+          if (showDebugLogs) {
+            console.log(`[Video Ad] Skipping spot ID ${spot} because it failed ${consecutiveFails} times consecutively.`);
+          }
+        }
+      }
+      // If all spots are blocked, reset the counters to allow retry
+      if (showDebugLogs) {
+        console.log(`[Video Ad] All configured spots have failed. Resetting failure limits.`);
+      }
+      for (const spot of videoSpots) {
+        if (!spot) continue;
+        sessionStorage.removeItem(`onclicka_failures_${spot}`);
+      }
+      return videoSpots.find(s => !!s) || null;
+    };
+
+    const fetchAd = async () => {
+      if (activeRequestRef.current) return;
+      activeRequestRef.current = true;
+
+      const spotId = getEligibleSpot();
+      if (!spotId) {
+        log("No Fill: No valid video spot configured or all have failed.");
+        log("Fallback Activated: Showing banner ads immediately.");
+        if (onVideoStateChange) onVideoStateChange("failed");
+        activeRequestRef.current = false;
+        return;
+      }
+
+      setCurrentSpotId(spotId);
+      log(`Video Request Started`);
+      log(`Spot ID Used: ${spotId}`);
+      log(`Attempt Number: ${attempt}`);
+
+      // Start configurable video ad timeout
+      let timeoutTriggered = false;
+      timeoutRef.current = setTimeout(() => {
+        timeoutTriggered = true;
+        log(`Timeout Triggered: Ad did not load within ${timeoutSeconds}s.`);
+        handleSpotFailure(spotId, "Video Timeout");
+      }, timeoutSeconds * 1000);
+
+      try {
+        const res = await fetch(`/api/onclicka/vast?spotId=${spotId}`);
+        if (timeoutTriggered) return;
+
+        if (!res.ok) {
+          log(`Network Error: Ad server responded with ${res.status}`);
+          handleSpotFailure(spotId, `Network Error ${res.status}`);
+          return;
+        }
+
+        const xmlText = await res.text();
+        if (timeoutTriggered) return;
+
+        if (!xmlText || xmlText.trim().length === 0) {
+          log("Empty Response: XML is blank.");
+          handleSpotFailure(spotId, "Empty Response");
+          return;
+        }
+
+        // Check if invalid XML or doesn't have standard VAST tags
+        if (!xmlText.includes("<VAST") && !xmlText.includes("<vast")) {
+          log("XML Error: Invalid VAST XML response.");
+          handleSpotFailure(spotId, "Invalid XML");
+          return;
+        }
+
+        // Check for empty VAST / No Fill
+        if (!xmlText.includes("<Ad") && !xmlText.includes("<ad")) {
+          log("No Fill: XML returned no active ad campaign.");
+          handleSpotFailure(spotId, "No Fill");
+          return;
+        }
+
+        // Regex parsing to prevent parsing crashes
+        const mediaFileMatch = xmlText.match(/<MediaFile[^>]*>([\s\S]*?)<\/MediaFile>/i);
+        const mediaUrl = mediaFileMatch ? mediaFileMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : null;
+
+        if (!mediaUrl) {
+          log("XML Error: Missing MediaFile inside VAST response.");
+          handleSpotFailure(spotId, "Missing MediaFile");
+          return;
+        }
+
+        const clickThroughMatch = xmlText.match(/<ClickThrough[^>]*>([\s\S]*?)<\/ClickThrough>/i);
+        const clickUrl = clickThroughMatch ? clickThroughMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : null;
+
+        // Success - clear timeout
+        clearTimeout(timeoutRef.current);
+        log("SDK Loaded: VAST XML successfully parsed.");
+        log(`Video ad payload resolved. Media source: ${mediaUrl}`);
+
+        // Reset consecutive failures on success
+        sessionStorage.setItem(`onclicka_failures_${spotId}`, "0");
+
+        setVideoUrl(mediaUrl);
+        setClickThroughUrl(clickUrl);
+        setIsPlaying(true);
+        if (onVideoStateChange) onVideoStateChange("playing");
+
+        // Fire impressions if any
+        const impressionMatches = [...xmlText.matchAll(/<Impression[^>]*>([\s\S]*?)<\/Impression>/gi)];
+        impressionMatches.forEach((m, idx) => {
+          const impUrl = m[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+          if (impUrl) {
+            navigator.sendBeacon ? navigator.sendBeacon(impUrl) : fetch(impUrl, { mode: "no-cors" });
+            if (showDebugLogs) console.log(`[Video Ad] Impression #${idx + 1} fired: ${impUrl}`);
+          }
+        });
+
+      } catch (err: any) {
+        if (timeoutTriggered) return;
+        log(`Network Error: ${err.message || err}`);
+        handleSpotFailure(spotId, "Network Error");
+      } finally {
+        activeRequestRef.current = false;
+      }
+    };
+
+    const handleSpotFailure = (spot: string, reason: string) => {
+      clearTimeout(timeoutRef.current);
+      log(`Video Failed: Spot ID ${spot} failed due to: ${reason}`);
+
+      // Track consecutive failures in sessionStorage
+      const failKey = `onclicka_failures_${spot}`;
+      const prevFails = Number(sessionStorage.getItem(failKey) || "0");
+      const nextFails = prevFails + 1;
+      sessionStorage.setItem(failKey, String(nextFails));
+
+      if (nextFails >= 2) {
+        log(`Spot ${spot} failed 2 consecutive times. It will be skipped for the rest of the session.`);
+      }
+
+      // Check for rotation
+      const nextSpotIdx = videoSpots.indexOf(spot) + 1;
+      if (autoRotation && nextSpotIdx < videoSpots.length) {
+        log(`Rotating to next spot: #${nextSpotIdx + 1}`);
+        setAttempt(prev => prev + 1);
+        // Force evaluation on next loop
+        activeRequestRef.current = false;
+        fetchAd();
+      } else {
+        log(`Final Result: No ad filled from any available spots.`);
+        log(`Fallback Activated: Loading banners immediately.`);
+        if (onVideoStateChange) onVideoStateChange("failed");
+      }
+    };
+
+    fetchAd();
+
+    return () => {
+      clearTimeout(timeoutRef.current);
+    };
+  }, [enabled, videoSpots, attempt, autoRotation, timeoutSeconds]);
+
+  // Video skip countdown timer
+  useEffect(() => {
+    if (!isPlaying) return;
+    const interval = setInterval(() => {
+      setSkipTimer((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isPlaying]);
+
+  const handleVideoCompleted = () => {
+    log("Video Completed");
+    log("Final Result: Success");
+    setIsPlaying(false);
+    setIsCompleted(true);
+    if (onVideoStateChange) onVideoStateChange("completed");
+  };
+
+  const handleVideoError = (e: any) => {
+    log("Playback Error: Video element failed during playing.");
+    handleVideoFailed();
+  };
+
+  const handleVideoFailed = () => {
+    log("Video Failed");
+    log("Fallback Activated");
+    setIsPlaying(false);
+    if (onVideoStateChange) onVideoStateChange("failed");
+  };
+
+  const handleSkipAd = () => {
+    log("Video Skipped by user");
+    log("Final Result: Skipped");
+    setIsPlaying(false);
+    setIsCompleted(true);
+    if (onVideoStateChange) onVideoStateChange("completed");
+  };
+
+  if (!enabled || !isPlaying || !videoUrl) return null;
+
+  return (
+    <div className="fixed inset-0 z-[99999] flex flex-col justify-center items-center bg-slate-950/95 backdrop-blur-md animate-fadeIn px-4">
+      {/* Container holding Video Ad */}
+      <div className="relative w-full max-w-3xl bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-2xl flex flex-col">
+        {/* Top bar with spot info */}
+        <div className="p-3 bg-slate-900 border-b border-slate-800 flex justify-between items-center text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+          <span className="flex items-center gap-1.5 text-indigo-400">
+            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+            Video Ad Sponsor
+          </span>
+          <span>Spot ID: {currentSpotId}</span>
+        </div>
+
+        {/* Video Frame */}
+        <div className="relative aspect-video w-full flex justify-center items-center bg-black cursor-pointer" onClick={() => {
+          if (clickThroughUrl) {
+            window.open(clickThroughUrl, "_blank");
+          }
+        }}>
+          <video
+            ref={videoRef}
+            src={videoUrl}
+            autoPlay
+            playsInline
+            controls={false}
+            onEnded={handleVideoCompleted}
+            onError={handleVideoError}
+            onTimeUpdate={() => {
+              if (videoRef.current) {
+                setCurrentTime(videoRef.current.currentTime);
+              }
+            }}
+            onLoadedMetadata={() => {
+              if (videoRef.current) {
+                setDuration(videoRef.current.duration);
+                log("Video Started: Metadata resolved, playback begins.");
+              }
+            }}
+            className="w-full h-full object-contain"
+          />
+
+          {/* Banner ad clicked instruction banner */}
+          {clickThroughUrl && (
+            <div className="absolute bottom-4 left-4 right-4 bg-slate-950/80 backdrop-blur border border-slate-800 p-2.5 rounded-xl flex justify-between items-center text-xs text-white hover:bg-slate-900/90 transition">
+              <span>Click video to visit sponsor website</span>
+              <span className="px-2 py-0.5 bg-indigo-600 text-white rounded text-[10px] font-bold">Visit ↗</span>
+            </div>
+          )}
+        </div>
+
+        {/* Progress Bar & Video Controls */}
+        <div className="p-4 bg-slate-900 border-t border-slate-850 flex flex-col gap-3">
+          {/* Progress row */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 bg-slate-950 rounded-full h-1.5 overflow-hidden">
+              <div 
+                className="bg-indigo-500 h-full transition-all duration-100" 
+                style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+              ></div>
+            </div>
+            <span className="text-[10px] font-mono font-bold text-slate-400">
+              {Math.floor(currentTime)}s / {Math.floor(duration || 0)}s
+            </span>
+          </div>
+
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] font-medium text-slate-500">
+              Your content is loading underneath...
+            </span>
+
+            {/* Skip button countdown */}
+            {skipTimer > 0 ? (
+              <span className="px-4 py-2 bg-slate-800 text-slate-400 text-xs font-bold rounded-lg select-none">
+                Skip in {skipTimer}s
+              </span>
+            ) : (
+              <button
+                onClick={handleSkipAd}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-all duration-150 cursor-pointer shadow-md flex items-center gap-1"
+              >
+                Skip Ad ➔
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Embedded Real-Time Diagnostic log panel under the video */}
+      {showDebugLogs && (
+        <div className="w-full max-w-3xl mt-4 bg-slate-900 border border-slate-850 rounded-xl p-3 flex flex-col gap-2">
+          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider border-b border-slate-800 pb-1.5 flex justify-between items-center">
+            <span>🔬 Live Video ad Diagnostics Log</span>
+            <span className="text-emerald-400 animate-pulse font-mono text-[9px]">● Active Streaming</span>
+          </div>
+          <div className="bg-slate-950 rounded-lg p-2.5 h-24 overflow-y-auto font-mono text-[10px] text-slate-300 space-y-1">
+            {logs.map((l, index) => (
+              <div key={index} className="leading-relaxed whitespace-pre-wrap">{l}</div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ----------------- Error Boundary -----------------
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -300,6 +667,15 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const [onclickaSdkScript, setOnclickaSdkScript] = useState("");
   const [onclickaSdkSpotId, setOnclickaSdkSpotId] = useState("");
   const [onclickaBannerSize, setOnclickaBannerSize] = useState("");
+
+  // OnClickA Video settings states
+  const [onclickaVideoEnabled, setOnclickaVideoEnabled] = useState(false);
+  const [onclickaVideoTimeout, setOnclickaVideoTimeout] = useState(8);
+  const [onclickaVideoRetryAttempts, setOnclickaVideoRetryAttempts] = useState(2);
+  const [onclickaVideoSpots, setOnclickaVideoSpots] = useState<string[]>([]);
+  const [onclickaVideoAutoRotation, setOnclickaVideoAutoRotation] = useState(true);
+  const [onclickaVideoFallbackToBanner, setOnclickaVideoFallbackToBanner] = useState(true);
+  const [onclickaVideoShowDebugLogs, setOnclickaVideoShowDebugLogs] = useState(true);
 
   // Inject OnClickA script exactly once if enabled globally
   useEffect(() => {
@@ -536,6 +912,13 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
         setOnclickaSdkScript(initData.onclickaSdkScript || "");
         setOnclickaSdkSpotId(initData.onclickaSdkSpotId || "");
         setOnclickaBannerSize(initData.onclickaBannerSize || "");
+        setOnclickaVideoEnabled(initData.onclickaVideoEnabled ?? false);
+        setOnclickaVideoTimeout(initData.onclickaVideoTimeout ?? 8);
+        setOnclickaVideoRetryAttempts(initData.onclickaVideoRetryAttempts ?? 2);
+        setOnclickaVideoSpots(initData.onclickaVideoSpots || []);
+        setOnclickaVideoAutoRotation(initData.onclickaVideoAutoRotation ?? true);
+        setOnclickaVideoFallbackToBanner(initData.onclickaVideoFallbackToBanner ?? true);
+        setOnclickaVideoShowDebugLogs(initData.onclickaVideoShowDebugLogs ?? true);
         
         // Setup Page 1 Timer
         const page1Config = initData.pagesConfig?.find((p: any) => p.pageNumber === 1);
@@ -833,6 +1216,15 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
 
   return (
     <div className="min-h-screen relative text-slate-200 font-sans flex flex-col justify-between overflow-hidden">
+      <OnClickAVideoAdPlayer
+        enabled={onclickaVideoEnabled}
+        videoSpots={onclickaVideoSpots}
+        timeoutSeconds={onclickaVideoTimeout}
+        retryAttempts={onclickaVideoRetryAttempts}
+        autoRotation={onclickaVideoAutoRotation}
+        fallbackToBanner={onclickaVideoFallbackToBanner}
+        showDebugLogs={onclickaVideoShowDebugLogs}
+      />
       <AnimatedBackground />
 
       {/* Header */}
