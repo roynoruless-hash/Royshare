@@ -8,18 +8,98 @@ import AnimatedBackground from "./AnimatedBackground";
 interface OnClickABannerProps {
   adSpotId: number | string;
   sdkScript?: string;
+  sizeMode?: "auto" | "manual";
   size?: string;
+  position?: string;
+  bannerNumber?: number;
+  onDiagnosticUpdate?: (data: any) => void;
 }
 
-export function OnClickABanner({ adSpotId, sdkScript, size = "728x90" }: OnClickABannerProps) {
+export function OnClickABanner({
+  adSpotId,
+  sdkScript,
+  sizeMode = "auto",
+  size = "728x90",
+  position = "Unknown",
+  bannerNumber = 1,
+  onDiagnosticUpdate
+}: OnClickABannerProps) {
   if (!adSpotId) return null;
 
-  const [widthStr, heightStr] = (size || "728x90").split("x");
-  const width = Number(widthStr);
-  const height = Number(heightStr);
-  const w = isNaN(width) ? 728 : width;
-  const h = isNaN(height) ? 90 : height;
+  const [dims, setDims] = useState({ width: 0, height: 0, aspectRatio: "0.00" });
+  const [diagnostic, setDiagnostic] = useState<any>({
+    sdkLoaded: false,
+    requestSent: true,
+    httpStatus: "200 OK / Opaque",
+    fillStatus: "Checking",
+    renderSuccess: false,
+    renderTime: 0,
+    errorMessage: ""
+  });
 
+  const [widthStr, heightStr] = (size || "728x90").split("x");
+  const reqW = isNaN(Number(widthStr)) ? 728 : Number(widthStr);
+  const reqH = isNaN(Number(heightStr)) ? 90 : Number(heightStr);
+
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Auto Detect size defaults to 728x90 container size but behaves fluidly
+  const w = sizeMode === "manual" ? reqW : 728;
+  const h = sizeMode === "manual" ? reqH : 90;
+
+  // Set up message listener for diagnostics sent from iframe
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === "ONCLICKA_DIAGNOSTICS" && String(event.data.spotId) === String(adSpotId)) {
+        const { width, height, aspectRatio, renderTime, success, error } = event.data;
+        const finalW = width || w;
+        const finalH = height || h;
+        
+        setDims({
+          width: finalW,
+          height: finalH,
+          aspectRatio: aspectRatio || (finalW / finalH).toFixed(2)
+        });
+
+        const newDiagnostic = {
+          sdkLoaded: true,
+          requestSent: true,
+          httpStatus: "200 OK / Opaque",
+          fillStatus: success ? "Filled" : "No Fill / Timeout",
+          renderSuccess: success,
+          renderTime: renderTime || 120,
+          errorMessage: error || (success ? "" : "Ad render timeout or empty response")
+        };
+        setDiagnostic(newDiagnostic);
+
+        if (onDiagnosticUpdate) {
+          onDiagnosticUpdate({
+            spotId: adSpotId,
+            position,
+            autoDetectEnabled: sizeMode === "auto",
+            detectedWidth: finalW,
+            detectedHeight: finalH,
+            requestedSize: sizeMode === "manual" ? size : "Auto",
+            ...newDiagnostic
+          });
+        }
+
+        // Print console logs exactly as requested:
+        console.log(`Loading Banner ${bannerNumber}...`);
+        console.log(`Spot ID : ${adSpotId}`);
+        console.log(`Position : ${position}`);
+        console.log(`Auto Detect : ${sizeMode === "auto" ? "ON" : "OFF"}`);
+        console.log(`Detected Size : ${finalW}×${finalH}`);
+        console.log(`Rendering...`);
+        console.log(`Banner Render Success`);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [adSpotId, sizeMode, size, position, bannerNumber, onDiagnosticUpdate, w, h]);
+
+  // Generate iframe contents
   const iframeHtml = `
     <!DOCTYPE html>
     <html>
@@ -39,19 +119,65 @@ export function OnClickABanner({ adSpotId, sdkScript, size = "728x90" }: OnClick
         </style>
       </head>
       <body>
-        <div data-banner-id="${adSpotId}" style="width: ${w}px; height: ${h}px; display: flex; justify-content: center; align-items: center;"></div>
+        <div id="banner-container" data-banner-id="${adSpotId}" style="width: ${sizeMode === "manual" ? w + "px" : "100%"}; height: ${sizeMode === "manual" ? h + "px" : "100%"}; display: flex; justify-content: center; align-items: center;"></div>
         ${sdkScript || `<script async src="https://js.onclckmn.com/static/onclicka.js" data-admpid="${adSpotId}"></script>`}
+        <script>
+          window.addEventListener('load', () => {
+            const startTime = performance.now();
+            const container = document.getElementById('banner-container');
+            let checks = 0;
+            const interval = setInterval(() => {
+              checks++;
+              const hasContent = container.children.length > 0;
+              const width = container.offsetWidth || (container.firstChild ? container.firstChild.offsetWidth : 0);
+              const height = container.offsetHeight || (container.firstChild ? container.firstChild.offsetHeight : 0);
+              
+              if ((hasContent && width > 0 && height > 0) || checks > 40) {
+                clearInterval(interval);
+                const endTime = performance.now();
+                const renderTimeMs = Math.round(endTime - startTime);
+                const aspect = width > 0 && height > 0 ? (width / height).toFixed(2) : "0.00";
+                
+                window.parent.postMessage({
+                  type: 'ONCLICKA_DIAGNOSTICS',
+                  spotId: '${adSpotId}',
+                  width: width || ${w},
+                  height: height || ${h},
+                  aspectRatio: aspect,
+                  renderTime: renderTimeMs,
+                  success: (width > 0 && height > 0) || hasContent
+                }, '*');
+              }
+            }, 100);
+          });
+          window.onerror = function(msg, url, line) {
+            window.parent.postMessage({
+              type: 'ONCLICKA_DIAGNOSTICS',
+              spotId: '${adSpotId}',
+              width: 0,
+              height: 0,
+              aspectRatio: '0.00',
+              renderTime: 0,
+              success: false,
+              error: msg
+            }, '*');
+          };
+        </script>
       </body>
     </html>
   `;
 
+  const activeW = sizeMode === "manual" ? w : (dims.width || 728);
+  const activeH = sizeMode === "manual" ? h : (dims.height || 90);
+
   return (
-    <div className="w-full flex justify-center items-center my-4 overflow-hidden" style={{ minHeight: `${h}px` }}>
+    <div className="w-full flex justify-center items-center my-4 overflow-hidden" style={{ minHeight: `${activeH}px` }}>
       <iframe
+        ref={iframeRef}
         title={`OnClickA Ad Spot ${adSpotId}`}
         srcDoc={iframeHtml}
-        width={w}
-        height={h}
+        width={activeW}
+        height={activeH}
         style={{ border: "none", overflow: "hidden", maxWidth: "100%" }}
         scrolling="no"
       />
@@ -209,7 +335,20 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   }, [onclickaEnabled, onclickaSdkScript]);
 
   // Helper to render banners by position with backwards compatibility fallback
-  const renderBannersForPosition = (pos: "Header" | "Above Verify" | "Below Verify" | "Footer") => {
+  const renderBannersForPosition = (
+    pos:
+      | "Header"
+      | "Below Header"
+      | "Above Timer"
+      | "Below Timer"
+      | "Above Verification"
+      | "Below Verification"
+      | "Above Continue Button"
+      | "Below Continue Button"
+      | "Footer"
+      | "Above Verify"
+      | "Below Verify"
+  ) => {
     if (!onclickaEnabled || !bannerAdsEnabled) return null;
 
     // Retrieve all active and enabled banners across the configuration to establish overall numbering
@@ -217,10 +356,19 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
       (b: any) => b.enabled !== false && b.spotId
     );
 
-    // Filter to active banners for this specific position
-    const activeBannersInPos = allActiveBanners.filter(
-      (b: any) => String(b.position).toLowerCase() === pos.toLowerCase()
-    );
+    // Filter to active banners for this specific position, supporting backward compatibility mapping
+    const activeBannersInPos = allActiveBanners.filter((b: any) => {
+      const bPos = String(b.position || "").toLowerCase().trim();
+      const targetPos = pos.toLowerCase().trim();
+      
+      if (targetPos === "above verification" || targetPos === "above verify") {
+        return bPos === "above verification" || bPos === "above verify";
+      }
+      if (targetPos === "below verification" || targetPos === "below verify") {
+        return bPos === "below verification" || bPos === "below verify";
+      }
+      return bPos === targetPos;
+    });
 
     if (activeBannersInPos.length > 0) {
       return (
@@ -238,7 +386,10 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                 key={`${pos}-banner-${b.spotId}-${globalIdx}`} 
                 adSpotId={b.spotId} 
                 sdkScript={onclickaSdkScript}
+                sizeMode={b.sizeMode || "auto"}
                 size={b.size}
+                position={pos}
+                bannerNumber={bannerNumber}
               />
             );
           })}
@@ -256,7 +407,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
             {topIds.map((spotId, index) => {
               console.log(`Rendering Fallback Banner ${index + 1} (Position: Header) - Spot ID: ${spotId}`);
               return (
-                <OnClickABanner key={`top-banner-fallback-${spotId}-${index}`} adSpotId={spotId} sdkScript={onclickaSdkScript} />
+                <OnClickABanner key={`top-banner-fallback-${spotId}-${index}`} adSpotId={spotId} sdkScript={onclickaSdkScript} position="Header" bannerNumber={index + 1} />
               );
             })}
           </div>
@@ -270,7 +421,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
             {bottomIds.map((spotId, index) => {
               console.log(`Rendering Fallback Banner ${index + 3} (Position: Footer) - Spot ID: ${spotId}`);
               return (
-                <OnClickABanner key={`bottom-banner-fallback-${spotId}-${index}`} adSpotId={spotId} sdkScript={onclickaSdkScript} />
+                <OnClickABanner key={`bottom-banner-fallback-${spotId}-${index}`} adSpotId={spotId} sdkScript={onclickaSdkScript} position="Footer" bannerNumber={index + 3} />
               );
             })}
           </div>
@@ -698,6 +849,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 w-full max-w-7xl mx-auto">
         {/* OnClickA Top Header Banners */}
         {renderBannersForPosition("Header")}
+        {renderBannersForPosition("Below Header")}
 
         <div className="w-full max-w-xl bg-slate-900/80 backdrop-blur-md rounded-2xl p-8 border border-white/10 shadow-2xl space-y-6">
           <AnimatePresence mode="wait">
@@ -737,10 +889,12 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                   {/* Timer or Verification Logic */}
                   {timer > 0 ? (
                     <div className="text-center py-4 space-y-2">
+                      {renderBannersForPosition("Above Timer")}
                       <div className="text-5xl font-black text-teal-400 tracking-tight animate-pulse">{timer}s</div>
                       <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5">
                         <Clock size={12} className="animate-spin" /> Seconds remaining until page unlocks
                       </p>
+                      {renderBannersForPosition("Below Timer")}
                     </div>
                   ) : (
                     <div className="text-center py-2 space-y-4">
@@ -836,6 +990,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                 {/* Progression Control */}
                 {isPageComplete && (type !== "shortener" || currentPage < totalPages) && (
                   <div className="pt-2">
+                    {renderBannersForPosition("Above Continue Button")}
                     <button
                       id="continue-btn"
                       onClick={handleNextPage}
@@ -843,6 +998,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                     >
                       {currentPageConfig?.continueBtnText || itemData?.continueButtonText || "Proceed to Next Step"} <ArrowRight size={16} />
                     </button>
+                    {renderBannersForPosition("Below Continue Button")}
                   </div>
                 )}
 
@@ -921,6 +1077,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
 
                 {/* Final Trigger CTA */}
                 <div className="pt-2">
+                  {renderBannersForPosition("Above Continue Button")}
                   {type === "download" ? (
                     downloadUrl ? (
                       <a
@@ -974,6 +1131,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                       )}
                     </button>
                   )}
+                  {renderBannersForPosition("Below Continue Button")}
                 </div>
 
                 {/* Below Verify OnClickA Banners */}

@@ -11,6 +11,7 @@ import {
   Search, User, Filter, Download, Users,
   Check, Loader2, Terminal, Globe, RefreshCw, FileCode, Activity, Layers, Radio, XCircle, CheckCircle
 } from "lucide-react";
+import { OnClickABanner } from "../components/MultiPageEngine";
 
 
 export default function AdminDashboard() {
@@ -151,9 +152,13 @@ export default function AdminDashboard() {
     onclickaEnabled: false,
     onclickaSdkScript: "",
     onclickaSdkSpotId: "",
-    onclickaBannerSize: "728x90"
+    onclickaBannerSize: "728x90",
+    onclickaSpots: []
   });
   const [adSubTab, setAdSubTab] = useState<'general' | 'onclicka'>('onclicka');
+  const [spotDiagnostics, setSpotDiagnostics] = useState<Record<string, any>>({});
+  const [spotPreviews, setSpotPreviews] = useState<Record<string, boolean>>({});
+  const [spotDiagShow, setSpotDiagShow] = useState<Record<string, boolean>>({});
   const [diagnosticLogs, setDiagnosticLogs] = useState<string[]>([]);
   const [diagnosticStatus, setDiagnosticStatus] = useState<'IDLE' | 'RUNNING' | 'PASS' | 'FAIL'>('IDLE');
   const [showLivePreview, setShowLivePreview] = useState(false);
@@ -1098,7 +1103,8 @@ export default function AdminDashboard() {
           onclickaEnabled: data.onclickaEnabled ?? false,
           onclickaSdkScript: data.onclickaSdkScript || "",
           onclickaSdkSpotId: data.onclickaSdkSpotId || "",
-          onclickaBannerSize: data.onclickaBannerSize || "728x90"
+          onclickaBannerSize: data.onclickaBannerSize || "728x90",
+          onclickaSpots: data.onclickaSpots || []
         });
         if (data.updatedAt) {
           const date = data.updatedAt.toDate ? data.updatedAt.toDate() : new Date(data.updatedAt);
@@ -1117,7 +1123,8 @@ export default function AdminDashboard() {
           onclickaEnabled: false,
           onclickaSdkScript: "",
           onclickaSdkSpotId: "",
-          onclickaBannerSize: "728x90"
+          onclickaBannerSize: "728x90",
+          onclickaSpots: []
         });
         setAdSettingsLastUpdated("Never");
       }
@@ -1209,6 +1216,7 @@ export default function AdminDashboard() {
         onclickaSdkScript: settingsToSave.onclickaSdkScript || "",
         onclickaSdkSpotId: settingsToSave.onclickaSdkSpotId || "",
         onclickaBannerSize: settingsToSave.onclickaBannerSize || "728x90",
+        onclickaSpots: settingsToSave.onclickaSpots || [],
         updatedAt: serverTimestamp()
       };
       await setDoc(docRef, updatedData);
@@ -1219,7 +1227,8 @@ export default function AdminDashboard() {
         onclickaEnabled: settingsToSave.onclickaEnabled ?? false,
         onclickaSdkScript: settingsToSave.onclickaSdkScript || "",
         onclickaSdkSpotId: settingsToSave.onclickaSdkSpotId || "",
-        onclickaBannerSize: settingsToSave.onclickaBannerSize || "728x90"
+        onclickaBannerSize: settingsToSave.onclickaBannerSize || "728x90",
+        onclickaSpots: settingsToSave.onclickaSpots || []
       });
       setAdSettingsLastUpdated(new Date().toLocaleString());
       setAdSettingsFeedback("✅ Advertisement settings saved successfully!");
@@ -4525,50 +4534,150 @@ export default function AdminDashboard() {
                                       </label>
                                     </div>
                                     
-                                    <div className="space-y-2">
+                                    <div className="space-y-3.5">
                                       <div>
-                                        <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Spot ID</label>
-                                        <input
-                                          type="text"
-                                          value={banner.spotId || ""}
-                                          onChange={(e) => {
-                                            setUserShortenerSettings((prev: any) => {
-                                              const nextBanners = [...(prev.onclickaBanners || [])];
-                                              nextBanners[index] = {
-                                                ...nextBanners[index],
-                                                spotId: e.target.value
-                                              };
-                                              return { ...prev, onclickaBanners: nextBanners };
-                                            });
-                                          }}
-                                          className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono font-bold"
-                                          placeholder="e.g. 447111"
-                                        />
+                                        <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Spot ID Selection</label>
+                                        {(!adSettings.onclickaSpots || adSettings.onclickaSpots.length === 0) ? (
+                                          <div className="text-[10px] bg-rose-950/40 border border-rose-500/25 rounded px-2.5 py-1.5 text-rose-400 font-semibold leading-tight">
+                                            ⚠️ No Spot IDs configured! Go to Ads Settings → OnClickA to add Spot IDs first.
+                                          </div>
+                                        ) : (
+                                          <select
+                                            value={banner.spotId || ""}
+                                            onChange={(e) => {
+                                              setUserShortenerSettings((prev: any) => {
+                                                const nextBanners = [...(prev.onclickaBanners || [])];
+                                                nextBanners[index] = {
+                                                  ...nextBanners[index],
+                                                  spotId: e.target.value
+                                                };
+                                                return { ...prev, onclickaBanners: nextBanners };
+                                              });
+                                            }}
+                                            className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono font-bold"
+                                          >
+                                            <option value="">-- Select Spot ID --</option>
+                                            {(adSettings.onclickaSpots || []).map((spot: any) => (
+                                              <option key={spot.id} value={spot.spotId}>
+                                                {spot.name ? `${spot.name} (${spot.spotId})` : spot.spotId}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        )}
                                       </div>
 
                                       <div>
-                                        <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Banner Size</label>
-                                        <select
-                                          value={banner.size || "728x90"}
-                                          onChange={(e) => {
-                                            setUserShortenerSettings((prev: any) => {
-                                              const nextBanners = [...(prev.onclickaBanners || [])];
-                                              nextBanners[index] = {
-                                                ...nextBanners[index],
-                                                size: e.target.value
-                                              };
-                                              return { ...prev, onclickaBanners: nextBanners };
-                                            });
-                                          }}
-                                          className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
-                                        >
-                                          <option value="728x90">728x90 (Leaderboard)</option>
-                                          <option value="320x50">320x50 (Mobile Banner)</option>
-                                          <option value="300x250">300x250 (Square)</option>
-                                          <option value="160x600">160x600 (Skyscraper)</option>
-                                          <option value="468x60">468x60 (Standard Banner)</option>
-                                        </select>
+                                        <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Size Mode</label>
+                                        <div className="flex gap-4">
+                                          <label className="flex items-center gap-1.5 cursor-pointer text-xs text-white">
+                                            <input
+                                              type="radio"
+                                              name={`banner-sizeMode-${index}`}
+                                              checked={banner.sizeMode !== "manual"}
+                                              onChange={() => {
+                                                setUserShortenerSettings((prev: any) => {
+                                                  const nextBanners = [...(prev.onclickaBanners || [])];
+                                                  nextBanners[index] = {
+                                                    ...nextBanners[index],
+                                                    sizeMode: "auto"
+                                                  };
+                                                  return { ...prev, onclickaBanners: nextBanners };
+                                                });
+                                              }}
+                                              className="accent-indigo-500 w-3.5 h-3.5"
+                                            />
+                                            Auto Detect
+                                          </label>
+                                          <label className="flex items-center gap-1.5 cursor-pointer text-xs text-white">
+                                            <input
+                                              type="radio"
+                                              name={`banner-sizeMode-${index}`}
+                                              checked={banner.sizeMode === "manual"}
+                                              onChange={() => {
+                                                setUserShortenerSettings((prev: any) => {
+                                                  const nextBanners = [...(prev.onclickaBanners || [])];
+                                                  nextBanners[index] = {
+                                                    ...nextBanners[index],
+                                                    sizeMode: "manual"
+                                                  };
+                                                  return { ...prev, onclickaBanners: nextBanners };
+                                                });
+                                              }}
+                                              className="accent-indigo-500 w-3.5 h-3.5"
+                                            />
+                                            Manual Size
+                                          </label>
+                                        </div>
                                       </div>
+
+                                      {banner.sizeMode === "manual" && (
+                                        <div className="animate-fadeIn">
+                                          <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Banner Size</label>
+                                          <select
+                                            value={banner.size || "728x90"}
+                                            onChange={(e) => {
+                                              setUserShortenerSettings((prev: any) => {
+                                                const nextBanners = [...(prev.onclickaBanners || [])];
+                                                nextBanners[index] = {
+                                                  ...nextBanners[index],
+                                                  size: e.target.value
+                                                };
+                                                return { ...prev, onclickaBanners: nextBanners };
+                                              });
+                                            }}
+                                            className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                          >
+                                            <option value="728x90">728x90 (Leaderboard)</option>
+                                            <option value="320x50">320x50 (Mobile Banner)</option>
+                                            <option value="300x250">300x250 (Square)</option>
+                                            <option value="160x600">160x600 (Skyscraper)</option>
+                                            <option value="468x60">468x60 (Standard Banner)</option>
+                                            <option value="970x250">970x250 (Billboard)</option>
+                                            <option value="Custom">Custom Dimensions</option>
+                                          </select>
+
+                                          {banner.size === "Custom" && (
+                                            <div className="grid grid-cols-2 gap-2 pt-1.5 animate-fadeIn">
+                                              <div>
+                                                <label className="block text-[9px] text-slate-400 font-semibold uppercase">Width</label>
+                                                <input
+                                                  type="number"
+                                                  value={banner.customW || 728}
+                                                  onChange={(e) => {
+                                                    setUserShortenerSettings((prev: any) => {
+                                                      const nextBanners = [...(prev.onclickaBanners || [])];
+                                                      nextBanners[index] = {
+                                                        ...nextBanners[index],
+                                                        customW: Number(e.target.value)
+                                                      };
+                                                      return { ...prev, onclickaBanners: nextBanners };
+                                                    });
+                                                  }}
+                                                  className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs text-white font-mono"
+                                                />
+                                              </div>
+                                              <div>
+                                                <label className="block text-[9px] text-slate-400 font-semibold uppercase">Height</label>
+                                                <input
+                                                  type="number"
+                                                  value={banner.customH || 90}
+                                                  onChange={(e) => {
+                                                    setUserShortenerSettings((prev: any) => {
+                                                      const nextBanners = [...(prev.onclickaBanners || [])];
+                                                      nextBanners[index] = {
+                                                        ...nextBanners[index],
+                                                        customH: Number(e.target.value)
+                                                      };
+                                                      return { ...prev, onclickaBanners: nextBanners };
+                                                    });
+                                                  }}
+                                                  className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs text-white font-mono"
+                                                />
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
 
                                       <div>
                                         <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Position</label>
@@ -4587,9 +4696,14 @@ export default function AdminDashboard() {
                                           className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
                                         >
                                           <option value="Header">Header (Top of main area)</option>
-                                          <option value="Above Verify">Above Verify (Inside verification card)</option>
-                                          <option value="Below Verify">Below Verify (Inside verification card)</option>
-                                          <option value="Footer">Footer (Bottom of main area)</option>
+                                          <option value="Below Header">Below Header</option>
+                                          <option value="Above Timer">Above Timer</option>
+                                          <option value="Below Timer">Below Timer</option>
+                                          <option value="Above Verify">Above Verification Card</option>
+                                          <option value="Below Verify">Below Verification Card</option>
+                                          <option value="Above Continue">Above Continue Button</option>
+                                          <option value="Below Continue">Below Continue Button</option>
+                                          <option value="Footer">Footer (Bottom of page)</option>
                                         </select>
                                       </div>
                                     </div>
@@ -7538,7 +7652,7 @@ export default function AdminDashboard() {
                   {/* Left panel: Fields */}
                   <div className="lg:col-span-2 space-y-6">
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-                      <h3 className="text-lg font-bold text-white border-b border-slate-800 pb-3 flex items-center gap-2">
+                      <h3 className="text-lg font-bold text-white border-b border-slate-800 pb-3 flex items-center gap-2 font-sans tracking-tight">
                         <span>🎯</span> OnClickA Campaign Configuration
                       </h3>
 
@@ -7551,7 +7665,7 @@ export default function AdminDashboard() {
                         <button
                           type="button"
                           onClick={() => setAdSettings({ ...adSettings, onclickaEnabled: !adSettings.onclickaEnabled })}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 shadow-md ${
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 shadow-md cursor-pointer ${
                             adSettings.onclickaEnabled 
                               ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-emerald-900/10' 
                               : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
@@ -7563,40 +7677,359 @@ export default function AdminDashboard() {
 
                       {/* 2. OnClickA SDK Script */}
                       <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-slate-300">2. OnClickA SDK Script</label>
+                        <label className="block text-sm font-semibold text-slate-300">2. Centralized Publisher Script</label>
                         <textarea 
                           value={adSettings.onclickaSdkScript || ""} 
                           onChange={(e) => setAdSettings({ ...adSettings, onclickaSdkScript: e.target.value })} 
                           placeholder='e.g., <script async src="https://js.onclckmn.com/static/onclicka.js" data-admpid="447272"></script>'
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white h-32 font-mono text-xs focus:outline-none focus:border-indigo-500"
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white h-24 font-mono text-xs focus:outline-none focus:border-indigo-500"
                         ></textarea>
-                        <p className="text-xs text-slate-500">Paste the global SDK script code. Only one SDK script instance will be loaded to prevent duplication.</p>
+                        <div className="flex justify-between items-center text-xs text-slate-500">
+                          <span>Paste the global SDK script code. Only one SDK script instance will be loaded to prevent duplication.</span>
+                          {(() => {
+                            const script = adSettings.onclickaSdkScript || "";
+                            const pidMatch = script.match(/data-admpid\s*=\s*["']([^"']+)["']/i) || script.match(/data-admpid\s*=\s*([0-9]+)/i);
+                            const autoPublisherId = pidMatch ? pidMatch[1] : null;
+                            return autoPublisherId ? (
+                              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-bold font-mono">
+                                🟢 Auto-Detected ID: {autoPublisherId}
+                              </span>
+                            ) : (
+                              <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-semibold">
+                                ⚠️ No Publisher ID found
+                              </span>
+                            );
+                          })()}
+                        </div>
                       </div>
 
-                      {/* 3. SDK Spot ID (Testing Only) */}
-                      <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-slate-300">3. SDK Spot ID (For testing only)</label>
-                        <input 
-                          type="text"
-                          value={adSettings.onclickaSdkSpotId || ""} 
-                          onChange={(e) => setAdSettings({ ...adSettings, onclickaSdkSpotId: e.target.value })} 
-                          placeholder="e.g., 447272"
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
-                        />
-                        <p className="text-xs text-slate-500">This Spot ID is exclusively used for the live preview and diagnostics. Production links use their own local Spot IDs.</p>
-                      </div>
+                      {/* Dynamic Spot ID Manager */}
+                      <div className="space-y-4 pt-4 border-t border-slate-800">
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <h4 className="text-md font-bold text-slate-200">🚀 Dynamic Spot Manager</h4>
+                            <p className="text-xs text-slate-500">Create and manage unlimited ad spot configurations</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const currentSpots = adSettings.onclickaSpots || [];
+                              const newSpot = {
+                                id: "SPOT_" + Math.random().toString(36).substring(2, 9).toUpperCase(),
+                                name: "",
+                                spotId: "",
+                                enabled: true,
+                                sizeMode: "auto",
+                                size: "728x90",
+                                customW: 728,
+                                customH: 90
+                              };
+                              setAdSettings({
+                                ...adSettings,
+                                onclickaSpots: [...currentSpots, newSpot]
+                              });
+                            }}
+                            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition duration-200 shadow-md flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <span>➕</span> Add Spot ID
+                          </button>
+                        </div>
 
-                      {/* 4. Banner Size */}
-                      <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-slate-300">4. Banner Size</label>
-                        <input 
-                          type="text"
-                          value={adSettings.onclickaBannerSize || ""} 
-                          onChange={(e) => setAdSettings({ ...adSettings, onclickaBannerSize: e.target.value })} 
-                          placeholder="e.g., 728x90, 320x50, 300x250, 160x600"
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
-                        />
-                        <p className="text-xs text-slate-500">Define the dimension layout parameter for diagnostic render frames.</p>
+                        {/* Render validation summary for duplicate Spot IDs */}
+                        {(() => {
+                          const spotIdCounts: Record<string, number> = {};
+                          (adSettings.onclickaSpots || []).forEach((s: any) => {
+                            if (s.spotId) {
+                              spotIdCounts[s.spotId] = (spotIdCounts[s.spotId] || 0) + 1;
+                            }
+                          });
+                          const hasDuplicates = Object.values(spotIdCounts).some(c => c > 1);
+                          return hasDuplicates ? (
+                            <div className="p-3 bg-rose-950/40 border border-rose-500/20 rounded-xl text-xs text-rose-400 flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4" />
+                              <span>Warning: Duplicate Spot IDs detected! Ensure each Spot ID configuration is unique to prevent rendering overlap conflicts.</span>
+                            </div>
+                          ) : null;
+                        })()}
+
+                        {(!adSettings.onclickaSpots || adSettings.onclickaSpots.length === 0) ? (
+                          <div className="border border-dashed border-slate-800 rounded-xl p-8 text-center text-slate-600 text-sm italic">
+                            No active Spot ID configurations. Click "+ Add Spot ID" to create your first ad spot.
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            {(adSettings.onclickaSpots || []).map((spot: any) => {
+                              const isPreviewing = !!spotPreviews[spot.id];
+                              const isDiagShowing = !!spotDiagShow[spot.id];
+                              const diag = spotDiagnostics[spot.id] || {
+                                sdkLoaded: adSettings.onclickaSdkScript ? "Active" : "Not Loaded",
+                                requestSent: "Opaque",
+                                httpStatus: "200 OK / Opaque",
+                                fillStatus: "Waiting...",
+                                renderSuccess: "Success",
+                                renderTime: "N/A",
+                                errorMessage: "None"
+                              };
+
+                              const updateSpotField = (field: string, val: any) => {
+                                const updated = (adSettings.onclickaSpots || []).map((s: any) => 
+                                  s.id === spot.id ? { ...s, [field]: val } : s
+                                );
+                                setAdSettings({ ...adSettings, onclickaSpots: updated });
+                              };
+
+                              const dupWarning = spot.spotId && (adSettings.onclickaSpots || []).filter((s: any) => s.spotId === spot.spotId).length > 1;
+
+                              return (
+                                <div key={spot.id} className="bg-slate-950 rounded-xl border border-slate-800 p-5 space-y-4 hover:border-slate-700 transition duration-150">
+                                  <div className="flex justify-between items-center border-b border-slate-900 pb-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs bg-slate-900 text-indigo-400 font-mono font-black px-2 py-0.5 rounded">
+                                        Spot Config
+                                      </span>
+                                      {dupWarning && (
+                                        <span className="text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded font-semibold animate-pulse">
+                                          ⚠️ Duplicate ID
+                                        </span>
+                                      )}
+                                    </div>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                      <span className="text-xs text-slate-400 font-medium">
+                                        {spot.enabled !== false ? "Active" : "Inactive"}
+                                      </span>
+                                      <input
+                                        type="checkbox"
+                                        checked={spot.enabled !== false}
+                                        onChange={(e) => updateSpotField("enabled", e.target.checked)}
+                                        className="accent-emerald-500 rounded cursor-pointer w-4 h-4"
+                                      />
+                                    </label>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                      <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Spot Name (Optional)</label>
+                                      <input
+                                        type="text"
+                                        value={spot.name || ""}
+                                        onChange={(e) => updateSpotField("name", e.target.value)}
+                                        placeholder="e.g. Header Leaderboard"
+                                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-semibold"
+                                      />
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                      <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Spot ID (from OnClickA)</label>
+                                      <input
+                                        type="text"
+                                        value={spot.spotId || ""}
+                                        onChange={(e) => updateSpotField("spotId", e.target.value)}
+                                        placeholder="e.g. 447218"
+                                        className={`w-full bg-slate-900 border rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono font-bold ${dupWarning ? 'border-rose-800' : 'border-slate-800'}`}
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* Banner Size Mode */}
+                                  <div className="space-y-3 bg-slate-900/40 p-3.5 rounded-lg border border-slate-900">
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+                                      <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Size Mode:</span>
+                                      <div className="flex items-center gap-6">
+                                        <label className="flex items-center gap-1.5 cursor-pointer text-xs text-white font-medium">
+                                          <input
+                                            type="radio"
+                                            name={`sizeMode-${spot.id}`}
+                                            checked={spot.sizeMode !== "manual"}
+                                            onChange={() => updateSpotField("sizeMode", "auto")}
+                                            className="accent-indigo-500 w-3.5 h-3.5"
+                                          />
+                                          Auto Detect (Default)
+                                        </label>
+                                        <label className="flex items-center gap-1.5 cursor-pointer text-xs text-white font-medium">
+                                          <input
+                                            type="radio"
+                                            name={`sizeMode-${spot.id}`}
+                                            checked={spot.sizeMode === "manual"}
+                                            onChange={() => updateSpotField("sizeMode", "manual")}
+                                            className="accent-indigo-500 w-3.5 h-3.5"
+                                          />
+                                          Manual Size Mode
+                                        </label>
+                                      </div>
+                                    </div>
+
+                                    {spot.sizeMode === "manual" && (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1 animate-fadeIn">
+                                        <div className="space-y-1.5">
+                                          <label className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Preset Banner Size</label>
+                                          <select
+                                            value={spot.size || "728x90"}
+                                            onChange={(e) => updateSpotField("size", e.target.value)}
+                                            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                          >
+                                            <option value="728x90">728x90 (Leaderboard)</option>
+                                            <option value="320x50">320x50 (Mobile Banner)</option>
+                                            <option value="300x250">300x250 (Square)</option>
+                                            <option value="468x60">468x60 (Standard Banner)</option>
+                                            <option value="970x250">970x250 (Billboard)</option>
+                                            <option value="160x600">160x600 (Skyscraper)</option>
+                                            <option value="Custom">Custom Dimensions</option>
+                                          </select>
+                                        </div>
+
+                                        {spot.size === "Custom" && (
+                                          <div className="grid grid-cols-2 gap-2">
+                                            <div className="space-y-1.5">
+                                              <label className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Width</label>
+                                              <input
+                                                type="number"
+                                                value={spot.customW || 728}
+                                                onChange={(e) => updateSpotField("customW", Number(e.target.value))}
+                                                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono"
+                                              />
+                                            </div>
+                                            <div className="space-y-1.5">
+                                              <label className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Height</label>
+                                              <input
+                                                type="number"
+                                                value={spot.customH || 90}
+                                                onChange={(e) => updateSpotField("customH", Number(e.target.value))}
+                                                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono"
+                                              />
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Actions Row */}
+                                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                                    <div className="flex gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSpotPreviews(prev => ({ ...prev, [spot.id]: !prev[spot.id] }))}
+                                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition duration-150 flex items-center gap-1 cursor-pointer ${
+                                          isPreviewing ? "bg-sky-600 hover:bg-sky-500 text-white" : "bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                                        }`}
+                                      >
+                                        <span>👁️</span> {isPreviewing ? "Hide Preview" : "Preview"}
+                                      </button>
+                                      
+                                      {isPreviewing && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setSpotPreviews(prev => ({ ...prev, [spot.id]: false }));
+                                            setTimeout(() => {
+                                              setSpotPreviews(prev => ({ ...prev, [spot.id]: true }));
+                                            }, 50);
+                                          }}
+                                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-bold rounded-lg transition duration-150 flex items-center gap-1 cursor-pointer"
+                                        >
+                                          <span>🔄</span> Refresh
+                                        </button>
+                                      )}
+
+                                      <button
+                                        type="button"
+                                        onClick={() => setSpotDiagShow(prev => ({ ...prev, [spot.id]: !prev[spot.id] }))}
+                                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition duration-150 flex items-center gap-1 cursor-pointer ${
+                                          isDiagShowing ? "bg-indigo-600 text-white" : "bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                                        }`}
+                                      >
+                                        <span>📊</span> Diagnostics
+                                      </button>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = (adSettings.onclickaSpots || []).filter((s: any) => s.id !== spot.id);
+                                        setAdSettings({ ...adSettings, onclickaSpots: updated });
+                                      }}
+                                      className="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-950 text-xs font-bold rounded-lg transition duration-150 flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <span>🗑️</span> Delete
+                                    </button>
+                                  </div>
+
+                                  {/* Spot Interactive Preview Frame */}
+                                  {isPreviewing && spot.spotId && (
+                                    <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-850 space-y-2 animate-fadeIn">
+                                      <div className="flex justify-between items-center text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                                        <span>Ad Render Sandbox Frame</span>
+                                        <span className="text-emerald-400 animate-pulse">● Sandbox Live</span>
+                                      </div>
+                                      <div className="border border-dashed border-slate-800 p-2 rounded bg-slate-950 flex justify-center items-center overflow-hidden">
+                                        <OnClickABanner
+                                          adSpotId={spot.spotId}
+                                          sdkScript={adSettings.onclickaSdkScript}
+                                          sizeMode={spot.sizeMode}
+                                          size={spot.size === "Custom" ? `${spot.customW}x${spot.customH}` : spot.size}
+                                          position={spot.name || "Preview Spot"}
+                                          bannerNumber={1}
+                                          onDiagnosticUpdate={(diagData) => {
+                                            setSpotDiagnostics(prev => ({ ...prev, [spot.id]: diagData }));
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Spot Diagnostics Panel */}
+                                  {isDiagShowing && (
+                                    <div className="bg-slate-900/80 p-4 rounded-lg border border-slate-850 space-y-3 text-xs animate-fadeIn">
+                                      <h5 className="font-bold text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-800 pb-1 flex items-center gap-1.5">
+                                        <span>🔬</span> Diagnostics & Telemetry Report
+                                      </h5>
+                                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                        <div className="bg-slate-950 p-2 rounded border border-slate-900">
+                                          <span className="text-[10px] text-slate-500 font-semibold block uppercase">Spot ID</span>
+                                          <span className="font-mono font-bold text-slate-300">{spot.spotId || "Not Defined"}</span>
+                                        </div>
+                                        <div className="bg-slate-950 p-2 rounded border border-slate-900">
+                                          <span className="text-[10px] text-slate-500 font-semibold block uppercase">Requested Size</span>
+                                          <span className="font-semibold text-slate-300">{spot.sizeMode === "auto" ? "Auto Detect" : (spot.size === "Custom" ? `${spot.customW}x${spot.customH}` : spot.size)}</span>
+                                        </div>
+                                        <div className="bg-slate-950 p-2 rounded border border-slate-900">
+                                          <span className="text-[10px] text-slate-500 font-semibold block uppercase">Detected Size</span>
+                                          <span className="font-mono font-bold text-emerald-400">
+                                            {diag.detectedWidth ? `${diag.detectedWidth}x${diag.detectedHeight}` : "Awaiting Render"}
+                                          </span>
+                                        </div>
+                                        <div className="bg-slate-950 p-2 rounded border border-slate-900">
+                                          <span className="text-[10px] text-slate-500 font-semibold block uppercase">SDK Loaded</span>
+                                          <span className={`font-semibold ${diag.sdkLoaded ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                            {diag.sdkLoaded ? "Successfully Loaded" : "Pending Load"}
+                                          </span>
+                                        </div>
+                                        <div className="bg-slate-950 p-2 rounded border border-slate-900">
+                                          <span className="text-[10px] text-slate-500 font-semibold block uppercase">HTTP Status</span>
+                                          <span className="font-semibold text-emerald-400">{diag.httpStatus}</span>
+                                        </div>
+                                        <div className="bg-slate-950 p-2 rounded border border-slate-900">
+                                          <span className="text-[10px] text-slate-500 font-semibold block uppercase">Fill Status</span>
+                                          <span className={`font-semibold ${diag.fillStatus === "Filled" ? 'text-emerald-400' : diag.fillStatus === "Checking" ? 'text-amber-400' : 'text-rose-400'}`}>
+                                            {diag.fillStatus}
+                                          </span>
+                                        </div>
+                                        <div className="bg-slate-950 p-2 rounded border border-slate-900 col-span-2 md:col-span-1">
+                                          <span className="text-[10px] text-slate-500 font-semibold block uppercase">Render Time</span>
+                                          <span className="font-mono text-indigo-400 font-bold">{diag.renderTime ? `${diag.renderTime} ms` : "Measuring..."}</span>
+                                        </div>
+                                        <div className="bg-slate-950 p-2 rounded border border-slate-900 col-span-2 md:col-span-2">
+                                          <span className="text-[10px] text-slate-500 font-semibold block uppercase">Error Logs / Messages</span>
+                                          <span className="font-mono text-slate-400 truncate block">{diag.errorMessage || "None Detected"}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
 
                       {/* Feedback Indicators */}
@@ -7613,140 +8046,21 @@ export default function AdminDashboard() {
                         </div>
                       )}
 
-                      {/* Diagnostic & Action Buttons */}
+                      {/* Action Buttons */}
                       <div className="flex flex-wrap gap-3 pt-2">
                         <button
                           type="button"
-                          onClick={handleRunDiagnostic}
-                          disabled={diagnosticStatus === 'RUNNING'}
-                          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white font-semibold text-xs rounded-xl transition-all shadow-md"
-                        >
-                          {diagnosticStatus === 'RUNNING' ? (
-                            <>
-                              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                              Diagnosing...
-                            </>
-                          ) : (
-                            "🔬 Run Diagnostic"
-                          )}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setShowLivePreview(!showLivePreview)}
-                          className="flex items-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs rounded-xl transition-all shadow-md"
-                        >
-                          {showLivePreview ? "👁️ Hide Live Preview" : "👁️ Live Preview"}
-                        </button>
-
-                        <button
-                          type="button"
                           onClick={() => saveAdSettings()}
-                          className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-xl transition-all shadow-md"
+                          className="flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-xl transition-all shadow-md cursor-pointer"
                         >
-                          💾 Save Configuration
+                          💾 Save Configuration settings
                         </button>
                       </div>
-
-                      {/* Diagnostic Log Display */}
-                      {diagnosticStatus !== 'IDLE' && (
-                        <div className="bg-slate-950 rounded-xl p-4 border border-slate-800 space-y-3">
-                          <div className="flex justify-between items-center border-b border-slate-800 pb-2">
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">🔬 Diagnostic Report Logs</span>
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
-                              diagnosticStatus === 'RUNNING' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' :
-                              diagnosticStatus === 'PASS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                              'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                            }`}>
-                              {diagnosticStatus}
-                            </span>
-                          </div>
-
-                          <div className="font-mono text-xs text-slate-300 max-h-48 overflow-y-auto space-y-1 bg-slate-900/50 p-3 rounded border border-slate-900/80">
-                            {diagnosticLogs.map((log, i) => (
-                              <div key={i} className="break-all whitespace-pre-wrap">{log}</div>
-                            ))}
-                          </div>
-
-                          {diagnosticStatus === 'PASS' && (
-                            <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 text-xs rounded-xl font-bold flex items-center gap-2">
-                              <span className="text-base">🟢</span>
-                              <span>DIAGNOSTIC REPORT: PASS. All system checks passed successfully. OnClickA is active!</span>
-                            </div>
-                          )}
-
-                          {diagnosticStatus === 'FAIL' && (
-                            <div className="p-3 bg-rose-950/40 border border-rose-500/30 text-rose-400 text-xs rounded-xl font-bold flex items-center gap-2">
-                              <span className="text-base">🔴</span>
-                              <span>DIAGNOSTIC REPORT: FAIL. Check your internet connection, disable active adblockers, and verify the script code structure.</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </div>
 
                   {/* Right Panel: Status Indicators & Live Preview Frame */}
                   <div className="space-y-6">
-                    {/* Live Preview Banner Frame */}
-                    {showLivePreview && (
-                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-                        <h4 className="text-sm font-bold text-white border-b border-slate-800 pb-2">👁️ OnClickA Live Preview</h4>
-                        <p className="text-xs text-slate-400 leading-relaxed">
-                          This preview uses the SDK Spot ID (<code className="bg-slate-950 px-1 py-0.5 rounded text-indigo-400">{adSettings.onclickaSdkSpotId || "None"}</code>) and rendering dimension parameters defined for verification.
-                        </p>
-
-                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-4">
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="text-slate-400 font-medium">Render Frame ({adSettings.onclickaBannerSize || "728x90"})</span>
-                            <span className="text-emerald-400 animate-pulse font-bold">● Live Sandbox</span>
-                          </div>
-
-                          <div className="border border-dashed border-slate-800 p-2 rounded bg-slate-900 flex justify-center items-center min-h-[90px] overflow-hidden">
-                            {adSettings.onclickaSdkSpotId ? (
-                              <div 
-                                data-banner-id={String(adSettings.onclickaSdkSpotId)} 
-                                className="flex justify-center items-center w-full max-w-full overflow-hidden text-slate-400 text-xs text-center" 
-                              >
-                                Rendering OnClickA Banner ad space for Spot ID: {adSettings.onclickaSdkSpotId}
-                              </div>
-                            ) : (
-                              <span className="text-slate-600 text-xs italic">Please enter an SDK Spot ID to trigger container initialization</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Live Sandbox Telemetry */}
-                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 text-xs">
-                          <h5 className="font-bold text-slate-400 uppercase tracking-wider text-[10px] mb-2 border-b border-slate-800 pb-1">📡 Preview Telemetry</h5>
-                          <div className="flex justify-between py-1 border-b border-slate-900">
-                            <span className="text-slate-400 font-medium">Script Loaded</span>
-                            <span className="text-emerald-400 font-bold font-mono">Yes</span>
-                          </div>
-                          <div className="flex justify-between py-1 border-b border-slate-900">
-                            <span className="text-slate-400 font-medium">SDK Initialized</span>
-                            <span className="text-emerald-400 font-bold font-mono">Active</span>
-                          </div>
-                          <div className="flex justify-between py-1 border-b border-slate-900">
-                            <span className="text-slate-400 font-medium">HTTP Status</span>
-                            <span className="text-emerald-400 font-bold font-mono">200 OK / Opaque</span>
-                          </div>
-                          <div className="flex justify-between py-1 border-b border-slate-900">
-                            <span className="text-slate-400 font-medium">Banner Rendered</span>
-                            <span className="text-emerald-400 font-bold font-mono">Success Frame</span>
-                          </div>
-                          <div className="flex justify-between py-1 border-b border-slate-900">
-                            <span className="text-slate-400 font-medium">Errors Captured</span>
-                            <span className="text-emerald-400 font-bold font-mono">0 Detected</span>
-                          </div>
-                          <div className="flex justify-between py-1">
-                            <span className="text-slate-400 font-medium">Console Logs</span>
-                            <span className="text-indigo-400 font-bold font-mono">Connected</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
                     {/* General OnClickA Overview Card */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
                       <h3 className="text-sm font-bold text-white border-b border-slate-800 pb-2">ℹ️ OnClickA Status Overview</h3>
@@ -7758,14 +8072,22 @@ export default function AdminDashboard() {
                           </span>
                         </div>
                         <div className="flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 font-medium">Loaded SDK Script</span>
-                          <span className="font-bold text-indigo-400 font-mono text-[10px] truncate max-w-[150px]">
-                            {adSettings.onclickaSdkScript ? "Installed" : "Not Detected"}
-                          </span>
+                          <span className="text-slate-400 font-medium">Total Configured Spots</span>
+                          <span className="font-bold text-slate-200 font-mono">{(adSettings.onclickaSpots || []).length} Spots</span>
                         </div>
                         <div className="flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 font-medium">Active Banner Size</span>
-                          <span className="font-bold text-slate-300 font-mono">{adSettings.onclickaBannerSize || "728x90"}</span>
+                          <span className="text-slate-400 font-medium">Active Spots Count</span>
+                          <span className="font-bold text-emerald-400 font-mono">{(adSettings.onclickaSpots || []).filter((s: any) => s.enabled !== false).length} Active</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
+                          <span className="text-slate-400 font-medium">Auto-detected Publisher ID</span>
+                          <span className="font-bold text-indigo-400 font-mono">
+                            {(() => {
+                              const script = adSettings.onclickaSdkScript || "";
+                              const pidMatch = script.match(/data-admpid\s*=\s*["']([^"']+)["']/i) || script.match(/data-admpid\s*=\s*([0-9]+)/i);
+                              return pidMatch ? pidMatch[1] : "Not Detected";
+                            })()}
+                          </span>
                         </div>
                       </div>
                     </div>

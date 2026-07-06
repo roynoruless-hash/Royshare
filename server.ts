@@ -5682,7 +5682,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           onclickaEnabled: false,
           onclickaSdkScript: "",
           onclickaSdkSpotId: "",
-          onclickaBannerSize: "728x90"
+          onclickaBannerSize: "728x90",
+          onclickaSpots: []
         };
         try {
           const adSettingsSnap = await getDoc(doc(db, "settings", "advertisement"));
@@ -5692,7 +5693,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
               onclickaEnabled: adData.onclickaEnabled ?? false,
               onclickaSdkScript: adData.onclickaSdkScript || "",
               onclickaSdkSpotId: adData.onclickaSdkSpotId || "",
-              onclickaBannerSize: adData.onclickaBannerSize || "728x90"
+              onclickaBannerSize: adData.onclickaBannerSize || "728x90",
+              onclickaSpots: adData.onclickaSpots || []
             };
           }
         } catch (err) {
@@ -5866,6 +5868,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         onclickaSdkScript: adSettings.onclickaSdkScript || "",
         onclickaSdkSpotId: adSettings.onclickaSdkSpotId || "",
         onclickaBannerSize: adSettings.onclickaBannerSize || "728x90",
+        onclickaSpots: adSettings.onclickaSpots || [],
         data: publicItemData
       });
 
