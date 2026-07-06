@@ -5547,13 +5547,24 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // ==========================================
 
   app.get("/api/onclicka/vast", async (req, res) => {
-    const { spotId } = req.query;
-    if (!spotId) {
-      return res.status(400).json({ success: false, error: "Missing spotId" });
+    const { spotId, url } = req.query;
+    if (!spotId && !url) {
+      return res.status(400).json({ success: false, error: "Missing spotId or url parameter" });
     }
     try {
-      const url = `https://syndication.onclckmn.com/vast?spotId=${spotId}`;
-      const response = await fetch(url, {
+      let targetUrl = "";
+      if (url) {
+        targetUrl = decodeURIComponent(url as string);
+      } else {
+        targetUrl = `https://syndication.onclckmn.com/vast?spotId=${spotId}`;
+      }
+
+      // Ensure protocol is valid
+      if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
+        return res.status(400).json({ success: false, error: "Invalid URL protocol. Must start with http:// or https://" });
+      }
+
+      const response = await fetch(targetUrl, {
         headers: {
           "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Accept": "application/xml, text/xml, */*"
@@ -5567,7 +5578,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       res.set("Access-Control-Allow-Origin", "*");
       return res.send(xmlText);
     } catch (err: any) {
-      console.error(`[OnClickA VAST Proxy] Error fetching spot ${spotId}:`, err);
+      console.error(`[OnClickA VAST Proxy] Error fetching URL:`, err);
       return res.status(500).json({ success: false, error: err.message || "Network Error" });
     }
   });
@@ -5709,7 +5720,16 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           onclickaSdkScript: "",
           onclickaSdkSpotId: "",
           onclickaBannerSize: "728x90",
-          onclickaSpots: []
+          onclickaSpots: [],
+          onclickaVideoEnabled: false,
+          onclickaVideoTimeout: 8,
+          onclickaVideoRetryAttempts: 2,
+          onclickaVideoSpots: [],
+          onclickaVideoAutoRotation: true,
+          onclickaVideoFallbackToBanner: true,
+          onclickaVideoShowDebugLogs: true,
+          onclickaAdType: "banner",
+          onclickaVastUrl: ""
         };
         try {
           const adSettingsSnap = await getDoc(doc(db, "settings", "advertisement"));
@@ -5720,7 +5740,16 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
               onclickaSdkScript: adData.onclickaSdkScript || "",
               onclickaSdkSpotId: adData.onclickaSdkSpotId || "",
               onclickaBannerSize: adData.onclickaBannerSize || "728x90",
-              onclickaSpots: adData.onclickaSpots || []
+              onclickaSpots: adData.onclickaSpots || [],
+              onclickaVideoEnabled: adData.onclickaVideoEnabled ?? false,
+              onclickaVideoTimeout: adData.onclickaVideoTimeout ?? 8,
+              onclickaVideoRetryAttempts: adData.onclickaVideoRetryAttempts ?? 2,
+              onclickaVideoSpots: adData.onclickaVideoSpots || [],
+              onclickaVideoAutoRotation: adData.onclickaVideoAutoRotation ?? true,
+              onclickaVideoFallbackToBanner: adData.onclickaVideoFallbackToBanner ?? true,
+              onclickaVideoShowDebugLogs: adData.onclickaVideoShowDebugLogs ?? true,
+              onclickaAdType: adData.onclickaAdType || "banner",
+              onclickaVastUrl: adData.onclickaVastUrl || ""
             };
           }
         } catch (err) {
@@ -5902,6 +5931,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         onclickaVideoAutoRotation: adSettings.onclickaVideoAutoRotation ?? true,
         onclickaVideoFallbackToBanner: adSettings.onclickaVideoFallbackToBanner ?? true,
         onclickaVideoShowDebugLogs: adSettings.onclickaVideoShowDebugLogs ?? true,
+        onclickaAdType: adSettings.onclickaAdType || "banner",
+        onclickaVastUrl: adSettings.onclickaVastUrl || "",
         data: publicItemData
       });
 

@@ -189,6 +189,8 @@ export function OnClickABanner({
 interface OnClickAVideoAdPlayerProps {
   enabled: boolean;
   videoSpots: string[];
+  vastUrl?: string;
+  adType?: string;
   timeoutSeconds?: number;
   retryAttempts?: number;
   autoRotation?: boolean;
@@ -201,6 +203,8 @@ interface OnClickAVideoAdPlayerProps {
 export function OnClickAVideoAdPlayer({
   enabled,
   videoSpots = [],
+  vastUrl = "",
+  adType = "banner",
   timeoutSeconds = 8,
   retryAttempts = 2,
   autoRotation = true,
@@ -235,10 +239,12 @@ export function OnClickAVideoAdPlayer({
   };
 
   useEffect(() => {
-    if (!enabled || videoSpots.length === 0) return;
+    const isVideoMode = adType === "video" || vastUrl;
+    if (!enabled || (!isVideoMode && videoSpots.length === 0)) return;
 
     // Filter spots to those that haven't failed 2 consecutive times in this session
     const getEligibleSpot = (): string | null => {
+      if (isVideoMode) return "vast-url";
       for (const spot of videoSpots) {
         if (!spot) continue;
         const failKey = `onclicka_failures_${spot}`;
@@ -267,7 +273,7 @@ export function OnClickAVideoAdPlayer({
       activeRequestRef.current = true;
 
       const spotId = getEligibleSpot();
-      if (!spotId) {
+      if (!spotId && !vastUrl) {
         log("No Fill: No valid video spot configured or all have failed.");
         log("Fallback Activated: Showing banner ads immediately.");
         if (onVideoStateChange) onVideoStateChange("failed");
@@ -275,9 +281,13 @@ export function OnClickAVideoAdPlayer({
         return;
       }
 
-      setCurrentSpotId(spotId);
+      setCurrentSpotId(spotId || "VAST_URL");
       log(`Video Request Started`);
-      log(`Spot ID Used: ${spotId}`);
+      if (isVideoMode) {
+        log(`VAST URL target configured: ${vastUrl}`);
+      } else {
+        log(`Spot ID Used: ${spotId}`);
+      }
       log(`Attempt Number: ${attempt}`);
 
       // Start configurable video ad timeout
@@ -285,16 +295,20 @@ export function OnClickAVideoAdPlayer({
       timeoutRef.current = setTimeout(() => {
         timeoutTriggered = true;
         log(`Timeout Triggered: Ad did not load within ${timeoutSeconds}s.`);
-        handleSpotFailure(spotId, "Video Timeout");
+        handleSpotFailure(spotId || "vast-url", "Video Timeout");
       }, timeoutSeconds * 1000);
 
       try {
-        const res = await fetch(`/api/onclicka/vast?spotId=${spotId}`);
+        const fetchUrl = isVideoMode 
+          ? `/api/onclicka/vast?url=${encodeURIComponent(vastUrl)}`
+          : `/api/onclicka/vast?spotId=${spotId}`;
+
+        const res = await fetch(fetchUrl);
         if (timeoutTriggered) return;
 
         if (!res.ok) {
-          log(`Network Error: Ad server responded with ${res.status}`);
-          handleSpotFailure(spotId, `Network Error ${res.status}`);
+          log(`Network Error: Ad server responded with status ${res.status}`);
+          handleSpotFailure(spotId || "vast-url", `Network Error ${res.status}`);
           return;
         }
 
@@ -302,22 +316,22 @@ export function OnClickAVideoAdPlayer({
         if (timeoutTriggered) return;
 
         if (!xmlText || xmlText.trim().length === 0) {
-          log("Empty Response: XML is blank.");
-          handleSpotFailure(spotId, "Empty Response");
+          log("Empty Response: XML response payload is blank.");
+          handleSpotFailure(spotId || "vast-url", "Empty Response");
           return;
         }
 
         // Check if invalid XML or doesn't have standard VAST tags
         if (!xmlText.includes("<VAST") && !xmlText.includes("<vast")) {
-          log("XML Error: Invalid VAST XML response.");
-          handleSpotFailure(spotId, "Invalid XML");
+          log("Invalid XML: Response body is not a compliant VAST document.");
+          handleSpotFailure(spotId || "vast-url", "Invalid XML");
           return;
         }
 
         // Check for empty VAST / No Fill
         if (!xmlText.includes("<Ad") && !xmlText.includes("<ad")) {
-          log("No Fill: XML returned no active ad campaign.");
-          handleSpotFailure(spotId, "No Fill");
+          log("No Fill: XML returned no active campaign or Ad node is empty.");
+          handleSpotFailure(spotId || "vast-url", "No Fill");
           return;
         }
 
@@ -326,8 +340,8 @@ export function OnClickAVideoAdPlayer({
         const mediaUrl = mediaFileMatch ? mediaFileMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : null;
 
         if (!mediaUrl) {
-          log("XML Error: Missing MediaFile inside VAST response.");
-          handleSpotFailure(spotId, "Missing MediaFile");
+          log("Missing MediaFile: XML does not contain a valid play stream URL.");
+          handleSpotFailure(spotId || "vast-url", "Missing MediaFile");
           return;
         }
 
@@ -340,7 +354,9 @@ export function OnClickAVideoAdPlayer({
         log(`Video ad payload resolved. Media source: ${mediaUrl}`);
 
         // Reset consecutive failures on success
-        sessionStorage.setItem(`onclicka_failures_${spotId}`, "0");
+        if (spotId) {
+          sessionStorage.setItem(`onclicka_failures_${spotId}`, "0");
+        }
 
         setVideoUrl(mediaUrl);
         setClickThroughUrl(clickUrl);
@@ -359,8 +375,8 @@ export function OnClickAVideoAdPlayer({
 
       } catch (err: any) {
         if (timeoutTriggered) return;
-        log(`Network Error: ${err.message || err}`);
-        handleSpotFailure(spotId, "Network Error");
+        log(`Network Error: Unable to fetch XML resource. ${err.message || err}`);
+        handleSpotFailure(spotId || "vast-url", "Network Error");
       } finally {
         activeRequestRef.current = false;
       }
@@ -382,7 +398,7 @@ export function OnClickAVideoAdPlayer({
 
       // Check for rotation
       const nextSpotIdx = videoSpots.indexOf(spot) + 1;
-      if (autoRotation && nextSpotIdx < videoSpots.length) {
+      if (!isVideoMode && autoRotation && nextSpotIdx < videoSpots.length) {
         log(`Rotating to next spot: #${nextSpotIdx + 1}`);
         setAttempt(prev => prev + 1);
         // Force evaluation on next loop
@@ -400,7 +416,7 @@ export function OnClickAVideoAdPlayer({
     return () => {
       clearTimeout(timeoutRef.current);
     };
-  }, [enabled, videoSpots, attempt, autoRotation, timeoutSeconds]);
+  }, [enabled, videoSpots, attempt, autoRotation, timeoutSeconds, vastUrl, adType]);
 
   // Video skip countdown timer
   useEffect(() => {
@@ -667,6 +683,8 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const [onclickaSdkScript, setOnclickaSdkScript] = useState("");
   const [onclickaSdkSpotId, setOnclickaSdkSpotId] = useState("");
   const [onclickaBannerSize, setOnclickaBannerSize] = useState("");
+  const [onclickaAdType, setOnclickaAdType] = useState("banner");
+  const [onclickaVastUrl, setOnclickaVastUrl] = useState("");
 
   // OnClickA Video settings states
   const [onclickaVideoEnabled, setOnclickaVideoEnabled] = useState(false);
@@ -912,6 +930,8 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
         setOnclickaSdkScript(initData.onclickaSdkScript || "");
         setOnclickaSdkSpotId(initData.onclickaSdkSpotId || "");
         setOnclickaBannerSize(initData.onclickaBannerSize || "");
+        setOnclickaAdType(initData.onclickaAdType || "banner");
+        setOnclickaVastUrl(initData.onclickaVastUrl || "");
         setOnclickaVideoEnabled(initData.onclickaVideoEnabled ?? false);
         setOnclickaVideoTimeout(initData.onclickaVideoTimeout ?? 8);
         setOnclickaVideoRetryAttempts(initData.onclickaVideoRetryAttempts ?? 2);
@@ -1217,7 +1237,9 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   return (
     <div className="min-h-screen relative text-slate-200 font-sans flex flex-col justify-between overflow-hidden">
       <OnClickAVideoAdPlayer
-        enabled={onclickaVideoEnabled}
+        enabled={onclickaVideoEnabled && (onclickaAdType === "video" || !onclickaAdType)}
+        adType={onclickaAdType}
+        vastUrl={onclickaVastUrl}
         videoSpots={onclickaVideoSpots}
         timeoutSeconds={onclickaVideoTimeout}
         retryAttempts={onclickaVideoRetryAttempts}
@@ -1539,6 +1561,9 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
 
       {/* Footer */}
       <footer className="relative z-10 w-full max-w-7xl mx-auto px-6 py-4 border-t border-white/5 text-center text-xs text-slate-500">
+        {onclickaVideoEnabled && (onclickaAdType === "video" || !onclickaAdType) && (
+          <div id="video-ad-container" className="my-2 flex justify-center"></div>
+        )}
         &copy; {new Date().getFullYear()} RoyShare Center. All rights reserved.
       </footer>
     </div>

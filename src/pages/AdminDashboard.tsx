@@ -167,6 +167,18 @@ export default function AdminDashboard() {
   const [adSettingsError, setAdSettingsError] = useState("");
   const [adSettingsLastUpdated, setAdSettingsLastUpdated] = useState<any>(null);
 
+  // VAST Test states
+  const [testVastUrl, setTestVastUrl] = useState("");
+  const [testXmlText, setTestXmlText] = useState("");
+  const [testMediaUrl, setTestMediaUrl] = useState("");
+  const [testConsoleLogs, setTestConsoleLogs] = useState<{ id: string; time: string; type: 'info' | 'success' | 'error' | 'warn'; msg: string }[]>([]);
+  const [testNetworkLogs, setTestNetworkLogs] = useState<{ id: string; time: string; url: string; method: string; status: number; duration: number; size: number }[]>([]);
+  const [testPlaybackStatus, setTestPlaybackStatus] = useState<'idle' | 'loading' | 'playing' | 'paused' | 'completed' | 'failed' | 'muted'>('idle');
+  const [xmlValidationStatus, setXmlValidationStatus] = useState("");
+  const [mediaFileDetectionStatus, setMediaFileDetectionStatus] = useState("");
+  const [testIsLoading, setTestIsLoading] = useState(false);
+  const testVideoRef = useRef<HTMLVideoElement | null>(null);
+
   const [systemSettings, setSystemSettings] = useState<any>({
     botSettings: {},
     earningSettings: {},
@@ -1111,8 +1123,11 @@ export default function AdminDashboard() {
           onclickaVideoSpots: data.onclickaVideoSpots || [],
           onclickaVideoAutoRotation: data.onclickaVideoAutoRotation ?? true,
           onclickaVideoFallbackToBanner: data.onclickaVideoFallbackToBanner ?? true,
-          onclickaVideoShowDebugLogs: data.onclickaVideoShowDebugLogs ?? true
+          onclickaVideoShowDebugLogs: data.onclickaVideoShowDebugLogs ?? true,
+          onclickaAdType: data.onclickaAdType || "banner",
+          onclickaVastUrl: data.onclickaVastUrl || ""
         });
+        setTestVastUrl(data.onclickaVastUrl || "");
         if (data.updatedAt) {
           const date = data.updatedAt.toDate ? data.updatedAt.toDate() : new Date(data.updatedAt);
           setAdSettingsLastUpdated(date.toLocaleString());
@@ -1138,8 +1153,11 @@ export default function AdminDashboard() {
           onclickaVideoSpots: [],
           onclickaVideoAutoRotation: true,
           onclickaVideoFallbackToBanner: true,
-          onclickaVideoShowDebugLogs: true
+          onclickaVideoShowDebugLogs: true,
+          onclickaAdType: "banner",
+          onclickaVastUrl: ""
         });
+        setTestVastUrl("");
         setAdSettingsLastUpdated("Never");
       }
     } catch (err: any) {
@@ -1198,6 +1216,175 @@ export default function AdminDashboard() {
     return true;
   };
 
+  const validateVastUrl = async (url: string): Promise<{ valid: boolean; error?: string }> => {
+    if (!url) {
+      return { valid: false, error: "VAST URL cannot be empty." };
+    }
+    try {
+      new URL(url);
+    } catch (e) {
+      return { valid: false, error: "Invalid URL format. Please enter a valid HTTP/HTTPS URL." };
+    }
+
+    try {
+      const res = await fetch(`/api/onclicka/vast?url=${encodeURIComponent(url)}`);
+      
+      if (res.status !== 200) {
+        return { valid: false, error: `Ad server returned HTTP status ${res.status}. Expected 200 OK.` };
+      }
+
+      const xmlText = await res.text();
+      if (!xmlText || xmlText.trim().length === 0) {
+        return { valid: false, error: "Received empty response from the ad server." };
+      }
+
+      if (!xmlText.includes("<VAST") && !xmlText.includes("<vast")) {
+        return { valid: false, error: "Invalid VAST XML. Missing standard <VAST> opening tags." };
+      }
+
+      if (!xmlText.includes("<Ad") && !xmlText.includes("<ad")) {
+        return { valid: false, error: "VAST XML contains no active campaigns (No Fill). <Ad> element is missing." };
+      }
+
+      const mediaFileMatch = xmlText.match(/<MediaFile[^>]*>([\s\S]*?)<\/MediaFile>/i);
+      const mediaUrl = mediaFileMatch ? mediaFileMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : null;
+
+      if (!mediaUrl) {
+        return { valid: false, error: "MediaFile element missing in the XML payload. No video URL could be detected." };
+      }
+
+      try {
+        new URL(mediaUrl);
+      } catch (e) {
+        return { valid: false, error: `Detected MediaFile contains an invalid video URL: "${mediaUrl}"` };
+      }
+
+      return { valid: true };
+    } catch (err: any) {
+      return { valid: false, error: `CORS/Network error when connecting to the ad server: ${err.message || err}` };
+    }
+  };
+
+  const appendConsoleLog = (type: 'info' | 'success' | 'warn' | 'error', msg: string) => {
+    const time = new Date().toLocaleTimeString();
+    setTestConsoleLogs(prev => [
+      ...prev,
+      { id: Math.random().toString(), time, type, msg }
+    ]);
+  };
+
+  const appendNetworkLog = (method: string, url: string, status: number, duration: number, size: number) => {
+    const time = new Date().toLocaleTimeString();
+    setTestNetworkLogs(prev => [
+      ...prev,
+      { id: Math.random().toString(), time, method, url, status, duration, size }
+    ]);
+  };
+
+  const handleCopyReport = () => {
+    const report = `### VAST Video Ad Validation Report
+- **VAST URL**: ${testVastUrl}
+- **Timestamp**: ${new Date().toLocaleString()}
+- **XML Validation Status**: ${xmlValidationStatus || 'Not Checked'}
+- **MediaFile Resolution**: ${mediaFileDetectionStatus || 'Not Detected'}
+- **Detected Video Asset URL**: ${testMediaUrl || 'None'}
+- **Logs Summary**: ${testConsoleLogs.length} events logged.
+- **Network Actions**: ${testNetworkLogs.length} requests captured.`;
+    navigator.clipboard.writeText(report);
+    alert("Copied detailed validation report to clipboard!");
+  };
+
+  const handleTestVast = async (autoPlay: boolean = true) => {
+    if (!testVastUrl) {
+      appendConsoleLog('error', '⚠️ VAST URL cannot be empty.');
+      return;
+    }
+    setTestIsLoading(true);
+    setTestPlaybackStatus('loading');
+    setTestXmlText('');
+    setTestMediaUrl('');
+    setXmlValidationStatus('Verifying XML...');
+    setMediaFileDetectionStatus('Detecting Media...');
+    
+    appendConsoleLog('info', `🚀 Initializing VAST parser...`);
+    appendConsoleLog('info', `📡 Fetching VAST XML payload from: ${testVastUrl}`);
+    
+    const startTime = Date.now();
+    try {
+      const res = await fetch(`/api/onclicka/vast?url=${encodeURIComponent(testVastUrl)}`);
+      const duration = Date.now() - startTime;
+      
+      appendNetworkLog('GET', `/api/onclicka/vast`, res.status, duration, 0);
+      
+      if (res.status !== 200) {
+        setTestPlaybackStatus('failed');
+        setXmlValidationStatus('❌ HTTP Error');
+        setMediaFileDetectionStatus('❌ Fetch Failed');
+        appendConsoleLog('error', `❌ HTTP Failure: Ad server returned status code ${res.status}`);
+        return;
+      }
+      
+      const xmlText = await res.text();
+      const payloadSize = xmlText.length;
+      
+      setTestNetworkLogs(prev => prev.map(l => l.url.includes('vast') ? { ...l, size: payloadSize } : l));
+      setTestXmlText(xmlText);
+      appendConsoleLog('success', `📥 Successfully retrieved XML file (${(payloadSize / 1024).toFixed(2)} KB) in ${duration}ms`);
+      
+      if (xmlText.includes("<VAST") || xmlText.includes("<vast")) {
+        setXmlValidationStatus('✅ Valid VAST Structure');
+        appendConsoleLog('success', `✅ VAST standard tags detected.`);
+      } else {
+        setXmlValidationStatus('❌ Invalid VAST XML');
+        setTestPlaybackStatus('failed');
+        appendConsoleLog('error', `❌ XML Parsing Error: Missing <VAST> wrapper elements.`);
+        return;
+      }
+
+      if (xmlText.includes("<Ad") || xmlText.includes("<ad")) {
+        appendConsoleLog('info', `🎯 Campaign ID & Ad wrapper verified inside VAST.`);
+      } else {
+        setXmlValidationStatus('⚠️ No Active Campaign (No Fill)');
+        appendConsoleLog('warn', `⚠️ VAST contains no campaign payload (Empty / No Fill).`);
+      }
+
+      const mediaFileMatch = xmlText.match(/<MediaFile[^>]*>([\s\S]*?)<\/MediaFile>/i);
+      const attributesMatch = xmlText.match(/<MediaFile([^>]*)/i);
+      const attributes = attributesMatch ? attributesMatch[1] : "";
+      const mediaUrl = mediaFileMatch ? mediaFileMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : null;
+      
+      if (!mediaUrl) {
+        setMediaFileDetectionStatus('❌ Missing MediaFile');
+        setTestPlaybackStatus('failed');
+        appendConsoleLog('error', `❌ Parser Error: No <MediaFile> tag found inside VAST XML.`);
+        return;
+      }
+
+      setTestMediaUrl(mediaUrl);
+      setMediaFileDetectionStatus(`✅ Detected (Type: video/mp4)`);
+      appendConsoleLog('success', `🎬 Video Source Asset detected: ${mediaUrl}`);
+      
+      if (attributes) {
+        appendConsoleLog('info', `Attributes detected: ${attributes.trim()}`);
+      }
+      
+      setTestPlaybackStatus('idle');
+      
+      if (autoPlay) {
+        appendConsoleLog('info', `▶️ Initializing HTML5 Video Player and attempting autoplay...`);
+        // We let the video element autoplay by setting its playing state and mounting it
+        setTestPlaybackStatus('playing');
+      }
+    } catch (err: any) {
+      setTestPlaybackStatus('failed');
+      setXmlValidationStatus('❌ Connection Failed');
+      setMediaFileDetectionStatus('❌ Interrupted');
+      appendConsoleLog('error', `❌ Network Request Failed: CORS constraint or bad URL endpoint. ${err.message || err}`);
+    } finally {
+      setTestIsLoading(false);
+    }
+  };
+
   const saveAdSettings = async (overrideSettings?: any) => {
     setAdSettingsLoading(true);
     setAdSettingsFeedback("");
@@ -1213,6 +1400,17 @@ export default function AdminDashboard() {
           setAdSettingsLoading(false);
           return;
         }
+      }
+    }
+
+    if (settingsToSave.onclickaEnabled && settingsToSave.onclickaAdType === "video") {
+      setAdSettingsFeedback("⏳ Validating VAST URL...");
+      const validation = await validateVastUrl(settingsToSave.onclickaVastUrl);
+      if (!validation.valid) {
+        setAdSettingsError(`❌ Validation failed: ${validation.error}`);
+        setAdSettingsFeedback("");
+        setAdSettingsLoading(false);
+        return;
       }
     }
 
@@ -1238,6 +1436,8 @@ export default function AdminDashboard() {
         onclickaVideoAutoRotation: settingsToSave.onclickaVideoAutoRotation ?? true,
         onclickaVideoFallbackToBanner: settingsToSave.onclickaVideoFallbackToBanner ?? true,
         onclickaVideoShowDebugLogs: settingsToSave.onclickaVideoShowDebugLogs ?? true,
+        onclickaAdType: settingsToSave.onclickaAdType || "banner",
+        onclickaVastUrl: settingsToSave.onclickaVastUrl || "",
         updatedAt: serverTimestamp()
       };
       await setDoc(docRef, updatedData);
@@ -1256,7 +1456,9 @@ export default function AdminDashboard() {
         onclickaVideoSpots: settingsToSave.onclickaVideoSpots || [],
         onclickaVideoAutoRotation: settingsToSave.onclickaVideoAutoRotation ?? true,
         onclickaVideoFallbackToBanner: settingsToSave.onclickaVideoFallbackToBanner ?? true,
-        onclickaVideoShowDebugLogs: settingsToSave.onclickaVideoShowDebugLogs ?? true
+        onclickaVideoShowDebugLogs: settingsToSave.onclickaVideoShowDebugLogs ?? true,
+        onclickaAdType: settingsToSave.onclickaAdType || "banner",
+        onclickaVastUrl: settingsToSave.onclickaVastUrl || ""
       });
       setAdSettingsLastUpdated(new Date().toLocaleString());
       setAdSettingsFeedback("✅ Advertisement settings saved successfully!");
@@ -7703,8 +7905,43 @@ export default function AdminDashboard() {
                         </button>
                       </div>
 
-                      {/* 2. OnClickA SDK Script */}
-                      <div className="space-y-2">
+                      {/* Ad Type Selector */}
+                      <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                        <div>
+                          <label className="block text-sm font-semibold text-white">Ad Type</label>
+                          <p className="text-xs text-slate-500">Choose the active advertisement format to serve to visitors.</p>
+                        </div>
+                        <div className="flex gap-6 items-center">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs text-white font-medium select-none">
+                            <input
+                              type="radio"
+                              name="onclickaAdType"
+                              value="banner"
+                              checked={(adSettings.onclickaAdType || "banner") === "banner"}
+                              onChange={() => setAdSettings({ ...adSettings, onclickaAdType: "banner" })}
+                              className="accent-indigo-500 w-4 h-4 cursor-pointer"
+                            />
+                            Banner Ads
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer text-xs text-white font-medium select-none">
+                            <input
+                              type="radio"
+                              name="onclickaAdType"
+                              value="video"
+                              checked={adSettings.onclickaAdType === "video"}
+                              onChange={() => setAdSettings({ ...adSettings, onclickaAdType: "video" })}
+                              className="accent-indigo-500 w-4 h-4 cursor-pointer"
+                            />
+                            Video Ads (VAST)
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Banner-Only Fields */}
+                      {(adSettings.onclickaAdType === "banner" || !adSettings.onclickaAdType) && (
+                        <>
+                          {/* 2. OnClickA SDK Script */}
+                          <div className="space-y-2">
                         <label className="block text-sm font-semibold text-slate-300">2. Centralized Publisher Script</label>
                         <textarea 
                           value={adSettings.onclickaSdkScript || ""} 
@@ -8059,185 +8296,315 @@ export default function AdminDashboard() {
                           </div>
                         )}
                       </div>
+                      </>)}
 
-                      {/* OnClickA Video Settings Section */}
-                      <div className="space-y-4 pt-6 border-t border-slate-800">
-                        <div>
-                          <h4 className="text-md font-bold text-slate-200 flex items-center gap-1.5">
-                            <span>🎥</span> OnClickA Video Settings
-                          </h4>
-                          <p className="text-xs text-slate-500">Configure OnClickA Video/VAST settings for shorteners and landing pages.</p>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* Enable/Disable Video Ads */}
-                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex justify-between items-center">
+                      {/* Video-Only Fields (VAST) */}
+                      {adSettings.onclickaAdType === "video" && (
+                        <div className="space-y-6 animate-fadeIn">
+                          {/* VAST URL Setup */}
+                          <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-4">
                             <div>
-                              <span className="block text-xs font-semibold text-white">Enable Video Ads</span>
-                              <span className="text-[10px] text-slate-500">Enable or disable OnClickA Video Ads</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setAdSettings({ ...adSettings, onclickaVideoEnabled: !adSettings.onclickaVideoEnabled })}
-                              className={`px-3.5 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-200 cursor-pointer ${
-                                adSettings.onclickaVideoEnabled 
-                                  ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm shadow-emerald-900/25' 
-                                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                              }`}
-                            >
-                              {adSettings.onclickaVideoEnabled ? "Enabled" : "Disabled"}
-                            </button>
-                          </div>
-
-                          {/* Video Timeout */}
-                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-2">
-                            <div className="flex justify-between items-center">
-                              <span className="block text-xs font-semibold text-white">Video Timeout (seconds)</span>
-                              <span className="text-[10px] text-slate-500">Default: 8 seconds</span>
+                              <label className="block text-sm font-semibold text-white">🎬 VAST URL</label>
+                              <p className="text-xs text-slate-500 font-sans">Paste the VAST endpoint URL from your ad network dashboard.</p>
                             </div>
                             <input
-                              type="number"
-                              min={1}
-                              max={60}
-                              value={adSettings.onclickaVideoTimeout !== undefined ? adSettings.onclickaVideoTimeout : 8}
-                              onChange={(e) => setAdSettings({ ...adSettings, onclickaVideoTimeout: Math.max(1, Number(e.target.value)) })}
-                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-bold font-mono"
-                            />
-                          </div>
-
-                          {/* Retry Attempts */}
-                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-2">
-                            <div className="flex justify-between items-center">
-                              <span className="block text-xs font-semibold text-white">Retry Attempts</span>
-                              <span className="text-[10px] text-slate-500">Consecutive failures skip</span>
-                            </div>
-                            <input
-                              type="number"
-                              min={1}
-                              max={10}
-                              value={adSettings.onclickaVideoRetryAttempts !== undefined ? adSettings.onclickaVideoRetryAttempts : 2}
-                              onChange={(e) => setAdSettings({ ...adSettings, onclickaVideoRetryAttempts: Math.max(1, Number(e.target.value)) })}
-                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-bold font-mono"
-                            />
-                          </div>
-
-                          {/* Enable Auto Rotation */}
-                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex justify-between items-center">
-                            <div>
-                              <span className="block text-xs font-semibold text-white">Enable Auto Rotation</span>
-                              <span className="text-[10px] text-slate-500">Automatically rotate spots until ad fills</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setAdSettings({ ...adSettings, onclickaVideoAutoRotation: adSettings.onclickaVideoAutoRotation === undefined ? false : !adSettings.onclickaVideoAutoRotation })}
-                              className={`px-3.5 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-200 cursor-pointer ${
-                                (adSettings.onclickaVideoAutoRotation !== false) 
-                                  ? 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-sm shadow-indigo-900/25' 
-                                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                              }`}
-                            >
-                              {(adSettings.onclickaVideoAutoRotation !== false) ? "ON" : "OFF"}
-                            </button>
-                          </div>
-
-                          {/* Fallback to Banner */}
-                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex justify-between items-center">
-                            <div>
-                              <span className="block text-xs font-semibold text-white">Fallback to Banner</span>
-                              <span className="text-[10px] text-slate-500">Show banners immediately if video fails</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setAdSettings({ ...adSettings, onclickaVideoFallbackToBanner: adSettings.onclickaVideoFallbackToBanner === undefined ? false : !adSettings.onclickaVideoFallbackToBanner })}
-                              className={`px-3.5 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-200 cursor-pointer ${
-                                (adSettings.onclickaVideoFallbackToBanner !== false) 
-                                  ? 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-sm shadow-indigo-900/25' 
-                                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                              }`}
-                            >
-                              {(adSettings.onclickaVideoFallbackToBanner !== false) ? "ON" : "OFF"}
-                            </button>
-                          </div>
-
-                          {/* Show Debug Logs */}
-                          <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex justify-between items-center">
-                            <div>
-                              <span className="block text-xs font-semibold text-white">Show Debug Logs</span>
-                              <span className="text-[10px] text-slate-500">Output detailed diagnostics in console</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setAdSettings({ ...adSettings, onclickaVideoShowDebugLogs: adSettings.onclickaVideoShowDebugLogs === undefined ? false : !adSettings.onclickaVideoShowDebugLogs })}
-                              className={`px-3.5 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-200 cursor-pointer ${
-                                (adSettings.onclickaVideoShowDebugLogs !== false) 
-                                  ? 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-sm shadow-indigo-900/25' 
-                                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                              }`}
-                            >
-                              {(adSettings.onclickaVideoShowDebugLogs !== false) ? "ON" : "OFF"}
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Video Spot List (Add More Button) */}
-                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-3">
-                          <div className="flex justify-between items-center border-b border-slate-850 pb-2">
-                            <div>
-                              <span className="block text-xs font-semibold text-white">Video Spot IDs</span>
-                              <span className="text-[10px] text-slate-500">List of OnClickA Spot IDs for Video Ads rotation</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const currentSpots = adSettings.onclickaVideoSpots || [];
-                                setAdSettings({
-                                  ...adSettings,
-                                  onclickaVideoSpots: [...currentSpots, ""]
-                                });
+                              type="text"
+                              value={adSettings.onclickaVastUrl || ""}
+                              placeholder="e.g., https://bid.onclckstr.com/vast?spot_id=6122214"
+                              onChange={(e) => {
+                                setAdSettings({ ...adSettings, onclickaVastUrl: e.target.value });
+                                setTestVastUrl(e.target.value);
                               }}
-                              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded-lg transition duration-200 shadow-sm flex items-center gap-1 cursor-pointer"
-                            >
-                              ➕ Add Video Spot
-                            </button>
+                              className="w-full bg-slate-900 border border-slate-850 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono font-bold"
+                            />
+                            <div className="text-[10px] text-slate-500 flex justify-between items-center bg-slate-900/40 p-2.5 rounded border border-slate-900">
+                              <span className="font-sans"><strong>Example format:</strong> https://bid.onclckstr.com/vast?spot_id=6122214</span>
+                              <span className="font-semibold text-indigo-400 font-sans">XML VAST 3.0/4.0 Standard Compliant</span>
+                            </div>
                           </div>
 
-                          {(!adSettings.onclickaVideoSpots || adSettings.onclickaVideoSpots.length === 0) ? (
-                            <div className="text-center py-3 text-slate-500 text-[10px]">
-                              No video spots configured. Click "Add Video Spot" to add at least one Spot ID.
+                          {/* Interactive VAST Test Panel */}
+                          <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-6">
+                            <div className="flex justify-between items-center border-b border-slate-900 pb-3">
+                              <div>
+                                <h4 className="text-md font-bold text-white flex items-center gap-1.5 font-sans tracking-tight">
+                                  <span>🔬</span> VAST Testing & Diagnostic Control
+                                </h4>
+                                <p className="text-[10px] text-slate-500 font-sans">Live preview, playback verification, response debugger, and error tracker.</p>
+                              </div>
+                              <span className="text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded font-bold font-mono">
+                                VAST Tester 1.2
+                              </span>
                             </div>
-                          ) : (
-                            <div className="space-y-2.5">
-                              {(adSettings.onclickaVideoSpots || []).map((spot: string, idx: number) => (
-                                <div key={idx} className="flex gap-2 items-center">
-                                  <span className="text-[10px] text-slate-500 font-bold font-mono w-6">#{idx + 1}</span>
-                                  <input
-                                    type="text"
-                                    value={spot}
-                                    placeholder="Enter Video Spot ID (e.g. 447812)"
-                                    onChange={(e) => {
-                                      const updated = [...(adSettings.onclickaVideoSpots || [])];
-                                      updated[idx] = e.target.value;
-                                      setAdSettings({ ...adSettings, onclickaVideoSpots: updated });
-                                    }}
-                                    className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const updated = (adSettings.onclickaVideoSpots || []).filter((_: any, i: number) => i !== idx);
-                                      setAdSettings({ ...adSettings, onclickaVideoSpots: updated });
-                                    }}
-                                    className="p-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-950 rounded-lg transition duration-150 cursor-pointer"
-                                    title="Delete Video Spot"
+
+                            {/* Control Bar Actions */}
+                            <div className="flex flex-wrap items-center gap-2 bg-slate-900/60 p-3 rounded-lg border border-slate-850 justify-between">
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={testIsLoading}
+                                  onClick={() => handleTestVast(true)}
+                                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white text-xs font-bold rounded-lg transition duration-150 flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-950 font-sans"
+                                >
+                                  {testIsLoading ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      <span>Fetching VAST...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>👁️</span>
+                                      <span>Preview</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={testIsLoading}
+                                  onClick={() => handleTestVast(false)}
+                                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-bold rounded-lg transition duration-150 flex items-center gap-1.5 cursor-pointer font-sans"
+                                >
+                                  <span>🔄</span>
+                                  <span>Test VAST Only</span>
+                                </button>
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={!testMediaUrl}
+                                  onClick={() => {
+                                    if (testVideoRef.current) {
+                                      testVideoRef.current.play();
+                                      setTestPlaybackStatus('playing');
+                                      appendConsoleLog('info', '▶️ Play command sent to video player.');
+                                    }
+                                  }}
+                                  className="p-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 border border-slate-700 rounded-lg text-xs font-bold cursor-pointer transition font-sans"
+                                  title="Play Test Video"
+                                >
+                                  Play
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!testMediaUrl}
+                                  onClick={() => {
+                                    if (testVideoRef.current) {
+                                      testVideoRef.current.pause();
+                                      setTestPlaybackStatus('paused');
+                                      appendConsoleLog('info', '⏸️ Pause command sent to video player.');
+                                    }
+                                  }}
+                                  className="p-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 border border-slate-700 rounded-lg text-xs font-bold cursor-pointer transition font-sans"
+                                  title="Pause Test Video"
+                                >
+                                  Pause
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!testMediaUrl}
+                                  onClick={() => {
+                                    if (testVideoRef.current) {
+                                      testVideoRef.current.currentTime = 0;
+                                      testVideoRef.current.play();
+                                      setTestPlaybackStatus('playing');
+                                      appendConsoleLog('info', '🔄 Video playback restarted from beginning.');
+                                    }
+                                  }}
+                                  className="p-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 border border-slate-700 rounded-lg text-xs font-bold cursor-pointer transition font-sans"
+                                  title="Retry Test Video"
+                                >
+                                  Retry
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTestConsoleLogs([]);
+                                    setTestNetworkLogs([]);
+                                    appendConsoleLog('info', '🧹 Diagnostic and network logs cleared.');
+                                  }}
+                                  className="p-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-950 rounded-lg text-xs font-bold cursor-pointer transition font-sans"
+                                  title="Clear Logs"
+                                >
+                                  Clear Logs
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleCopyReport}
+                                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-indigo-400 border border-slate-700 rounded-lg text-xs font-bold cursor-pointer transition font-sans"
+                                  title="Copy Report"
+                                >
+                                  Copy Report
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Validation Indicators Row */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div className="bg-slate-900 p-3 rounded-lg border border-slate-850">
+                                <span className="text-[10px] text-slate-500 font-bold block uppercase mb-1 font-sans">XML Validation</span>
+                                <span className={`text-xs font-semibold ${xmlValidationStatus.includes('✅') ? 'text-emerald-400' : xmlValidationStatus.includes('❌') ? 'text-rose-400' : xmlValidationStatus ? 'text-amber-400' : 'text-slate-400'}`}>
+                                  {xmlValidationStatus || "Not Checked"}
+                                </span>
+                              </div>
+                              <div className="bg-slate-900 p-3 rounded-lg border border-slate-850">
+                                <span className="text-[10px] text-slate-500 font-bold block uppercase mb-1 font-sans">MediaFile Detection</span>
+                                <span className={`text-xs font-semibold ${mediaFileDetectionStatus.includes('✅') ? 'text-emerald-400' : mediaFileDetectionStatus.includes('❌') ? 'text-rose-400' : mediaFileDetectionStatus ? 'text-amber-400' : 'text-slate-400'}`}>
+                                  {mediaFileDetectionStatus || "Awaiting Fetch"}
+                                </span>
+                              </div>
+                              <div className="bg-slate-900 p-3 rounded-lg border border-slate-850">
+                                <span className="text-[10px] text-slate-500 font-bold block uppercase mb-1 font-sans">Playback Status</span>
+                                <span className={`text-xs font-mono font-bold uppercase tracking-wider ${testPlaybackStatus === 'playing' ? 'text-emerald-400' : testPlaybackStatus === 'failed' ? 'text-rose-400' : testPlaybackStatus === 'loading' ? 'text-amber-400 animate-pulse' : 'text-slate-400'}`}>
+                                  ● {testPlaybackStatus}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Sandbox Video Preview Frame */}
+                            <div className="bg-slate-900 rounded-xl border border-slate-850 overflow-hidden relative">
+                              <div className="bg-slate-950 px-4 py-2 border-b border-slate-950 flex justify-between items-center">
+                                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-sans">Video Canvas Sandbox</span>
+                                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded font-black font-mono animate-pulse">● LIVE PREVIEW</span>
+                              </div>
+                              <div className="p-3 bg-slate-950 flex justify-center items-center overflow-hidden min-h-[220px]">
+                                {testMediaUrl ? (
+                                  <div className="relative w-full aspect-video max-w-md rounded-lg overflow-hidden border border-slate-800">
+                                    <video
+                                      ref={testVideoRef}
+                                      src={testMediaUrl}
+                                      autoPlay
+                                      playsInline
+                                      className="w-full h-full object-contain animate-fadeIn"
+                                      onPlay={() => {
+                                        setTestPlaybackStatus('playing');
+                                        appendConsoleLog('success', '🎬 Playback successfully started.');
+                                      }}
+                                      onPause={() => setTestPlaybackStatus('paused')}
+                                      onEnded={() => {
+                                        setTestPlaybackStatus('completed');
+                                        appendConsoleLog('success', '🏁 Playback finished completely.');
+                                      }}
+                                      onError={() => {
+                                        setTestPlaybackStatus('failed');
+                                        appendConsoleLog('error', '❌ Playback Error: Media stream is corrupted or format is not supported by your browser.');
+                                      }}
+                                    />
+                                    {/* Playback status overlay */}
+                                    <div className="absolute top-2 left-2 bg-slate-950/80 backdrop-blur-sm border border-slate-800 rounded px-2 py-1 text-[9px] font-bold text-slate-300 pointer-events-none font-mono">
+                                      Status: {testPlaybackStatus.toUpperCase()}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="text-center text-slate-600 text-xs italic py-8 space-y-2 font-sans">
+                                    <div className="text-2xl opacity-40">📺</div>
+                                    <p>No video loaded. Click "Preview" above to parse XML and launch video player.</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* XML Viewer */}
+                            <div className="space-y-2">
+                              <span className="text-[10px] text-slate-500 font-bold block uppercase font-sans">XML Viewer</span>
+                              <div className="max-h-52 overflow-y-auto bg-slate-950 border border-slate-850 rounded-lg p-3 font-mono text-[9px] text-slate-300 leading-normal select-all">
+                                {testXmlText ? (
+                                  <pre className="whitespace-pre-wrap">{testXmlText}</pre>
+                                ) : (
+                                  <span className="text-slate-600 italic font-sans">No XML fetched yet. Click "Preview" to load XML.</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* MediaFile Info Viewer */}
+                            <div className="space-y-2">
+                              <span className="text-[10px] text-slate-500 font-bold block uppercase font-sans">MediaFile Viewer</span>
+                              <div className="bg-slate-950 border border-slate-850 rounded-lg p-3 text-xs text-slate-300 flex justify-between items-center gap-4">
+                                <span className="font-mono text-[10px] text-indigo-400 truncate flex-1 block">
+                                  {testMediaUrl || "No MediaFile resolved."}
+                                </span>
+                                {testMediaUrl && (
+                                  <a
+                                    href={testMediaUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded font-bold text-[10px] shrink-0 border border-slate-700 flex items-center gap-1 cursor-pointer font-sans"
                                   >
-                                    🗑️
-                                  </button>
-                                </div>
-                              ))}
+                                    Open ↗
+                                  </a>
+                                )}
+                              </div>
                             </div>
-                          )}
+
+                            {/* Network Logger Panel */}
+                            <div className="space-y-2">
+                              <span className="text-[10px] text-slate-500 font-bold block uppercase font-sans">Network Logger</span>
+                              <div className="bg-slate-950 border border-slate-850 rounded-lg overflow-hidden font-mono text-[9px]">
+                                <table className="w-full text-left border-collapse">
+                                  <thead>
+                                    <tr className="bg-slate-900 border-b border-slate-850 text-slate-400">
+                                      <th className="p-2 font-sans">Time</th>
+                                      <th className="p-2 font-sans">Method</th>
+                                      <th className="p-2 font-sans">URL</th>
+                                      <th className="p-2 font-sans">Status</th>
+                                      <th className="p-2 text-right font-sans">Duration</th>
+                                      <th className="p-2 text-right font-sans">Size</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {testNetworkLogs.length === 0 ? (
+                                      <tr>
+                                        <td colSpan={6} className="p-3 text-center text-slate-600 italic font-sans">No request history captured.</td>
+                                      </tr>
+                                    ) : (
+                                      testNetworkLogs.map((log) => (
+                                        <tr key={log.id} className="border-b border-slate-900 text-slate-300 hover:bg-slate-900/40">
+                                          <td className="p-2 text-slate-500">{log.time}</td>
+                                          <td className="p-2 text-indigo-400 font-bold">{log.method}</td>
+                                          <td className="p-2 truncate max-w-[140px] text-slate-400" title={log.url}>{log.url}</td>
+                                          <td className="p-2 font-bold">
+                                            <span className={log.status === 200 ? "text-emerald-400" : "text-rose-400"}>
+                                              {log.status} {log.status === 200 ? "OK" : "Error"}
+                                            </span>
+                                          </td>
+                                          <td className="p-2 text-right text-slate-400 font-bold">{log.duration}ms</td>
+                                          <td className="p-2 text-right text-slate-500">{log.size ? `${(log.size / 1024).toFixed(2)} KB` : "0 B"}</td>
+                                        </tr>
+                                      ))
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                            {/* Live Console Logs Panel */}
+                            <div className="space-y-2">
+                              <span className="text-[10px] text-slate-500 font-bold block uppercase font-sans">Live Console Logger</span>
+                              <div className="max-h-48 overflow-y-auto bg-slate-950 border border-slate-850 rounded-lg p-3 font-mono text-[9px] leading-relaxed space-y-1 select-text">
+                                {testConsoleLogs.length === 0 ? (
+                                  <span className="text-slate-600 italic font-sans">Awaiting operations to capture terminal output...</span>
+                                ) : (
+                                  testConsoleLogs.map((log) => {
+                                    const colorMap = {
+                                      info: 'text-slate-400',
+                                      success: 'text-emerald-400 font-semibold',
+                                      warn: 'text-amber-400 font-semibold',
+                                      error: 'text-rose-400 font-black'
+                                    };
+                                    return (
+                                      <div key={log.id} className="flex gap-2">
+                                        <span className="text-slate-600 font-mono">[{log.time}]</span>
+                                        <span className={colorMap[log.type] || 'text-slate-300'}>{log.msg}</span>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Feedback Indicators */}
                       {adSettingsFeedback && (
