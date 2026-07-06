@@ -298,84 +298,238 @@ export function OnClickAVideoAdPlayer({
         handleSpotFailure(spotId || "vast-url", "Video Timeout");
       }, timeoutSeconds * 1000);
 
+      const getXmlTreeStructure = (node: Node, depth: number = 0): string => {
+        if (!node || node.nodeType !== 1) return "";
+        const el = node as Element;
+        let result = "  ".repeat(depth) + `<${el.tagName}`;
+        if (el.attributes) {
+          for (let i = 0; i < el.attributes.length; i++) {
+            const attr = el.attributes[i];
+            result += ` ${attr.name}="${attr.value}"`;
+          }
+        }
+        result += ">\n";
+        
+        if (el.childNodes) {
+          for (let i = 0; i < el.childNodes.length; i++) {
+            result += getXmlTreeStructure(el.childNodes[i], depth + 1);
+          }
+        }
+        return result;
+      };
+
+      const resolveVastTextAndDetails = async (
+        urlOrXml: string,
+        depth: number = 0,
+        isUrl: boolean = true
+      ): Promise<{ mediaUrl: string | null; clickUrl: string | null; xmlText: string; mediaFilesCount: number; impressions: string[] }> => {
+        if (depth > 5) {
+          log(`Exceeded maximum Wrapper redirect limit (5).`);
+          throw new Error("Wrapper redirection limit exceeded");
+        }
+
+        let xmlText = "";
+        if (isUrl) {
+          log(`Fetching VAST XML payload (depth ${depth}) from: ${urlOrXml}`);
+          const fetchUrl = `/api/onclicka/vast?url=${encodeURIComponent(urlOrXml)}`;
+          const res = await fetch(fetchUrl);
+          if (!res.ok) {
+            log(`HTTP Failure: Ad server returned status code ${res.status}`);
+            throw new Error(`HTTP status ${res.status}`);
+          }
+          xmlText = await res.text();
+          log(`Successfully retrieved XML file (${(xmlText.length / 1024).toFixed(2)} KB)`);
+        } else {
+          xmlText = urlOrXml;
+        }
+
+        log(`Parsing XML document at depth ${depth}...`);
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+
+        const parserError = xmlDoc.querySelector("parsererror");
+        if (parserError) {
+          log(`XML parsererror detected: ${parserError.textContent}`);
+        }
+
+        // Check standard tags
+        const vastNode = xmlDoc.querySelector("VAST, vast, Vast");
+        if (vastNode) {
+          log(`Parsing step: <VAST> opening tag resolved.`);
+        } else {
+          log(`Parsing step: <VAST> tag missing or named differently in XML.`);
+        }
+
+        const adNode = xmlDoc.querySelector("Ad, ad, AD");
+        if (adNode) {
+          log(`Parsing step: <Ad> tag resolved.`);
+        } else {
+          log(`Parsing step: <Ad> tag missing or named differently in XML.`);
+        }
+
+        // 3. Search recursively through: VAST -> Ad -> Wrapper -> InLine -> Creatives -> Creative -> Linear -> MediaFiles -> MediaFile
+        const pathSteps: string[] = [];
+        const mediaFileElements: Element[] = [];
+
+        const traverseAndLog = (node: Node, path: string = "") => {
+          if (!node || node.nodeType !== 1) return;
+          const el = node as Element;
+          const tagName = el.tagName;
+          const currentPath = path ? `${path} -> ${tagName}` : tagName;
+          pathSteps.push(currentPath);
+
+          log(`Parsing step: Resolved element <${tagName}> at path: ${currentPath}`);
+
+          if (tagName.toLowerCase() === "mediafile" && !mediaFileElements.includes(el)) {
+            mediaFileElements.push(el);
+          }
+
+          if (el.childNodes) {
+            for (let i = 0; i < el.childNodes.length; i++) {
+              traverseAndLog(el.childNodes[i], currentPath);
+            }
+          }
+        };
+
+        if (xmlDoc.documentElement) {
+          traverseAndLog(xmlDoc.documentElement);
+        }
+
+        // 1. Search MediaFile using: document.querySelectorAll("MediaFile")
+        const q1 = xmlDoc.querySelectorAll("MediaFile");
+        q1.forEach(el => {
+          if (!mediaFileElements.includes(el)) {
+            mediaFileElements.push(el);
+            log(`Parsing step: querySelectorAll("MediaFile") matched: ${el.tagName}`);
+          }
+        });
+
+        const q2 = xmlDoc.querySelectorAll("mediafile");
+        q2.forEach(el => {
+          if (!mediaFileElements.includes(el)) {
+            mediaFileElements.push(el);
+            log(`Parsing step: querySelectorAll("mediafile") matched: ${el.tagName}`);
+          }
+        });
+
+        const q3 = xmlDoc.querySelectorAll("MEDIAFILE");
+        q3.forEach(el => {
+          if (!mediaFileElements.includes(el)) {
+            mediaFileElements.push(el);
+            log(`Parsing step: querySelectorAll("MEDIAFILE") matched: ${el.tagName}`);
+          }
+        });
+
+        // 4. Log: Total MediaFile count, details for each MediaFile URL, Type, Delivery, Bitrate, Width, Height, Selected MediaFile
+        log(`Total MediaFile count: ${mediaFileElements.length}`);
+        
+        const mediaFilesDetails = mediaFileElements.map((el, index) => {
+          const rawUrl = el.textContent || "";
+          const cleanUrl = rawUrl.replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+          const type = el.getAttribute("type") || "unknown";
+          const delivery = el.getAttribute("delivery") || "unknown";
+          const bitrate = el.getAttribute("bitrate") || "unknown";
+          const width = el.getAttribute("width") || "unknown";
+          const height = el.getAttribute("height") || "unknown";
+          
+          log(`MediaFile #${index + 1} details: URL: ${cleanUrl} | Type: ${type} | Delivery: ${delivery} | Bitrate: ${bitrate} | Width: ${width} | Height: ${height}`);
+
+          return { url: cleanUrl, type, delivery, bitrate, width, height, element: el };
+        });
+
+        let selectedMediaUrl: string | null = null;
+        let selectedClickUrl: string | null = null;
+        const impressions: string[] = [];
+
+        // Try to collect Impression tags from current doc
+        const impressionNodes = xmlDoc.querySelectorAll("Impression, impression, IMPRESSION");
+        impressionNodes.forEach(node => {
+          const impUrl = (node.textContent || "").replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+          if (impUrl) {
+            impressions.push(impUrl);
+          }
+        });
+
+        if (mediaFileElements.length > 0) {
+          // 5. If MediaFile count > 0, never display "Missing MediaFile"
+          const selected = mediaFilesDetails[0]; // Select first compatible
+          selectedMediaUrl = selected.url;
+          log(`Selected MediaFile: ${selectedMediaUrl}`);
+          
+          // 6. Display the raw parsed MediaFile URL before creating the video element
+          log(`Raw Parsed MediaFile URL: ${selectedMediaUrl}`);
+
+          // Try to find ClickThrough URL in the same document
+          const clickThroughs = xmlDoc.querySelectorAll("ClickThrough, clickthrough, CLICKTHROUGH");
+          if (clickThroughs.length > 0) {
+            selectedClickUrl = (clickThroughs[0].textContent || "").replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+            log(`ClickThrough URL: ${selectedClickUrl}`);
+          }
+        } else {
+          // No MediaFile directly in this XML, check for Wrapper Ad tag redirection
+          log(`No direct MediaFiles in XML at depth ${depth}. Searching for Wrapper redirect VASTAdTagURI...`);
+          const adTagUris = xmlDoc.querySelectorAll("VASTAdTagURI, vastadtaguri, VASTAdTagURL, vastadtagurl");
+          if (adTagUris.length > 0) {
+            const redirectUrl = (adTagUris[0].textContent || "").replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+            log(`Wrapper VAST detected. Redirecting to: ${redirectUrl}`);
+            
+            const resolved = await resolveVastTextAndDetails(redirectUrl, depth + 1, true);
+            return {
+              ...resolved,
+              impressions: [...impressions, ...resolved.impressions]
+            };
+          } else {
+            // 8. If parser cannot find MediaFile, print the entire parsed XML tree path.
+            log(`Missing MediaFile: Unable to find MediaFile or Wrapper VASTAdTagURI in XML depth ${depth}.`);
+            log(`XML Tree Path Hierarchy:\n${getXmlTreeStructure(xmlDoc.documentElement)}`);
+          }
+        }
+
+        return {
+          mediaUrl: selectedMediaUrl,
+          clickUrl: selectedClickUrl,
+          xmlText,
+          mediaFilesCount: mediaFileElements.length,
+          impressions
+        };
+      };
+
       try {
         const fetchUrl = isVideoMode 
           ? `/api/onclicka/vast?url=${encodeURIComponent(vastUrl)}`
           : `/api/onclicka/vast?spotId=${spotId}`;
 
-        const res = await fetch(fetchUrl);
+        const resolved = await resolveVastTextAndDetails(fetchUrl, 0, true);
         if (timeoutTriggered) return;
 
-        if (!res.ok) {
-          log(`Network Error: Ad server responded with status ${res.status}`);
-          handleSpotFailure(spotId || "vast-url", `Network Error ${res.status}`);
-          return;
-        }
+        if (resolved.mediaFilesCount > 0 && resolved.mediaUrl) {
+          // Success - clear timeout
+          clearTimeout(timeoutRef.current);
+          log("SDK Loaded: VAST XML successfully parsed.");
+          log(`Video ad payload resolved. Media source: ${resolved.mediaUrl}`);
 
-        const xmlText = await res.text();
-        if (timeoutTriggered) return;
+          // Reset consecutive failures on success
+          if (spotId) {
+            sessionStorage.setItem(`onclicka_failures_${spotId}`, "0");
+          }
 
-        if (!xmlText || xmlText.trim().length === 0) {
-          log("Empty Response: XML response payload is blank.");
-          handleSpotFailure(spotId || "vast-url", "Empty Response");
-          return;
-        }
+          setVideoUrl(resolved.mediaUrl);
+          setClickThroughUrl(resolved.clickUrl);
+          setIsPlaying(true);
+          if (onVideoStateChange) onVideoStateChange("playing");
 
-        // Check if invalid XML or doesn't have standard VAST tags
-        if (!xmlText.includes("<VAST") && !xmlText.includes("<vast")) {
-          log("Invalid XML: Response body is not a compliant VAST document.");
-          handleSpotFailure(spotId || "vast-url", "Invalid XML");
-          return;
-        }
-
-        // Check for empty VAST / No Fill
-        if (!xmlText.includes("<Ad") && !xmlText.includes("<ad")) {
-          log("No Fill: XML returned no active campaign or Ad node is empty.");
-          handleSpotFailure(spotId || "vast-url", "No Fill");
-          return;
-        }
-
-        // Regex parsing to prevent parsing crashes
-        const mediaFileMatch = xmlText.match(/<MediaFile[^>]*>([\s\S]*?)<\/MediaFile>/i);
-        const mediaUrl = mediaFileMatch ? mediaFileMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : null;
-
-        if (!mediaUrl) {
-          log("Missing MediaFile: XML does not contain a valid play stream URL.");
-          handleSpotFailure(spotId || "vast-url", "Missing MediaFile");
-          return;
-        }
-
-        const clickThroughMatch = xmlText.match(/<ClickThrough[^>]*>([\s\S]*?)<\/ClickThrough>/i);
-        const clickUrl = clickThroughMatch ? clickThroughMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : null;
-
-        // Success - clear timeout
-        clearTimeout(timeoutRef.current);
-        log("SDK Loaded: VAST XML successfully parsed.");
-        log(`Video ad payload resolved. Media source: ${mediaUrl}`);
-
-        // Reset consecutive failures on success
-        if (spotId) {
-          sessionStorage.setItem(`onclicka_failures_${spotId}`, "0");
-        }
-
-        setVideoUrl(mediaUrl);
-        setClickThroughUrl(clickUrl);
-        setIsPlaying(true);
-        if (onVideoStateChange) onVideoStateChange("playing");
-
-        // Fire impressions if any
-        const impressionMatches = [...xmlText.matchAll(/<Impression[^>]*>([\s\S]*?)<\/Impression>/gi)];
-        impressionMatches.forEach((m, idx) => {
-          const impUrl = m[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim();
-          if (impUrl) {
+          // Fire impressions
+          resolved.impressions.forEach((impUrl, idx) => {
             navigator.sendBeacon ? navigator.sendBeacon(impUrl) : fetch(impUrl, { mode: "no-cors" });
             if (showDebugLogs) console.log(`[Video Ad] Impression #${idx + 1} fired: ${impUrl}`);
-          }
-        });
-
+          });
+        } else {
+          log("Missing MediaFile: Resolved VAST XML contains no valid MediaFile play stream URLs.");
+          handleSpotFailure(spotId || "vast-url", "Missing MediaFile");
+        }
       } catch (err: any) {
         if (timeoutTriggered) return;
-        log(`Network Error: Unable to fetch XML resource. ${err.message || err}`);
+        log(`Network Error: Unable to fetch or resolve XML resource. ${err.message || err}`);
         handleSpotFailure(spotId || "vast-url", "Network Error");
       } finally {
         activeRequestRef.current = false;

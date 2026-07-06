@@ -1238,25 +1238,25 @@ export default function AdminDashboard() {
         return { valid: false, error: "Received empty response from the ad server." };
       }
 
-      if (!xmlText.includes("<VAST") && !xmlText.includes("<vast")) {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+      
+      const isVast = xmlDoc.querySelector("VAST, vast, Vast") !== null || xmlText.includes("<VAST") || xmlText.includes("<vast");
+      if (!isVast) {
         return { valid: false, error: "Invalid VAST XML. Missing standard <VAST> opening tags." };
       }
 
-      if (!xmlText.includes("<Ad") && !xmlText.includes("<ad")) {
+      const isAd = xmlDoc.querySelector("Ad, ad, AD") !== null || xmlText.includes("<Ad") || xmlText.includes("<ad");
+      if (!isAd) {
         return { valid: false, error: "VAST XML contains no active campaigns (No Fill). <Ad> element is missing." };
       }
 
-      const mediaFileMatch = xmlText.match(/<MediaFile[^>]*>([\s\S]*?)<\/MediaFile>/i);
-      const mediaUrl = mediaFileMatch ? mediaFileMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : null;
+      const mediaFiles = xmlDoc.querySelectorAll("MediaFile");
+      const mediaFilesLower = xmlDoc.querySelectorAll("mediafile");
+      const wrapperRedirects = xmlDoc.querySelectorAll("VASTAdTagURI, vastadtaguri, VASTAdTagURL, vastadtagurl");
 
-      if (!mediaUrl) {
-        return { valid: false, error: "MediaFile element missing in the XML payload. No video URL could be detected." };
-      }
-
-      try {
-        new URL(mediaUrl);
-      } catch (e) {
-        return { valid: false, error: `Detected MediaFile contains an invalid video URL: "${mediaUrl}"` };
+      if (mediaFiles.length === 0 && mediaFilesLower.length === 0 && wrapperRedirects.length === 0) {
+        return { valid: false, error: "MediaFile element or Wrapper VASTAdTagURI missing in the XML payload." };
       }
 
       return { valid: true };
@@ -1307,79 +1307,225 @@ export default function AdminDashboard() {
     setMediaFileDetectionStatus('Detecting Media...');
     
     appendConsoleLog('info', `🚀 Initializing VAST parser...`);
-    appendConsoleLog('info', `📡 Fetching VAST XML payload from: ${testVastUrl}`);
     
-    const startTime = Date.now();
+    const getXmlTreeStructure = (node: Node, depth: number = 0): string => {
+      if (!node || node.nodeType !== 1) return "";
+      const el = node as Element;
+      let result = "  ".repeat(depth) + `<${el.tagName}`;
+      if (el.attributes) {
+        for (let i = 0; i < el.attributes.length; i++) {
+          const attr = el.attributes[i];
+          result += ` ${attr.name}="${attr.value}"`;
+        }
+      }
+      result += ">\n";
+      
+      if (el.childNodes) {
+        for (let i = 0; i < el.childNodes.length; i++) {
+          result += getXmlTreeStructure(el.childNodes[i], depth + 1);
+        }
+      }
+      return result;
+    };
+
+    const resolveVastTextAndDetails = async (
+      urlOrXml: string,
+      depth: number = 0,
+      isUrl: boolean = true
+    ): Promise<{ mediaUrl: string | null; clickUrl: string | null; xmlText: string; mediaFilesCount: number }> => {
+      if (depth > 5) {
+        appendConsoleLog('error', `❌ Exceeded maximum Wrapper redirect limit (5).`);
+        throw new Error("Wrapper redirection limit exceeded");
+      }
+
+      let xmlText = "";
+      if (isUrl) {
+        appendConsoleLog('info', `📡 Fetching VAST XML payload (depth ${depth}) from: ${urlOrXml}`);
+        const startTime = Date.now();
+        const res = await fetch(`/api/onclicka/vast?url=${encodeURIComponent(urlOrXml)}`);
+        const duration = Date.now() - startTime;
+        appendNetworkLog('GET', `/api/onclicka/vast?url=...`, res.status, duration, 0);
+        
+        if (res.status !== 200) {
+          appendConsoleLog('error', `❌ HTTP Failure: Ad server returned status code ${res.status}`);
+          throw new Error(`HTTP status ${res.status}`);
+        }
+        xmlText = await res.text();
+        appendConsoleLog('success', `📥 Successfully retrieved XML file (${(xmlText.length / 1024).toFixed(2)} KB) in ${duration}ms`);
+      } else {
+        xmlText = urlOrXml;
+      }
+
+      appendConsoleLog('info', `🔍 Parsing XML document at depth ${depth}...`);
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+
+      const parserError = xmlDoc.querySelector("parsererror");
+      if (parserError) {
+        appendConsoleLog('warn', `⚠️ XML parsererror detected: ${parserError.textContent}`);
+      }
+
+      // Check standard tags
+      const vastNode = xmlDoc.querySelector("VAST, vast, Vast");
+      if (vastNode) {
+        appendConsoleLog('success', `✅ Parsing step: <VAST> opening tag resolved.`);
+      } else {
+        appendConsoleLog('warn', `⚠️ Parsing step: <VAST> tag missing or named differently in XML.`);
+      }
+
+      const adNode = xmlDoc.querySelector("Ad, ad, AD");
+      if (adNode) {
+        appendConsoleLog('success', `✅ Parsing step: <Ad> tag resolved.`);
+      } else {
+        appendConsoleLog('warn', `⚠️ Parsing step: <Ad> tag missing or named differently in XML.`);
+      }
+
+      // 3. Search recursively through: VAST -> Ad -> Wrapper -> InLine -> Creatives -> Creative -> Linear -> MediaFiles -> MediaFile
+      // Let's log every single parsing step so it is obvious where parsing stops!
+      const pathSteps: string[] = [];
+      const mediaFileElements: Element[] = [];
+
+      const traverseAndLog = (node: Node, path: string = "") => {
+        if (!node || node.nodeType !== 1) return;
+        const el = node as Element;
+        const tagName = el.tagName;
+        const currentPath = path ? `${path} -> ${tagName}` : tagName;
+        pathSteps.push(currentPath);
+
+        appendConsoleLog('info', `Parsing step: Resolved element <${tagName}> at path: ${currentPath}`);
+
+        if (tagName.toLowerCase() === "mediafile" && !mediaFileElements.includes(el)) {
+          mediaFileElements.push(el);
+        }
+
+        if (el.childNodes) {
+          for (let i = 0; i < el.childNodes.length; i++) {
+            traverseAndLog(el.childNodes[i], currentPath);
+          }
+        }
+      };
+
+      if (xmlDoc.documentElement) {
+        traverseAndLog(xmlDoc.documentElement);
+      }
+
+      // 1. Search MediaFile using: document.querySelectorAll("MediaFile")
+      const q1 = xmlDoc.querySelectorAll("MediaFile");
+      q1.forEach(el => {
+        if (!mediaFileElements.includes(el)) {
+          mediaFileElements.push(el);
+          appendConsoleLog('info', `Parsing step: querySelectorAll("MediaFile") matched: ${el.tagName}`);
+        }
+      });
+
+      const q2 = xmlDoc.querySelectorAll("mediafile");
+      q2.forEach(el => {
+        if (!mediaFileElements.includes(el)) {
+          mediaFileElements.push(el);
+          appendConsoleLog('info', `Parsing step: querySelectorAll("mediafile") matched: ${el.tagName}`);
+        }
+      });
+
+      const q3 = xmlDoc.querySelectorAll("MEDIAFILE");
+      q3.forEach(el => {
+        if (!mediaFileElements.includes(el)) {
+          mediaFileElements.push(el);
+          appendConsoleLog('info', `Parsing step: querySelectorAll("MEDIAFILE") matched: ${el.tagName}`);
+        }
+      });
+
+      // 4. Log: Total MediaFile count, details for each MediaFile URL, Type, Delivery, Bitrate, Width, Height, Selected MediaFile
+      appendConsoleLog('info', `📊 Total MediaFile count: ${mediaFileElements.length}`);
+      
+      const mediaFilesDetails = mediaFileElements.map((el, index) => {
+        const rawUrl = el.textContent || "";
+        const cleanUrl = rawUrl.replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+        const type = el.getAttribute("type") || "unknown";
+        const delivery = el.getAttribute("delivery") || "unknown";
+        const bitrate = el.getAttribute("bitrate") || "unknown";
+        const width = el.getAttribute("width") || "unknown";
+        const height = el.getAttribute("height") || "unknown";
+        
+        appendConsoleLog('info', `📺 MediaFile #${index + 1} details:
+• URL: ${cleanUrl}
+• Type: ${type}
+• Delivery: ${delivery}
+• Bitrate: ${bitrate}
+• Width: ${width}
+• Height: ${height}`);
+
+        return { url: cleanUrl, type, delivery, bitrate, width, height, element: el };
+      });
+
+      let selectedMediaUrl: string | null = null;
+      let selectedClickUrl: string | null = null;
+
+      if (mediaFileElements.length > 0) {
+        // 5. If MediaFile count > 0, never display "Missing MediaFile"
+        const selected = mediaFilesDetails[0]; // Select first compatible
+        selectedMediaUrl = selected.url;
+        appendConsoleLog('success', `🎯 Selected MediaFile: ${selectedMediaUrl}`);
+        
+        // 6. Display the raw parsed MediaFile URL before creating the video element
+        appendConsoleLog('info', `🔗 Raw Parsed MediaFile URL: ${selectedMediaUrl}`);
+
+        // Try to find ClickThrough URL in the same document
+        const clickThroughs = xmlDoc.querySelectorAll("ClickThrough, clickthrough, CLICKTHROUGH");
+        if (clickThroughs.length > 0) {
+          selectedClickUrl = (clickThroughs[0].textContent || "").replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+          appendConsoleLog('info', `🔗 ClickThrough URL: ${selectedClickUrl}`);
+        }
+      } else {
+        // No MediaFile directly in this XML, check for Wrapper Ad tag redirection
+        appendConsoleLog('warn', `⚠️ No direct MediaFiles in XML at depth ${depth}. Searching for Wrapper redirect VASTAdTagURI...`);
+        const adTagUris = xmlDoc.querySelectorAll("VASTAdTagURI, vastadtaguri, VASTAdTagURL, vastadtagurl");
+        if (adTagUris.length > 0) {
+          const redirectUrl = (adTagUris[0].textContent || "").replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+          appendConsoleLog('info', `🔄 Wrapper VAST detected. Redirecting to: ${redirectUrl}`);
+          
+          const resolved = await resolveVastTextAndDetails(redirectUrl, depth + 1, true);
+          return resolved;
+        } else {
+          // 8. If parser cannot find MediaFile, print the entire parsed XML tree path.
+          appendConsoleLog('error', `❌ Missing MediaFile: Unable to find MediaFile or Wrapper VASTAdTagURI in XML depth ${depth}.`);
+          appendConsoleLog('error', `🌲 XML Tree Path Hierarchy:\n${getXmlTreeStructure(xmlDoc.documentElement)}`);
+        }
+      }
+
+      return {
+        mediaUrl: selectedMediaUrl,
+        clickUrl: selectedClickUrl,
+        xmlText,
+        mediaFilesCount: mediaFileElements.length
+      };
+    };
+
     try {
-      const res = await fetch(`/api/onclicka/vast?url=${encodeURIComponent(testVastUrl)}`);
-      const duration = Date.now() - startTime;
+      const resolved = await resolveVastTextAndDetails(testVastUrl, 0, true);
       
-      appendNetworkLog('GET', `/api/onclicka/vast`, res.status, duration, 0);
-      
-      if (res.status !== 200) {
-        setTestPlaybackStatus('failed');
-        setXmlValidationStatus('❌ HTTP Error');
-        setMediaFileDetectionStatus('❌ Fetch Failed');
-        appendConsoleLog('error', `❌ HTTP Failure: Ad server returned status code ${res.status}`);
-        return;
-      }
-      
-      const xmlText = await res.text();
-      const payloadSize = xmlText.length;
-      
-      setTestNetworkLogs(prev => prev.map(l => l.url.includes('vast') ? { ...l, size: payloadSize } : l));
-      setTestXmlText(xmlText);
-      appendConsoleLog('success', `📥 Successfully retrieved XML file (${(payloadSize / 1024).toFixed(2)} KB) in ${duration}ms`);
-      
-      if (xmlText.includes("<VAST") || xmlText.includes("<vast")) {
+      setTestXmlText(resolved.xmlText);
+
+      if (resolved.mediaFilesCount > 0 && resolved.mediaUrl) {
         setXmlValidationStatus('✅ Valid VAST Structure');
-        appendConsoleLog('success', `✅ VAST standard tags detected.`);
+        setTestMediaUrl(resolved.mediaUrl);
+        setMediaFileDetectionStatus(`✅ Detected (${resolved.mediaFilesCount} MediaFiles, Selected first)`);
+        appendConsoleLog('success', `🎬 Video Source Asset detected and resolved: ${resolved.mediaUrl}`);
+        
+        setTestPlaybackStatus('idle');
+        if (autoPlay) {
+          appendConsoleLog('info', `▶️ Initializing HTML5 Video Player and attempting autoplay...`);
+          setTestPlaybackStatus('playing');
+        }
       } else {
-        setXmlValidationStatus('❌ Invalid VAST XML');
-        setTestPlaybackStatus('failed');
-        appendConsoleLog('error', `❌ XML Parsing Error: Missing <VAST> wrapper elements.`);
-        return;
-      }
-
-      if (xmlText.includes("<Ad") || xmlText.includes("<ad")) {
-        appendConsoleLog('info', `🎯 Campaign ID & Ad wrapper verified inside VAST.`);
-      } else {
-        setXmlValidationStatus('⚠️ No Active Campaign (No Fill)');
-        appendConsoleLog('warn', `⚠️ VAST contains no campaign payload (Empty / No Fill).`);
-      }
-
-      const mediaFileMatch = xmlText.match(/<MediaFile[^>]*>([\s\S]*?)<\/MediaFile>/i);
-      const attributesMatch = xmlText.match(/<MediaFile([^>]*)/i);
-      const attributes = attributesMatch ? attributesMatch[1] : "";
-      const mediaUrl = mediaFileMatch ? mediaFileMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : null;
-      
-      if (!mediaUrl) {
+        setXmlValidationStatus('⚠️ No MediaFile Found');
         setMediaFileDetectionStatus('❌ Missing MediaFile');
         setTestPlaybackStatus('failed');
-        appendConsoleLog('error', `❌ Parser Error: No <MediaFile> tag found inside VAST XML.`);
-        return;
-      }
-
-      setTestMediaUrl(mediaUrl);
-      setMediaFileDetectionStatus(`✅ Detected (Type: video/mp4)`);
-      appendConsoleLog('success', `🎬 Video Source Asset detected: ${mediaUrl}`);
-      
-      if (attributes) {
-        appendConsoleLog('info', `Attributes detected: ${attributes.trim()}`);
-      }
-      
-      setTestPlaybackStatus('idle');
-      
-      if (autoPlay) {
-        appendConsoleLog('info', `▶️ Initializing HTML5 Video Player and attempting autoplay...`);
-        // We let the video element autoplay by setting its playing state and mounting it
-        setTestPlaybackStatus('playing');
       }
     } catch (err: any) {
       setTestPlaybackStatus('failed');
       setXmlValidationStatus('❌ Connection Failed');
       setMediaFileDetectionStatus('❌ Interrupted');
-      appendConsoleLog('error', `❌ Network Request Failed: CORS constraint or bad URL endpoint. ${err.message || err}`);
+      appendConsoleLog('error', `❌ Network/Parsing Request Failed: ${err.message || err}`);
     } finally {
       setTestIsLoading(false);
     }
