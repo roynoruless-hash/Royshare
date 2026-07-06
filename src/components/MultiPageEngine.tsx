@@ -127,6 +127,8 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const [bannerAdsEnabled, setBannerAdsEnabled] = useState(false);
   const [totalBannerSlots, setTotalBannerSlots] = useState(0);
   const [bannerSpotIds, setBannerSpotIds] = useState<any[]>([]);
+  const [totalBannerAds, setTotalBannerAds] = useState(0);
+  const [onclickaBanners, setOnclickaBanners] = useState<any[]>([]);
 
   // OnClickA states
   const [onclickaEnabled, setOnclickaEnabled] = useState(false);
@@ -166,6 +168,53 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
     
     document.head.appendChild(script);
   }, [onclickaEnabled, onclickaSdkScript]);
+
+  // Helper to render banners by position with backwards compatibility fallback
+  const renderBannersForPosition = (pos: "Header" | "Above Verify" | "Below Verify" | "Footer") => {
+    if (!onclickaEnabled || !bannerAdsEnabled) return null;
+
+    const activeBanners = (onclickaBanners || []).filter(
+      (b: any) => b.enabled !== false && b.spotId && String(b.position).toLowerCase() === pos.toLowerCase()
+    );
+
+    if (activeBanners.length > 0) {
+      return (
+        <div className={`w-full flex flex-col items-center gap-4 ${pos === "Header" ? "mb-6" : pos === "Footer" ? "mt-6" : "my-4"}`}>
+          {activeBanners.map((b: any, index: number) => (
+            <OnClickABanner key={`${pos}-banner-${b.spotId}-${index}`} adSpotId={b.spotId} />
+          ))}
+        </div>
+      );
+    }
+
+    // Fallback to old format
+    if (!onclickaBanners || onclickaBanners.length === 0) {
+      if (pos === "Header") {
+        const topIds = bannerSpotIds.slice(0, 2);
+        if (topIds.length === 0) return null;
+        return (
+          <div className="w-full flex flex-col items-center gap-4 mb-6">
+            {topIds.map((spotId, index) => (
+              <OnClickABanner key={`top-banner-fallback-${spotId}-${index}`} adSpotId={spotId} />
+            ))}
+          </div>
+        );
+      }
+      if (pos === "Footer") {
+        const bottomIds = bannerSpotIds.slice(2);
+        if (bottomIds.length === 0) return null;
+        return (
+          <div className="w-full flex flex-col items-center gap-4 mt-6">
+            {bottomIds.map((spotId, index) => (
+              <OnClickABanner key={`bottom-banner-fallback-${spotId}-${index}`} adSpotId={spotId} />
+            ))}
+          </div>
+        );
+      }
+    }
+
+    return null;
+  };
 
   // Bottom scroll reference
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -265,6 +314,8 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
         setBannerAdsEnabled(initData.bannerAdsEnabled ?? false);
         setTotalBannerSlots(initData.totalBannerSlots ?? 0);
         setBannerSpotIds(initData.bannerSpotIds ?? []);
+        setTotalBannerAds(initData.totalBannerAds ?? 0);
+        setOnclickaBanners(initData.onclickaBanners ?? []);
         setOnclickaEnabled(initData.onclickaEnabled ?? false);
         setOnclickaSdkScript(initData.onclickaSdkScript || "");
         setOnclickaSdkSpotId(initData.onclickaSdkSpotId || "");
@@ -581,13 +632,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
       {/* Main Content Arena */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 w-full max-w-7xl mx-auto">
         {/* OnClickA Top Header Banners */}
-        {onclickaEnabled && bannerAdsEnabled && bannerSpotIds.length > 0 && (
-          <div className="w-full flex flex-col items-center gap-4 mb-6">
-            {bannerSpotIds.slice(0, 2).map((spotId, index) => (
-              <OnClickABanner key={`top-banner-${spotId}-${index}`} adSpotId={spotId} />
-            ))}
-          </div>
-        )}
+        {renderBannersForPosition("Header")}
 
         <div className="w-full max-w-xl bg-slate-900/80 backdrop-blur-md rounded-2xl p-8 border border-white/10 shadow-2xl space-y-6">
           <AnimatePresence mode="wait">
@@ -608,6 +653,9 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                     {currentPageConfig ? currentPageConfig.instructions || itemData?.instructions : itemData?.instructions || "Follow the instructions below to unlock your destination link."}
                   </p>
                 </div>
+
+                {/* Above Verify OnClickA Banners */}
+                {renderBannersForPosition("Above Verify")}
 
                 {/* Progress Indicators */}
                 <div className="bg-slate-950/60 rounded-xl p-6 border border-white/5 space-y-4 text-sm relative overflow-hidden">
@@ -733,6 +781,9 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                   </div>
                 )}
 
+                {/* Below Verify OnClickA Banners */}
+                {renderBannersForPosition("Below Verify")}
+
                 {/* Scroll reference anchor */}
                 <div ref={bottomRef} className="h-2" />
               </motion.div>
@@ -754,6 +805,9 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                     </p>
                   </div>
                 </div>
+
+                {/* Above Verify OnClickA Banners */}
+                {renderBannersForPosition("Above Verify")}
 
                 {type === "download" ? (
                   // DOWNLOAD FINAL CORE VIEW
@@ -856,19 +910,16 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                     </button>
                   )}
                 </div>
+
+                {/* Below Verify OnClickA Banners */}
+                {renderBannersForPosition("Below Verify")}
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
         {/* OnClickA Bottom Banners */}
-        {onclickaEnabled && bannerAdsEnabled && bannerSpotIds.length > 2 && (
-          <div className="w-full flex flex-col items-center gap-4 mt-6">
-            {bannerSpotIds.slice(2).map((spotId, index) => (
-              <OnClickABanner key={`bottom-banner-${spotId}-${index}`} adSpotId={spotId} />
-            ))}
-          </div>
-        )}
+        {renderBannersForPosition("Footer")}
       </main>
 
       {/* Footer */}

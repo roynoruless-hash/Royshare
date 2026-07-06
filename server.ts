@@ -5569,6 +5569,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         bannerAdsEnabled: false,
         totalBannerSlots: 0,
         bannerSpotIds: [],
+        totalBannerAds: 0,
+        onclickaBanners: [],
         pagesConfig: []
       };
 
@@ -5858,6 +5860,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         bannerAdsEnabled: globalSettings.bannerAdsEnabled ?? false,
         totalBannerSlots: globalSettings.totalBannerSlots ?? 0,
         bannerSpotIds: globalSettings.bannerSpotIds ?? [],
+        totalBannerAds: globalSettings.totalBannerAds ?? 0,
+        onclickaBanners: globalSettings.onclickaBanners ?? [],
         onclickaEnabled: adSettings.onclickaEnabled ?? false,
         onclickaSdkScript: adSettings.onclickaSdkScript || "",
         onclickaSdkSpotId: adSettings.onclickaSdkSpotId || "",
@@ -6449,7 +6453,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           ...data,
           bannerAdsEnabled: data.bannerAdsEnabled ?? false,
           totalBannerSlots: data.totalBannerSlots ?? 0,
-          bannerSpotIds: data.bannerSpotIds ?? []
+          bannerSpotIds: data.bannerSpotIds ?? [],
+          totalBannerAds: data.totalBannerAds ?? 0,
+          onclickaBanners: data.onclickaBanners ?? []
         });
       } else {
         const defaultUserSettings = {

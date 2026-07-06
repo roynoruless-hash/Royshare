@@ -125,6 +125,8 @@ export default function AdminDashboard() {
     bannerAdsEnabled: false,
     totalBannerSlots: 0,
     bannerSpotIds: [],
+    totalBannerAds: 0,
+    onclickaBanners: [],
     pagesConfig: []
   });
   const [userShortenerSettingsLoading, setUserShortenerSettingsLoading] = useState(false);
@@ -1864,7 +1866,9 @@ export default function AdminDashboard() {
           ...data,
           bannerAdsEnabled: data.bannerAdsEnabled ?? false,
           totalBannerSlots: data.totalBannerSlots ?? 0,
-          bannerSpotIds: data.bannerSpotIds ?? []
+          bannerSpotIds: data.bannerSpotIds ?? [],
+          totalBannerAds: data.totalBannerAds ?? 0,
+          onclickaBanners: data.onclickaBanners ?? []
         });
       }
     } catch (e) {
@@ -4438,12 +4442,12 @@ export default function AdminDashboard() {
                       {/* OnClickA Banner Configuration */}
                       <div className="border-t border-slate-800 pt-6 space-y-4">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-850 pb-2">
-                          <h4 className="text-base font-bold text-slate-200">📢 OnClickA Banner Configuration</h4>
-                          <span className="text-xs text-slate-500 font-mono">Setup dynamic OnClickA Banner slots for URL Shortener pages</span>
+                          <h4 className="text-base font-bold text-slate-200">📢 Dynamic OnClickA Banner Manager</h4>
+                          <span className="text-xs text-slate-500 font-mono">Setup multi-position OnClickA Banners for landing pages</span>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <div>
-                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Enable Banner Ads</label>
+                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Enable Banner Ads Globally</label>
                             <select
                               id="banner-ads-enabled"
                               value={userShortenerSettings.bannerAdsEnabled !== false ? "true" : "false"}
@@ -4455,25 +4459,34 @@ export default function AdminDashboard() {
                             </select>
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Total Banner Slots (1-20)</label>
+                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Total Banner Ads (0-20)</label>
                             <input
-                              id="total-banner-slots"
+                              id="total-banner-ads"
                               type="number"
                               min="0"
                               max="20"
-                              value={userShortenerSettings.totalBannerSlots || 0}
+                              value={userShortenerSettings.totalBannerAds || 0}
                               onChange={(e) => {
-                                const slotsCount = Math.max(0, Math.min(20, Number(e.target.value)));
+                                const count = Math.max(0, Math.min(20, Number(e.target.value)));
                                 setUserShortenerSettings((prev: any) => {
-                                  const currentIds = prev.bannerSpotIds || [];
-                                  const newIds = [];
-                                  for (let i = 0; i < slotsCount; i++) {
-                                    newIds.push(currentIds[i] !== undefined ? currentIds[i] : "");
+                                  const prevBanners = prev.onclickaBanners || [];
+                                  const newBanners = [];
+                                  for (let i = 0; i < count; i++) {
+                                    if (prevBanners[i]) {
+                                      newBanners.push(prevBanners[i]);
+                                    } else {
+                                      newBanners.push({
+                                        spotId: "",
+                                        size: "728x90",
+                                        enabled: true,
+                                        position: "Header"
+                                      });
+                                    }
                                   }
                                   return {
                                     ...prev,
-                                    totalBannerSlots: slotsCount,
-                                    bannerSpotIds: newIds
+                                    totalBannerAds: count,
+                                    onclickaBanners: newBanners
                                   };
                                 });
                               }}
@@ -4483,33 +4496,103 @@ export default function AdminDashboard() {
                           </div>
                         </div>
 
-                        {userShortenerSettings.totalBannerSlots > 0 && (
+                        {userShortenerSettings.totalBannerAds > 0 && (
                           <div className="bg-slate-950 border border-slate-850 rounded-xl p-5 space-y-4">
-                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Configure Spot IDs for Banner Slots</label>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                              {Array.from({ length: userShortenerSettings.totalBannerSlots }).map((_, index) => {
-                                const currentIds = userShortenerSettings.bannerSpotIds || [];
-                                const val = currentIds[index] !== undefined ? currentIds[index] : "";
+                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Dynamic Banner List</label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                              {(userShortenerSettings.onclickaBanners || []).map((banner: any, index: number) => {
                                 return (
-                                  <div key={index} className="space-y-1.5">
-                                    <label className="block text-[11px] font-medium text-slate-400">Banner {index + 1} Spot ID</label>
-                                    <input
-                                      id={`banner-spot-id-${index}`}
-                                      type="number"
-                                      value={val}
-                                      onChange={(e) => {
-                                        setUserShortenerSettings((prev: any) => {
-                                          const nextIds = [...(prev.bannerSpotIds || [])];
-                                          nextIds[index] = e.target.value !== "" ? Number(e.target.value) : "";
-                                          return {
-                                            ...prev,
-                                            bannerSpotIds: nextIds
-                                          };
-                                        });
-                                      }}
-                                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono font-bold"
-                                      placeholder="e.g. 447111"
-                                    />
+                                  <div key={index} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3.5 relative">
+                                    <div className="flex justify-between items-center border-b border-slate-800 pb-1.5">
+                                      <span className="text-xs font-bold text-indigo-400">Banner {index + 1}</span>
+                                      <label className="flex items-center gap-1.5 cursor-pointer">
+                                        <span className="text-[10px] text-slate-400 font-semibold">{banner.enabled !== false ? "🟢 Active" : "🔴 Inactive"}</span>
+                                        <input
+                                          type="checkbox"
+                                          checked={banner.enabled !== false}
+                                          onChange={(e) => {
+                                            setUserShortenerSettings((prev: any) => {
+                                              const nextBanners = [...(prev.onclickaBanners || [])];
+                                              nextBanners[index] = {
+                                                ...nextBanners[index],
+                                                enabled: e.target.checked
+                                              };
+                                              return { ...prev, onclickaBanners: nextBanners };
+                                            });
+                                          }}
+                                          className="accent-indigo-500 rounded cursor-pointer w-3.5 h-3.5"
+                                        />
+                                      </label>
+                                    </div>
+                                    
+                                    <div className="space-y-2">
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Spot ID</label>
+                                        <input
+                                          type="text"
+                                          value={banner.spotId || ""}
+                                          onChange={(e) => {
+                                            setUserShortenerSettings((prev: any) => {
+                                              const nextBanners = [...(prev.onclickaBanners || [])];
+                                              nextBanners[index] = {
+                                                ...nextBanners[index],
+                                                spotId: e.target.value
+                                              };
+                                              return { ...prev, onclickaBanners: nextBanners };
+                                            });
+                                          }}
+                                          className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono font-bold"
+                                          placeholder="e.g. 447111"
+                                        />
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Banner Size</label>
+                                        <select
+                                          value={banner.size || "728x90"}
+                                          onChange={(e) => {
+                                            setUserShortenerSettings((prev: any) => {
+                                              const nextBanners = [...(prev.onclickaBanners || [])];
+                                              nextBanners[index] = {
+                                                ...nextBanners[index],
+                                                size: e.target.value
+                                              };
+                                              return { ...prev, onclickaBanners: nextBanners };
+                                            });
+                                          }}
+                                          className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                        >
+                                          <option value="728x90">728x90 (Leaderboard)</option>
+                                          <option value="320x50">320x50 (Mobile Banner)</option>
+                                          <option value="300x250">300x250 (Square)</option>
+                                          <option value="160x600">160x600 (Skyscraper)</option>
+                                          <option value="468x60">468x60 (Standard Banner)</option>
+                                        </select>
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Position</label>
+                                        <select
+                                          value={banner.position || "Header"}
+                                          onChange={(e) => {
+                                            setUserShortenerSettings((prev: any) => {
+                                              const nextBanners = [...(prev.onclickaBanners || [])];
+                                              nextBanners[index] = {
+                                                ...nextBanners[index],
+                                                position: e.target.value
+                                              };
+                                              return { ...prev, onclickaBanners: nextBanners };
+                                            });
+                                          }}
+                                          className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                                        >
+                                          <option value="Header">Header (Top of main area)</option>
+                                          <option value="Above Verify">Above Verify (Inside verification card)</option>
+                                          <option value="Below Verify">Below Verify (Inside verification card)</option>
+                                          <option value="Footer">Footer (Bottom of main area)</option>
+                                        </select>
+                                      </div>
+                                    </div>
                                   </div>
                                 );
                               })}
@@ -4522,7 +4605,7 @@ export default function AdminDashboard() {
                       <div className="border-t border-slate-800 pt-6 space-y-4">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                           <h4 className="text-base font-bold text-slate-200">📄 Dynamic Step Configurations (PAGE SETTINGS)</h4>
-                          <span className="text-xs text-slate-500 font-mono">Select a page step to configure individual settings & ads</span>
+                          <span className="text-xs text-slate-500 font-mono">Select a page step to configure individual settings</span>
                         </div>
 
                         {/* Horizontal selector for activePageTab */}
@@ -4618,85 +4701,6 @@ export default function AdminDashboard() {
                                     <option value="false">🔴 Disabled (Direct Unlock)</option>
                                   </select>
                                 </div>
-                              </div>
-
-                              {/* Ads selection */}
-                              <div className="space-y-3">
-                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Select Ads for Step {activePageTab}</label>
-                                </div>
-
-                                {(() => {
-                                  const activeAds = ads.filter(ad => ad.status === '🟢 Active' || String(ad.status).includes('Active') || String(ad.status).includes('🟢'));
-                                  if (activeAds.length === 0) {
-                                    return <p className="text-xs text-slate-500 bg-slate-900 p-3 rounded-lg border border-slate-800 text-center font-semibold">No Active Ads in Ads Manager. Please configure some active ads under the Ads Manager tab first!</p>;
-                                  }
-
-                                  // Group ads by network (adSource)
-                                  const groupedAds: { [network: string]: any[] } = {};
-                                  activeAds.forEach(ad => {
-                                    const network = ad.adSource || "Unknown Network";
-                                    if (!groupedAds[network]) {
-                                      groupedAds[network] = [];
-                                    }
-                                    groupedAds[network].push(ad);
-                                  });
-
-                                  // Sort networks alphabetically
-                                  const sortedNetworks = Object.keys(groupedAds).sort();
-
-                                  // Within each network, sort ads by adType then adName so they are grouped by adType
-                                  sortedNetworks.forEach(network => {
-                                    groupedAds[network].sort((a, b) => {
-                                      const typeCompare = (a.adType || "").localeCompare(b.adType || "");
-                                      if (typeCompare !== 0) return typeCompare;
-                                      return (a.adName || "").localeCompare(b.adName || "");
-                                    });
-                                  });
-
-                                  return (
-                                    <div className="space-y-4 max-h-72 overflow-y-auto bg-slate-900 p-4 rounded-xl border border-slate-800">
-                                      {sortedNetworks.map(network => (
-                                        <div key={network} className="space-y-2 border-b border-slate-800/60 pb-3 last:border-b-0 last:pb-0">
-                                          <h5 className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">{network}</h5>
-                                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                                            {groupedAds[network].map((ad: any) => {
-                                              const isChecked = (pageConf.selectedAdIds || []).includes(ad.id);
-                                              return (
-                                                <div
-                                                  key={ad.id}
-                                                  onClick={() => {
-                                                    const currentSelected = pageConf.selectedAdIds || [];
-                                                    const nextSelected = isChecked
-                                                      ? currentSelected.filter((id: string) => id !== ad.id)
-                                                      : [...currentSelected, ad.id];
-                                                    updatePageConfField("selectedAdIds", nextSelected);
-                                                  }}
-                                                  className={`p-2.5 rounded-lg border transition-all cursor-pointer flex items-center gap-3 select-none text-left ${
-                                                    isChecked
-                                                      ? "bg-indigo-600/10 border-indigo-500/50 text-white font-medium"
-                                                      : "bg-slate-950 border-slate-850 text-slate-400 hover:border-slate-750 hover:text-slate-200"
-                                                  }`}
-                                                >
-                                                  <input
-                                                    type="checkbox"
-                                                    checked={isChecked}
-                                                    onChange={() => {}} // handled by parent onClick
-                                                    className="accent-indigo-500 rounded cursor-pointer w-4 h-4"
-                                                  />
-                                                  <div className="min-w-0 flex-1">
-                                                    <p className="text-xs font-bold text-slate-200 truncate">{ad.adName}</p>
-                                                    <p className="text-[10px] text-indigo-400 font-semibold font-mono uppercase truncate mt-0.5">{ad.adType}</p>
-                                                  </div>
-                                                </div>
-                                              );
-                                            })}
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  );
-                                })()}
                               </div>
                             </div>
                           );
