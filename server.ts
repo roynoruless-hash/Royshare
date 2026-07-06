@@ -5556,6 +5556,28 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       let itemData: any = null;
       let docRef: any = null;
       let col = type === "shortener" ? "links" : "uploads";
+      let globalSettings: any = {
+        totalPages: 1,
+        instructions: "Follow the steps below to reach your destination.",
+        autoScroll: true,
+        autoRedirect: true,
+        continueButtonText: "Proceed",
+        verifyButtonText: "Verify This Step",
+        humanVerification: true,
+        vpnDetection: false,
+        botDetection: true,
+        bannerAdsEnabled: false,
+        totalBannerSlots: 0,
+        bannerSpotIds: [],
+        pagesConfig: []
+      };
+
+      let adSettings: any = {
+        onclickaEnabled: false,
+        onclickaSdkScript: "",
+        onclickaSdkSpotId: "",
+        onclickaBannerSize: "728x90"
+      };
 
       // Requirement 6: Debug log - Link ID received
       console.log(`[DEBUG SHORTENER] Link ID received: "${id}"`);
@@ -5644,25 +5666,35 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
 
         // Fetch Global Configuration Defaults
-        let globalSettings: any = {
-          totalPages: 1,
-          instructions: "Follow the steps below to reach your destination.",
-          autoScroll: true,
-          autoRedirect: true,
-          continueButtonText: "Proceed",
-          verifyButtonText: "Verify This Step",
-          humanVerification: true,
-          vpnDetection: false,
-          botDetection: true,
-          pagesConfig: []
-        };
         try {
           const userSettingsSnap = await getDoc(doc(db, "settings", "user_shortener_config"));
           if (userSettingsSnap.exists()) {
-            globalSettings = userSettingsSnap.data();
+            globalSettings = { ...globalSettings, ...userSettingsSnap.data() };
           }
         } catch (err) {
           console.error("Error fetching global shortener settings config:", err);
+        }
+
+        // Fetch OnClickA Advertisement Settings
+        adSettings = {
+          onclickaEnabled: false,
+          onclickaSdkScript: "",
+          onclickaSdkSpotId: "",
+          onclickaBannerSize: "728x90"
+        };
+        try {
+          const adSettingsSnap = await getDoc(doc(db, "settings", "advertisement"));
+          if (adSettingsSnap.exists()) {
+            const adData = adSettingsSnap.data();
+            adSettings = {
+              onclickaEnabled: adData.onclickaEnabled ?? false,
+              onclickaSdkScript: adData.onclickaSdkScript || "",
+              onclickaSdkSpotId: adData.onclickaSdkSpotId || "",
+              onclickaBannerSize: adData.onclickaBannerSize || "728x90"
+            };
+          }
+        } catch (err) {
+          console.error("Error fetching global advertisement settings config:", err);
         }
 
         // Requirement 9: Apply configuration logic
@@ -5823,6 +5855,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         sessionId,
         totalPages,
         pagesConfig,
+        bannerAdsEnabled: globalSettings.bannerAdsEnabled ?? false,
+        totalBannerSlots: globalSettings.totalBannerSlots ?? 0,
+        bannerSpotIds: globalSettings.bannerSpotIds ?? [],
+        onclickaEnabled: adSettings.onclickaEnabled ?? false,
+        onclickaSdkScript: adSettings.onclickaSdkScript || "",
+        onclickaSdkSpotId: adSettings.onclickaSdkSpotId || "",
+        onclickaBannerSize: adSettings.onclickaBannerSize || "728x90",
         data: publicItemData
       });
 
@@ -6405,7 +6444,13 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const docRef = doc(db, "settings", "user_shortener_config");
       const snap = await getDoc(docRef);
       if (snap.exists()) {
-        res.json(snap.data());
+        const data = snap.data();
+        res.json({
+          ...data,
+          bannerAdsEnabled: data.bannerAdsEnabled ?? false,
+          totalBannerSlots: data.totalBannerSlots ?? 0,
+          bannerSpotIds: data.bannerSpotIds ?? []
+        });
       } else {
         const defaultUserSettings = {
           totalPages: 2,

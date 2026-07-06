@@ -3,7 +3,6 @@ import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Gift, Disc, AlertTriangle, ArrowLeft, Star, Package, CreditCard, ChevronRight, Trophy } from "lucide-react";
 import confetti from "canvas-confetti";
-import { OnClickAAd } from "../components/OnClickAAd";
 
 // --- Types ---
 interface RewardItem {
@@ -616,7 +615,6 @@ export default function DailyBonusPage() {
 
   return (
     <div className="min-h-screen bg-[#020617] text-white font-sans flex flex-col">
-      <OnClickAAd pageName="daily-bonus" isDailyBonusScratchActive={activeView === 'scratch' && scratchedPercent < 100} />
       {/* Header */}
       <header className="p-5 border-b border-slate-900 bg-slate-950/50 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-md mx-auto flex items-center justify-between">

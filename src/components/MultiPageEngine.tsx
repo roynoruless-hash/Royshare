@@ -3,7 +3,22 @@ import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, ShieldAlert, ArrowRight, Download, ExternalLink, CheckCircle2 } from "lucide-react";
 import AnimatedBackground from "./AnimatedBackground";
-import { OnClickAAd } from "./OnClickAAd";
+
+// ----------------- OnClickA Banner -----------------
+interface OnClickABannerProps {
+  adSpotId: number | string;
+}
+
+export function OnClickABanner({ adSpotId }: OnClickABannerProps) {
+  return (
+    <div className="w-full flex justify-center items-center my-4 overflow-hidden min-h-[90px] bg-slate-950/20 border border-white/5 rounded-xl p-2">
+      <div 
+        data-banner-id={String(adSpotId)} 
+        className="flex justify-center items-center w-full max-w-[728px] overflow-hidden" 
+      />
+    </div>
+  );
+}
 
 // ----------------- Error Boundary -----------------
 interface ErrorBoundaryProps {
@@ -108,6 +123,50 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const [showVerifyButton, setShowVerifyButton] = useState(false);
   const [verifyClicked, setVerifyClicked] = useState(false);
 
+  // Banner ad states
+  const [bannerAdsEnabled, setBannerAdsEnabled] = useState(false);
+  const [totalBannerSlots, setTotalBannerSlots] = useState(0);
+  const [bannerSpotIds, setBannerSpotIds] = useState<any[]>([]);
+
+  // OnClickA states
+  const [onclickaEnabled, setOnclickaEnabled] = useState(false);
+  const [onclickaSdkScript, setOnclickaSdkScript] = useState("");
+  const [onclickaSdkSpotId, setOnclickaSdkSpotId] = useState("");
+  const [onclickaBannerSize, setOnclickaBannerSize] = useState("");
+
+  // Inject OnClickA script exactly once if enabled globally
+  useEffect(() => {
+    if (!onclickaEnabled || !onclickaSdkScript) return;
+
+    // Parse src url from onclickaSdkScript
+    const srcMatch = onclickaSdkScript.match(/src\s*=\s*["'](https:\/\/[^"']+)["']/i);
+    if (!srcMatch || !srcMatch[1]) {
+      console.warn("[OnClickA] Could not parse src attribute from SDK Script");
+      return;
+    }
+    const srcUrl = srcMatch[1];
+
+    // Check if script already exists
+    const existingScript = document.querySelector(`script[src="${srcUrl}"]`);
+    if (existingScript) {
+      console.log("[OnClickA] SDK script already exists in head");
+      return;
+    }
+
+    console.log("[OnClickA] Injecting centralized SDK Script:", srcUrl);
+    const script = document.createElement("script");
+    script.src = srcUrl;
+    script.async = true;
+
+    // Extract other attributes like data-admpid
+    const pidMatch = onclickaSdkScript.match(/data-admpid\s*=\s*["']([^"']+)["']/i);
+    if (pidMatch && pidMatch[1]) {
+      script.setAttribute("data-admpid", pidMatch[1]);
+    }
+    
+    document.head.appendChild(script);
+  }, [onclickaEnabled, onclickaSdkScript]);
+
   // Bottom scroll reference
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -203,6 +262,13 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
         setSessionId(initData.sessionId);
         setTotalPages(initData.totalPages || 1);
         setPagesConfig(initData.pagesConfig || []);
+        setBannerAdsEnabled(initData.bannerAdsEnabled ?? false);
+        setTotalBannerSlots(initData.totalBannerSlots ?? 0);
+        setBannerSpotIds(initData.bannerSpotIds ?? []);
+        setOnclickaEnabled(initData.onclickaEnabled ?? false);
+        setOnclickaSdkScript(initData.onclickaSdkScript || "");
+        setOnclickaSdkSpotId(initData.onclickaSdkSpotId || "");
+        setOnclickaBannerSize(initData.onclickaBannerSize || "");
         
         // Setup Page 1 Timer
         const page1Config = initData.pagesConfig?.find((p: any) => p.pageNumber === 1);
@@ -501,7 +567,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   return (
     <div className="min-h-screen relative text-slate-200 font-sans flex flex-col justify-between overflow-hidden">
       <AnimatedBackground />
-      <OnClickAAd pageName={type} />
 
       {/* Header */}
       <header className="relative z-10 w-full max-w-7xl mx-auto px-6 py-4 flex items-center justify-between border-b border-white/5 bg-slate-950/20 backdrop-blur-sm">
@@ -514,7 +579,16 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
       </header>
 
       {/* Main Content Arena */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6">
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 w-full max-w-7xl mx-auto">
+        {/* OnClickA Top Header Banners */}
+        {onclickaEnabled && bannerAdsEnabled && bannerSpotIds.length > 0 && (
+          <div className="w-full flex flex-col items-center gap-4 mb-6">
+            {bannerSpotIds.slice(0, 2).map((spotId, index) => (
+              <OnClickABanner key={`top-banner-${spotId}-${index}`} adSpotId={spotId} />
+            ))}
+          </div>
+        )}
+
         <div className="w-full max-w-xl bg-slate-900/80 backdrop-blur-md rounded-2xl p-8 border border-white/10 shadow-2xl space-y-6">
           <AnimatePresence mode="wait">
             {!isFinalStep ? (
@@ -786,6 +860,15 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
             )}
           </AnimatePresence>
         </div>
+
+        {/* OnClickA Bottom Banners */}
+        {onclickaEnabled && bannerAdsEnabled && bannerSpotIds.length > 2 && (
+          <div className="w-full flex flex-col items-center gap-4 mt-6">
+            {bannerSpotIds.slice(2).map((spotId, index) => (
+              <OnClickABanner key={`bottom-banner-${spotId}-${index}`} adSpotId={spotId} />
+            ))}
+          </div>
+        )}
       </main>
 
       {/* Footer */}

@@ -12,18 +12,3 @@
   }
 }
 
-/* Ensure OnClickA or any floating overlay ad is hidden on prohibited pages */
-body.ads-blocked .onclicka-ad-container,
-body.ads-blocked [id^="wa-"],
-body.ads-blocked [class^="wa-"],
-body.ads-blocked iframe[src*="onclicka"],
-body.ads-blocked iframe[src*="clickadu"],
-body.ads-blocked iframe[src*="groleeguls"],
-body.ads-blocked div[style*="position: fixed"][style*="z-index"],
-body.ads-blocked div[style*="position:absolute"][style*="z-index"] {
-  display: none !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-  opacity: 0 !important;
-}
-

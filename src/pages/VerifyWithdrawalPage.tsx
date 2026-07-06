@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../config/api';
 import { motion } from 'framer-motion';
-import { OnClickAAd } from '../components/OnClickAAd';
 
 export default function VerifyWithdrawalPage({ userId }: { userId: string }) {
   const [loading, setLoading] = useState(true);
@@ -77,7 +76,6 @@ export default function VerifyWithdrawalPage({ userId }: { userId: string }) {
 
   return (
     <div className="min-h-screen bg-[#020617] text-white p-4 flex flex-col items-center justify-center">
-      <OnClickAAd pageName={success ? "history" : "human-verification"} />
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
