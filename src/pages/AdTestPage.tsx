@@ -21,11 +21,14 @@ import {
 
 interface DebugLog {
   scriptLoaded: "PASS" | "FAIL" | "PENDING";
+  bannerContainerFound: "PASS" | "FAIL" | "PENDING";
   sdkInitialized: "PASS" | "FAIL" | "PENDING";
   requestSent: "PASS" | "FAIL" | "PENDING";
   httpStatus: string;
   response: string;
   adRendered: "PASS" | "FAIL" | "PENDING";
+  fillStatus: "Yes" | "No" | "PENDING";
+  liveAdPreview: "PASS" | "FAIL" | "PENDING";
   sdkError: string;
   failureReason: string;
 }
@@ -53,6 +56,7 @@ export default function AdTestPage() {
     verified: boolean;
     script: string;
     network: string;
+    bannerContainerCode: string;
   } | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -60,11 +64,14 @@ export default function AdTestPage() {
   
   const [debugLog, setDebugLog] = useState<DebugLog>({
     scriptLoaded: "PENDING",
+    bannerContainerFound: "PENDING",
     sdkInitialized: "PENDING",
     requestSent: "PENDING",
     httpStatus: "N/A",
     response: "Awaiting initialization...",
     adRendered: "PENDING",
+    fillStatus: "PENDING",
+    liveAdPreview: "PENDING",
     sdkError: "None detected",
     failureReason: "None detected"
   });
@@ -125,11 +132,14 @@ export default function AdTestPage() {
 
     const initialDebugLog: DebugLog = {
       scriptLoaded: "PENDING",
+      bannerContainerFound: "PENDING",
       sdkInitialized: "PENDING",
       requestSent: "PENDING",
       httpStatus: "N/A",
       response: "Running audit...",
       adRendered: "PENDING",
+      fillStatus: "PENDING",
+      liveAdPreview: "PENDING",
       sdkError: "None detected",
       failureReason: "None detected"
     };
@@ -274,15 +284,21 @@ export default function AdTestPage() {
     // 4. Setup MutationObserver to watch for iframe/ad elements reactively
     const observer = new MutationObserver(() => {
       const container = document.getElementById("onclicka-inpage-ad-stage");
-      const hasChild = container && container.children.length > 0;
-      const iframePresent = !!document.querySelector('iframe[src*="onclicka"]') || 
+      const bannerElInStage = container?.firstElementChild;
+      const hasInjectedContent = bannerElInStage && bannerElInStage.childNodes.length > 0;
+      const iframePresent = container && (
+                            !!container.querySelector('iframe') ||
+                            !!document.querySelector('iframe[src*="onclicka"]') || 
                             !!document.querySelector('iframe[src*="clickadu"]') || 
                             !!document.querySelector('[id^="wa-"] iframe') || 
-                            !!document.querySelector('[class^="wa-"] iframe');
+                            !!document.querySelector('[class^="wa-"] iframe')
+                          );
 
-      if (hasChild || iframePresent) {
+      if (hasInjectedContent || iframePresent) {
         addLogRef.current("[RENDERED] OnClickA advertisement rendered (iframe or container nodes detected)!");
         updateDebugRef.current("adRendered", "PASS");
+        updateDebugRef.current("fillStatus", "Yes");
+        updateDebugRef.current("liveAdPreview", "PASS");
       }
     });
 
@@ -306,8 +322,9 @@ export default function AdTestPage() {
       setAdConfig({
         enabled: dbConfig.enabled ?? false,
         verified: dbConfig.verified ?? false,
-        script: dbConfig.script || "",
-        network: dbConfig.network || "onclicka"
+        script: dbConfig.adsScriptCode || dbConfig.script || "",
+        network: dbConfig.network || "onclicka",
+        bannerContainerCode: dbConfig.bannerContainerCode || dbConfig.bannerContainer || ""
       });
     } catch (err: any) {
       addLogRef.current(`Error fetching Firestore config: ${err.message}`);
@@ -367,6 +384,19 @@ export default function AdTestPage() {
     if (existingScript) {
       addLogRef.current("Step 2: OnClickA script tag is ALREADY present in document.head. Respecting single-injection rule.");
       updateLocalDebug("scriptLoaded", "PASS");
+
+      // Inject the Banner Container HTML into the preview area!
+      addLogRef.current("Injecting Banner Container HTML into the staging target...");
+      const bannerContainerCode = dbConfig.bannerContainerCode || dbConfig.bannerContainer || "";
+      const targetStage = document.getElementById("onclicka-inpage-ad-stage");
+      if (targetStage) {
+        targetStage.innerHTML = bannerContainerCode;
+        addLogRef.current("✅ Banner Container HTML successfully injected into the staging target!");
+        updateLocalDebug("bannerContainerFound", "PASS");
+      } else {
+        addLogRef.current("❌ Error: Staging target #onclicka-inpage-ad-stage not found.");
+        updateLocalDebug("bannerContainerFound", "FAIL");
+      }
     } else {
       addLogRef.current("Step 2: No existing OnClickA script tag found. Injecting script tag once...");
       const scriptEl = document.createElement("script");
@@ -391,11 +421,25 @@ export default function AdTestPage() {
         addLogRef.current("OnClickA script loaded successfully (onload triggered).");
         updateLocalDebug("scriptLoaded", "PASS");
         (window as any).__onclickaScriptLoaded = true;
+
+        // Inject the Banner Container HTML into the preview area!
+        addLogRef.current("Injecting Banner Container HTML into the staging target...");
+        const bannerContainerCode = dbConfig.bannerContainerCode || dbConfig.bannerContainer || "";
+        const targetStage = document.getElementById("onclicka-inpage-ad-stage");
+        if (targetStage) {
+          targetStage.innerHTML = bannerContainerCode;
+          addLogRef.current("✅ Banner Container HTML successfully injected into the staging target!");
+          updateLocalDebug("bannerContainerFound", "PASS");
+        } else {
+          addLogRef.current("❌ Error: Staging target #onclicka-inpage-ad-stage not found.");
+          updateLocalDebug("bannerContainerFound", "FAIL");
+        }
       } else {
         addLogRef.current("OnClickA script failed to load (or timed out). AdBlocker or CSP blocked execution.");
         updateLocalDebug("scriptLoaded", "FAIL");
         updateLocalDebug("failureReason", "Network blocked script (AdBlocker or Content Security Policy blocked onclicka.js)");
         (window as any).__onclickaScriptLoaded = false;
+        updateLocalDebug("bannerContainerFound", "FAIL");
         
         // Finalize immediately
         setLoading(false);
@@ -514,18 +558,32 @@ export default function AdTestPage() {
 
     // Final DOM render check
     const container = document.getElementById("onclicka-inpage-ad-stage");
-    const hasChild = container && container.children.length > 0;
-    const iframePresent = !!document.querySelector('iframe[src*="onclicka"]') || 
+    const bannerElInStage = container?.firstElementChild;
+    const hasInjectedContent = bannerElInStage && bannerElInStage.childNodes.length > 0;
+    const iframePresent = container && (
+                          !!container.querySelector('iframe') ||
+                          !!document.querySelector('iframe[src*="onclicka"]') || 
                           !!document.querySelector('iframe[src*="clickadu"]') || 
                           !!document.querySelector('[id^="wa-"] iframe') || 
-                          !!document.querySelector('[class^="wa-"] iframe');
+                          !!document.querySelector('[class^="wa-"] iframe')
+                        );
 
-    if (hasChild || iframePresent) {
+    if (hasInjectedContent || iframePresent) {
       updateLocalDebug("adRendered", "PASS");
+      updateLocalDebug("fillStatus", "Yes");
+      updateLocalDebug("liveAdPreview", "PASS");
     }
 
     // 8. Compile Final Report
     addLogRef.current("Step 4: Observation window closed. Compiling final report...");
+
+    if (localDebugLog.bannerContainerFound === "PENDING") {
+      if (container && container.innerHTML.trim().length > 0) {
+        updateLocalDebug("bannerContainerFound", "PASS");
+      } else {
+        updateLocalDebug("bannerContainerFound", "FAIL");
+      }
+    }
 
     if (localDebugLog.sdkInitialized === "PENDING") {
       updateLocalDebug("sdkInitialized", "FAIL");
@@ -541,8 +599,10 @@ export default function AdTestPage() {
       }
     }
 
-    if (localDebugLog.adRendered === "PENDING") {
+    if (localDebugLog.adRendered === "PENDING" || localDebugLog.adRendered === "FAIL") {
       updateLocalDebug("adRendered", "FAIL");
+      updateLocalDebug("fillStatus", "No");
+      updateLocalDebug("liveAdPreview", "FAIL");
       if (localDebugLog.requestSent === "PASS") {
         let reason = "No fill";
         const errorMsg = localDebugLog.sdkError.toLowerCase();
@@ -561,7 +621,7 @@ export default function AdTestPage() {
       }
     }
 
-    if (localDebugLog.scriptLoaded === "PASS" && localDebugLog.sdkInitialized === "PASS" && localDebugLog.requestSent === "PASS" && localDebugLog.adRendered === "PASS") {
+    if (localDebugLog.scriptLoaded === "PASS" && localDebugLog.bannerContainerFound === "PASS" && localDebugLog.sdkInitialized === "PASS" && localDebugLog.requestSent === "PASS" && localDebugLog.adRendered === "PASS") {
       updateLocalDebug("failureReason", "None (All direct SDK namespace audit indicators passed successfully!)");
     }
 
@@ -663,25 +723,32 @@ export default function AdTestPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 border-t border-b border-slate-800 py-4 my-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 border-t border-b border-slate-800 py-4 my-4">
                 <div>
-                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Script Loaded</span>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Loader Script Loaded</span>
                   <span className={`text-sm font-semibold font-mono ${debugLog.scriptLoaded === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
-                    {debugLog.scriptLoaded === "PASS" ? "PASS" : "FAIL"}
+                    {debugLog.scriptLoaded}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Banner Container Found</span>
+                  <span className={`text-sm font-semibold font-mono ${debugLog.bannerContainerFound === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
+                    {debugLog.bannerContainerFound}
                   </span>
                 </div>
                 
                 <div>
                   <span className="text-[10px] text-slate-500 font-mono uppercase block">SDK Initialized</span>
                   <span className={`text-sm font-semibold font-mono ${debugLog.sdkInitialized === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
-                    {debugLog.sdkInitialized === "PASS" ? "PASS" : "FAIL"}
+                    {debugLog.sdkInitialized}
                   </span>
                 </div>
 
                 <div>
                   <span className="text-[10px] text-slate-500 font-mono uppercase block">Request Sent</span>
                   <span className={`text-sm font-semibold font-mono ${debugLog.requestSent === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
-                    {debugLog.requestSent === "PASS" ? "PASS" : "FAIL"}
+                    {debugLog.requestSent}
                   </span>
                 </div>
 
@@ -695,14 +762,21 @@ export default function AdTestPage() {
                 <div>
                   <span className="text-[10px] text-slate-500 font-mono uppercase block">Ad Rendered</span>
                   <span className={`text-sm font-semibold font-mono ${debugLog.adRendered === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
-                    {debugLog.adRendered === "PASS" ? "PASS" : "FAIL"}
+                    {debugLog.adRendered}
                   </span>
                 </div>
 
                 <div>
-                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Audit Result</span>
-                  <span className={`text-sm font-semibold font-mono ${debugLog.adRendered === "PASS" ? "text-emerald-400" : "text-amber-400"}`}>
-                    {debugLog.adRendered === "PASS" ? "SUCCESS" : "FAILED / BLOCKED"}
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Fill Status</span>
+                  <span className={`text-sm font-semibold font-mono ${debugLog.fillStatus === "Yes" ? "text-emerald-400" : "text-rose-400"}`}>
+                    {debugLog.fillStatus}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-slate-500 font-mono uppercase block">Live Ad Preview</span>
+                  <span className={`text-sm font-semibold font-mono ${debugLog.liveAdPreview === "PASS" ? "text-emerald-400" : "text-rose-400"}`}>
+                    {debugLog.liveAdPreview}
                   </span>
                 </div>
               </div>
@@ -716,7 +790,7 @@ export default function AdTestPage() {
             </div>
           )}
 
-          {/* Main 6 Core States Dashboard */}
+          {/* Main 8 Core States Dashboard */}
           <div className="bg-slate-900/60 backdrop-blur-md rounded-xl border border-slate-800 p-6 shadow-2xl">
             <div className="flex items-center gap-2 mb-4 border-b border-slate-800 pb-3">
               <Layers className="w-5 h-5 text-blue-500" />
@@ -725,18 +799,18 @@ export default function AdTestPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               
-              {/* Core State 1: Script Loaded */}
+              {/* Core State 1: Loader Script Loaded */}
               <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex flex-col justify-between h-28">
                 <div className="flex items-start justify-between">
-                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">1. Script Loaded Successfully</div>
+                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">1. Loader Script Loaded</div>
                   <div>
                     {debugLog.scriptLoaded === "PASS" ? (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-bold">
-                        <Check className="w-3 h-3" /> YES
+                        <Check className="w-3 h-3" /> PASS
                       </span>
                     ) : debugLog.scriptLoaded === "FAIL" ? (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-bold">
-                        <XCircle className="w-3 h-3" /> NO
+                        <XCircle className="w-3 h-3" /> FAIL
                       </span>
                     ) : (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full font-bold">
@@ -750,18 +824,43 @@ export default function AdTestPage() {
                 </div>
               </div>
 
-              {/* Core State 2: SDK Initialized */}
+              {/* Core State 2: Banner Container Found */}
               <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex flex-col justify-between h-28">
                 <div className="flex items-start justify-between">
-                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">2. SDK Initialized Successfully</div>
+                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">2. Banner Container Found</div>
+                  <div>
+                    {debugLog.bannerContainerFound === "PASS" ? (
+                      <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-bold">
+                        <Check className="w-3 h-3" /> PASS
+                      </span>
+                    ) : debugLog.bannerContainerFound === "FAIL" ? (
+                      <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-bold">
+                        <XCircle className="w-3 h-3" /> FAIL
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full font-bold">
+                        <Loader2 className="w-3 h-3 animate-spin" /> PENDING
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-xs text-slate-400 font-mono mt-2">
+                  <span className="text-slate-500">Evidence:</span> {debugLog.bannerContainerFound === "PASS" ? "Staging area container found" : "Container not found in page"}
+                </div>
+              </div>
+
+              {/* Core State 3: SDK Initialized */}
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex flex-col justify-between h-28">
+                <div className="flex items-start justify-between">
+                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">3. SDK Initialized</div>
                   <div>
                     {debugLog.sdkInitialized === "PASS" ? (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-bold">
-                        <Check className="w-3 h-3" /> YES
+                        <Check className="w-3 h-3" /> PASS
                       </span>
                     ) : debugLog.sdkInitialized === "FAIL" ? (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-bold">
-                        <XCircle className="w-3 h-3" /> NO
+                        <XCircle className="w-3 h-3" /> FAIL
                       </span>
                     ) : (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full font-bold">
@@ -775,18 +874,18 @@ export default function AdTestPage() {
                 </div>
               </div>
 
-              {/* Core State 3: Request Sent */}
+              {/* Core State 4: Request Sent */}
               <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex flex-col justify-between h-28">
                 <div className="flex items-start justify-between">
-                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">3. Ad Request Sent to OnClickA</div>
+                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">4. Request Sent</div>
                   <div>
                     {debugLog.requestSent === "PASS" ? (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-bold">
-                        <Check className="w-3 h-3" /> YES
+                        <Check className="w-3 h-3" /> PASS
                       </span>
                     ) : debugLog.requestSent === "FAIL" ? (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-bold">
-                        <XCircle className="w-3 h-3" /> NO
+                        <XCircle className="w-3 h-3" /> FAIL
                       </span>
                     ) : (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full font-bold">
@@ -800,16 +899,56 @@ export default function AdTestPage() {
                 </div>
               </div>
 
-              {/* Core State 4: Ad Rendered */}
+              {/* Core State 5: HTTP Status */}
               <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex flex-col justify-between h-28">
                 <div className="flex items-start justify-between">
-                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">4. Ad Rendered Successfully</div>
+                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">5. HTTP Status</div>
+                  <div>
+                    <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full font-bold">
+                      {debugLog.httpStatus}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-xs text-slate-400 font-mono mt-2">
+                  <span className="text-slate-500">Latest status returned:</span> {debugLog.httpStatus}
+                </div>
+              </div>
+
+              {/* Core State 6: Ad Rendered */}
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex flex-col justify-between h-28">
+                <div className="flex items-start justify-between">
+                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">6. Ad Rendered</div>
                   <div>
                     {debugLog.adRendered === "PASS" ? (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-bold">
-                        <Check className="w-3 h-3" /> YES
+                        <Check className="w-3 h-3" /> PASS
                       </span>
                     ) : debugLog.adRendered === "FAIL" ? (
+                      <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-bold">
+                        <XCircle className="w-3 h-3" /> FAIL
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full font-bold">
+                        <Loader2 className="w-3 h-3 animate-spin" /> PENDING
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-xs text-slate-400 font-mono mt-2">
+                  <span className="text-slate-500">Evidence:</span> {debugLog.adRendered === "PASS" ? "DOM container loaded elements" : "No iframe/DOM nodes injected"}
+                </div>
+              </div>
+
+              {/* Core State 7: Fill Status */}
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex flex-col justify-between h-28">
+                <div className="flex items-start justify-between">
+                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">7. Fill Status</div>
+                  <div>
+                    {debugLog.fillStatus === "Yes" ? (
+                      <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-bold">
+                        <Check className="w-3 h-3" /> YES
+                      </span>
+                    ) : debugLog.fillStatus === "No" ? (
                       <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-bold">
                         <XCircle className="w-3 h-3" /> NO
                       </span>
@@ -821,7 +960,32 @@ export default function AdTestPage() {
                   </div>
                 </div>
                 <div className="text-xs text-slate-400 font-mono mt-2">
-                  <span className="text-slate-500">Evidence:</span> {debugLog.adRendered === "PASS" ? "DOM container loaded elements" : "No iframe/DOM nodes injected"}
+                  <span className="text-slate-500">Response:</span> {debugLog.fillStatus === "Yes" ? "Ad content loaded" : "Awaiting fill status"}
+                </div>
+              </div>
+
+              {/* Core State 8: Live Ad Preview */}
+              <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex flex-col justify-between h-28">
+                <div className="flex items-start justify-between">
+                  <div className="text-xs text-slate-400 font-mono uppercase tracking-wider">8. Live Ad Preview</div>
+                  <div>
+                    {debugLog.liveAdPreview === "PASS" ? (
+                      <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-bold">
+                        <Check className="w-3 h-3" /> PASS
+                      </span>
+                    ) : debugLog.liveAdPreview === "FAIL" ? (
+                      <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-bold">
+                        <XCircle className="w-3 h-3" /> FAIL
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-xs px-2.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full font-bold">
+                        <Loader2 className="w-3 h-3 animate-spin" /> PENDING
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-xs text-slate-400 font-mono mt-2">
+                  <span className="text-slate-500">Live preview:</span> {debugLog.liveAdPreview === "PASS" ? "Live Ad Rendering is PASS" : "Awaiting rendering"}
                 </div>
               </div>
 

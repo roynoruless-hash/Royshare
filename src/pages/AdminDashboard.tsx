@@ -140,7 +140,9 @@ export default function AdminDashboard() {
     network: "onclicka",
     enabled: false,
     verified: false,
-    script: ""
+    script: "",
+    adsScriptCode: "",
+    bannerContainerCode: ""
   });
   const [adSettingsLoading, setAdSettingsLoading] = useState(false);
   const [adSettingsFeedback, setAdSettingsFeedback] = useState("");
@@ -152,11 +154,13 @@ export default function AdminDashboard() {
   const [liveAdPreviewLogs, setLiveAdPreviewLogs] = useState<string[]>([]);
   const [liveAdPreviewStatus, setLiveAdPreviewStatus] = useState<any>({
     scriptLoaded: "PENDING",
+    bannerContainerFound: "PENDING",
     sdkInitialized: "PENDING",
     requestSent: "PENDING",
     httpStatus: "N/A",
     adRendered: "PENDING",
     fillStatus: "N/A",
+    liveAdPreview: "PENDING",
     currentDomain: "N/A",
     spotId: "N/A",
     publisherId: "N/A"
@@ -169,11 +173,13 @@ export default function AdminDashboard() {
   const liveAdPreviewNetworkLogsRef = useRef<any[]>([]);
   const liveAdPreviewStatusRef = useRef<any>({
     scriptLoaded: "PENDING",
+    bannerContainerFound: "PENDING",
     sdkInitialized: "PENDING",
     requestSent: "PENDING",
     httpStatus: "N/A",
     adRendered: "PENDING",
     fillStatus: "N/A",
+    liveAdPreview: "PENDING",
     currentDomain: "N/A",
     spotId: "N/A",
     publisherId: "N/A"
@@ -1111,7 +1117,9 @@ export default function AdminDashboard() {
           network: data.network || "onclicka",
           enabled: data.enabled ?? false,
           verified: data.verified ?? false,
-          script: data.script || ""
+          script: data.adsScriptCode || data.script || "",
+          adsScriptCode: data.adsScriptCode || data.script || "",
+          bannerContainerCode: data.bannerContainerCode || data.bannerContainer || ""
         });
         if (data.updatedAt) {
           const date = data.updatedAt.toDate ? data.updatedAt.toDate() : new Date(data.updatedAt);
@@ -1124,7 +1132,9 @@ export default function AdminDashboard() {
           network: "onclicka",
           enabled: false,
           verified: false,
-          script: ""
+          script: "",
+          adsScriptCode: "",
+          bannerContainerCode: ""
         });
         setAdSettingsLastUpdated("Never");
       }
@@ -1221,10 +1231,17 @@ export default function AdminDashboard() {
         enabled: settingsToSave.enabled,
         verified: settingsToSave.verified,
         script: settingsToSave.script,
+        adsScriptCode: settingsToSave.script,
+        bannerContainerCode: settingsToSave.bannerContainerCode || "",
+        bannerContainer: settingsToSave.bannerContainerCode || "",
         updatedAt: serverTimestamp()
       };
       await setDoc(docRef, updatedData);
-      setAdSettings(settingsToSave);
+      setAdSettings({
+        ...settingsToSave,
+        adsScriptCode: settingsToSave.script,
+        bannerContainerCode: settingsToSave.bannerContainerCode || ""
+      });
       setAdSettingsLastUpdated(new Date().toLocaleString());
       setAdSettingsFeedback("✅ Advertisement settings saved successfully!");
     } catch (err: any) {
@@ -1459,11 +1476,23 @@ export default function AdminDashboard() {
             const hasAdClass = el.className && typeof el.className === 'string' && (el.className.includes("wa-") || el.id?.startsWith("wa-"));
             
             if (isAdRelated || isTargetStage || hasAdClass) {
-              addLog("🎉 Real advertisement element or iframe injection detected in the DOM!");
-              updateStatus("adRendered", "PASS");
-              updateStatus("fillStatus", "Yes");
-              setLiveAdPreviewFinalResult("SUCCESS");
-              setLiveAdPreviewState("COMPLETED");
+              const stage = document.getElementById("onclicka-inpage-ad-stage");
+              const bannerElInStage = stage?.firstElementChild;
+              const hasInjectedContent = bannerElInStage && bannerElInStage.childNodes.length > 0;
+              const hasIframeInStage = stage && (
+                !!stage.querySelector("iframe") ||
+                !!document.querySelector('iframe[src*="onclicka"]') || 
+                !!document.querySelector('iframe[src*="clickadu"]')
+              );
+
+              if (hasInjectedContent || hasIframeInStage || isAdRelated || hasAdClass) {
+                addLog("🎉 Real advertisement element or iframe injection detected in the DOM!");
+                updateStatus("adRendered", "PASS");
+                updateStatus("fillStatus", "Yes");
+                updateStatus("liveAdPreview", "PASS");
+                setLiveAdPreviewFinalResult("SUCCESS");
+                setLiveAdPreviewState("COMPLETED");
+              }
             }
           }
         }
@@ -1472,8 +1501,14 @@ export default function AdminDashboard() {
     mutationObserver.observe(document.body, { childList: true, subtree: true });
     previewCleanupRefs.current.push(() => mutationObserver.disconnect());
     
-    // 7. Inject the script
-    addLog("Injecting SDK Script tag...");
+    // Clear preview container before script load
+    const stage = document.getElementById("onclicka-inpage-ad-stage");
+    if (stage) {
+      stage.innerHTML = "";
+    }
+
+    // 7. Inject the script into <head>
+    addLog("Injecting SDK Script tag into <head>...");
     const scriptEl = document.createElement("script");
     
     // Copy all attributes from the parsed script tag
@@ -1484,16 +1519,44 @@ export default function AdminDashboard() {
     scriptEl.onload = () => {
       addLog("✅ SDK Script tag loaded successfully (onload triggered)!");
       updateStatus("scriptLoaded", "PASS");
+
+      // Inject the Banner Container HTML into the preview area
+      addLog("Injecting Banner Container HTML into the preview area...");
+      const bannerContainerCode = adSettings.bannerContainerCode || adSettings.bannerContainer || "";
+      if (!bannerContainerCode || !bannerContainerCode.trim()) {
+        addLog("❌ Error: Banner Container Code is empty.");
+        updateStatus("bannerContainerFound", "FAIL");
+        updateStatus("liveAdPreview", "FAIL");
+        setLiveAdPreviewFinalResult("INIT_FAILED");
+        setLiveAdPreviewState("COMPLETED");
+        return;
+      }
+
+      const targetStage = document.getElementById("onclicka-inpage-ad-stage");
+      if (targetStage) {
+        targetStage.innerHTML = bannerContainerCode;
+        addLog("✅ Banner Container HTML successfully injected into the staging target!");
+        updateStatus("bannerContainerFound", "PASS");
+      } else {
+        addLog("❌ Error: Staging target #onclicka-inpage-ad-stage not found in DOM.");
+        updateStatus("bannerContainerFound", "FAIL");
+        updateStatus("liveAdPreview", "FAIL");
+        setLiveAdPreviewFinalResult("INIT_FAILED");
+        setLiveAdPreviewState("COMPLETED");
+        return;
+      }
     };
     
     scriptEl.onerror = () => {
       addLog("❌ Error loading SDK script tag (onerror triggered). Adblocker or offline network?");
       updateStatus("scriptLoaded", "FAIL");
+      updateStatus("bannerContainerFound", "FAIL");
+      updateStatus("liveAdPreview", "FAIL");
       setLiveAdPreviewFinalResult("TIMEOUT");
       setLiveAdPreviewState("COMPLETED");
     };
     
-    document.body.appendChild(scriptEl);
+    document.head.appendChild(scriptEl);
     
     previewCleanupRefs.current.push(() => {
       scriptEl.remove();
@@ -1570,6 +1633,10 @@ export default function AdminDashboard() {
           
           updateStatus("adRendered", "FAIL");
           updateStatus("fillStatus", "No");
+          updateStatus("liveAdPreview", "FAIL");
+          if (status.bannerContainerFound !== "PASS") {
+            updateStatus("bannerContainerFound", "FAIL");
+          }
           setLiveAdPreviewFinalResult(finalResult);
           return "COMPLETED";
         }
@@ -1589,11 +1656,13 @@ export default function AdminDashboard() {
     setLiveAdPreviewNetworkLogs([]);
     setLiveAdPreviewStatus({
       scriptLoaded: "PENDING",
+      bannerContainerFound: "PENDING",
       sdkInitialized: "PENDING",
       requestSent: "PENDING",
       httpStatus: "N/A",
       adRendered: "PENDING",
       fillStatus: "N/A",
+      liveAdPreview: "PENDING",
       currentDomain: "N/A",
       spotId: "N/A",
       publisherId: "N/A"
@@ -7640,6 +7709,18 @@ ${netLogsText || "No network requests captured."}
                         <p className="text-xs text-slate-500">Provide the official OnClickA script tag. Changing this script resets the verification status.</p>
                       </div>
 
+                      {/* 4. Banner Container Code Textarea */}
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-slate-300">4. Banner Container Code</label>
+                        <textarea 
+                          value={adSettings.bannerContainerCode || ""} 
+                          onChange={(e) => setAdSettings({ ...adSettings, bannerContainerCode: e.target.value })} 
+                          placeholder="Paste the HTML banner container provided by the ad network (e.g. <div data-banner-id='6122185'></div>)"
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white h-24 font-mono text-xs focus:outline-none focus:border-indigo-500"
+                        ></textarea>
+                        <p className="text-xs text-slate-500">Paste the HTML banner container provided by the ad network.</p>
+                      </div>
+
                       {/* Feedback Indicators */}
                       {adSettingsFeedback && (
                         <div className="p-4 bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs flex items-center gap-2">
@@ -7835,10 +7916,10 @@ ${netLogsText || "No network requests captured."}
                         <label className="block text-sm font-semibold text-slate-300">
                           📊 Realtime Audit Status Indicators
                         </label>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           {/* Script Loaded */}
                           <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
-                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Script Loaded</span>
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Loader Script Loaded</span>
                             <div className="flex items-center justify-between mt-1.5">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                                 liveAdPreviewStatus.scriptLoaded === "PASS"
@@ -7850,6 +7931,23 @@ ${netLogsText || "No network requests captured."}
                                 {liveAdPreviewStatus.scriptLoaded}
                               </span>
                               <FileCode className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+
+                          {/* Banner Container Found */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Banner Container Found</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                liveAdPreviewStatus.bannerContainerFound === "PASS"
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                  : liveAdPreviewStatus.bannerContainerFound === "FAIL"
+                                  ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                                  : "bg-slate-800 text-slate-400 border border-slate-700"
+                              }`}>
+                                {liveAdPreviewStatus.bannerContainerFound}
+                              </span>
+                              <Layers className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
                             </div>
                           </div>
 
@@ -7925,6 +8023,23 @@ ${netLogsText || "No network requests captured."}
                                 {liveAdPreviewStatus.fillStatus}
                               </span>
                               <Target className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
+                            </div>
+                          </div>
+
+                          {/* Live Ad Preview */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Live Ad Preview</span>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                liveAdPreviewStatus.liveAdPreview === "PASS"
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                  : liveAdPreviewStatus.liveAdPreview === "FAIL"
+                                  ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                                  : "bg-slate-800 text-slate-400 border border-slate-700"
+                              }`}>
+                                {liveAdPreviewStatus.liveAdPreview}
+                              </span>
+                              <Tv className="w-3.5 h-3.5 text-slate-500 stroke-[1.5]" />
                             </div>
                           </div>
 
