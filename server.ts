@@ -5566,31 +5566,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         humanVerification: true,
         vpnDetection: false,
         botDetection: true,
-        bannerAdsEnabled: false,
-        totalBannerSlots: 0,
-        bannerSpotIds: [],
-        totalBannerAds: 0,
-        onclickaBanners: [],
         pagesConfig: []
       };
 
-      let adSettings: any = {
-        onclickaEnabled: false,
-        onclickaSdkScript: "",
-        onclickaSdkSpotId: "",
-        onclickaBannerSize: "728x90",
-        network: "disabled",
-        ezmobEnabled: false,
-        ezmobPrebidScript: "",
-        ezmobRendererScript: "",
-        ezmobZoneId: "",
-        ezmobHost: "",
-        ezmobContainerId: "",
-        ezmobPlayerSizeMode: "auto",
-        ezmobDisplayMode: "floating",
-        ezmobEnableTransitions: true,
-        ezmobVpaidMode: true
-      };
+
 
       // Requirement 6: Debug log - Link ID received
       console.log(`[DEBUG SHORTENER] Link ID received: "${id}"`);
@@ -5686,52 +5665,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           }
         } catch (err) {
           console.error("Error fetching global shortener settings config:", err);
-        }
-
-        // Fetch OnClickA & EZMob Advertisement Settings
-        adSettings = {
-          onclickaEnabled: false,
-          onclickaSdkScript: "",
-          onclickaSdkSpotId: "",
-          onclickaBannerSize: "728x90",
-          onclickaSpots: [],
-          network: "disabled",
-          ezmobEnabled: false,
-          ezmobPrebidScript: "",
-          ezmobRendererScript: "",
-          ezmobZoneId: "",
-          ezmobHost: "",
-          ezmobContainerId: "",
-          ezmobPlayerSizeMode: "auto",
-          ezmobDisplayMode: "floating",
-          ezmobEnableTransitions: true,
-          ezmobVpaidMode: true
-        };
-        try {
-          const adSettingsSnap = await getDoc(doc(db, "settings", "advertisement"));
-          if (adSettingsSnap.exists()) {
-            const adData = adSettingsSnap.data();
-            adSettings = {
-              onclickaEnabled: adData.onclickaEnabled ?? false,
-              onclickaSdkScript: adData.onclickaSdkScript || "",
-              onclickaSdkSpotId: adData.onclickaSdkSpotId || "",
-              onclickaBannerSize: adData.onclickaBannerSize || "728x90",
-              onclickaSpots: adData.onclickaSpots || [],
-              network: adData.network || "disabled",
-              ezmobEnabled: adData.ezmobEnabled ?? (adData.network === "ezmob"),
-              ezmobPrebidScript: adData.ezmobPrebidScript || "https://royshare.online/prebid.js",
-              ezmobRendererScript: adData.ezmobRendererScript || "https://acdn.adnxs.com/video/outstream/ANOutstreamVideo.js",
-              ezmobZoneId: adData.ezmobZoneId || "",
-              ezmobHost: adData.ezmobHost || "xml.ezmob.com",
-              ezmobContainerId: adData.ezmobContainerId || "ezmob-player-container",
-              ezmobPlayerSizeMode: adData.ezmobPlayerSizeMode || "auto",
-              ezmobDisplayMode: adData.ezmobDisplayMode || "floating",
-              ezmobEnableTransitions: adData.ezmobEnableTransitions ?? true,
-              ezmobVpaidMode: adData.ezmobVpaidMode ?? true
-            };
-          }
-        } catch (err) {
-          console.error("Error fetching global advertisement settings config:", err);
         }
 
         // Requirement 9: Apply configuration logic
@@ -5893,27 +5826,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         sessionId,
         totalPages,
         pagesConfig,
-        bannerAdsEnabled: globalSettings.bannerAdsEnabled ?? false,
-        totalBannerSlots: globalSettings.totalBannerSlots ?? 0,
-        bannerSpotIds: globalSettings.bannerSpotIds ?? [],
-        totalBannerAds: globalSettings.totalBannerAds ?? 0,
-        onclickaBanners: globalSettings.onclickaBanners ?? [],
-        onclickaEnabled: adSettings.onclickaEnabled ?? false,
-        onclickaSdkScript: adSettings.onclickaSdkScript || "",
-        onclickaSdkSpotId: adSettings.onclickaSdkSpotId || "",
-        onclickaBannerSize: adSettings.onclickaBannerSize || "728x90",
-        onclickaSpots: adSettings.onclickaSpots || [],
-        network: adSettings.network || "disabled",
-        ezmobEnabled: adSettings.ezmobEnabled ?? false,
-        ezmobPrebidScript: adSettings.ezmobPrebidScript || "",
-        ezmobRendererScript: adSettings.ezmobRendererScript || "",
-        ezmobZoneId: adSettings.ezmobZoneId || "",
-        ezmobHost: adSettings.ezmobHost || "",
-        ezmobContainerId: adSettings.ezmobContainerId || "",
-        ezmobPlayerSizeMode: adSettings.ezmobPlayerSizeMode || "auto",
-        ezmobDisplayMode: adSettings.ezmobDisplayMode || "floating",
-        ezmobEnableTransitions: adSettings.ezmobEnableTransitions ?? true,
-        ezmobVpaidMode: adSettings.ezmobVpaidMode ?? true,
+
         data: publicItemData
       });
 
@@ -6552,11 +6465,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         const data = snap.data();
         res.json({
           ...data,
-          bannerAdsEnabled: data.bannerAdsEnabled ?? false,
-          totalBannerSlots: data.totalBannerSlots ?? 0,
-          bannerSpotIds: data.bannerSpotIds ?? [],
-          totalBannerAds: data.totalBannerAds ?? 0,
-          onclickaBanners: data.onclickaBanners ?? []
         });
       } else {
         const defaultUserSettings = {
