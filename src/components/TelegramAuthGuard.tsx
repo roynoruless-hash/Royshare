@@ -11,7 +11,13 @@ interface TelegramAuthGuardProps {
 export const TelegramAuthGuard: React.FC<TelegramAuthGuardProps> = ({ children, setupComponent }) => {
   const { user, loading, error, verifyAuth } = useTelegramAuth();
 
-  if (loading) {
+  // Check if we are actually in a Telegram Mini App context
+  const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
+  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const queryUserId = params?.get("userId");
+  const isMiniApp = !!(tg?.initData || queryUserId);
+
+  if (loading && isMiniApp) {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center p-6 text-center">
         <motion.div
@@ -25,7 +31,7 @@ export const TelegramAuthGuard: React.FC<TelegramAuthGuardProps> = ({ children, 
     );
   }
 
-  if (error) {
+  if (error && isMiniApp) {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center p-6 text-center">
         <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mb-6">
@@ -44,7 +50,9 @@ export const TelegramAuthGuard: React.FC<TelegramAuthGuardProps> = ({ children, 
     );
   }
 
-  if (!user) return null;
+  if (isMiniApp && !user) {
+    return setupComponent ? <>{setupComponent}</> : null;
+  }
 
   return <>{children}</>;
 };

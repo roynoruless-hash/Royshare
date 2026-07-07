@@ -1,3 +1,4 @@
+import LinkAnalyticsPage from "./LinkAnalyticsPage";
 import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
@@ -45,12 +46,136 @@ import {
   CheckCircle,
 } from "lucide-react";
 
+
+import React from 'react';
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: any;
+}
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("AdminDashboard Error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return <div className="text-white p-10 bg-red-900 min-h-screen"><h1>CRASHED: {String(this.state.error)}</h1><pre>{this.state.error && this.state.error.stack}</pre></div>;
+    }
+    return this.props.children; 
+  }
+}
+
 export default function AdminDashboard() {
+  return <ErrorBoundary><AdminDashboardContent /></ErrorBoundary>;
+}
+
+function AdminDashboardContent() {
   const [activeTab, setActiveTab] = useState("Overview");
   const [data, setData] = useState<any>(null);
+
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [aiGenSettings, setAiGenSettings] = useState<any>({});
+  const [aiPreviewRewards, setAiPreviewRewards] = useState<any>(null);
+  const [usersError, setUsersError] = useState("");
+  const [modalLoading, setModalLoading] = useState(false);
+  const [adPlacements, setAdPlacements] = useState<any>({});
+  const [adPlacementsLoading, setAdPlacementsLoading] = useState(false);
+  const [rejectionType, setRejectionType] = useState("normal");
+  const [activePageTab, setActivePageTab] = useState<number>(1);
+  const [adForm, setAdForm] = useState<any>(null);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiAnnouncing, setAiAnnouncing] = useState(false);
+  const [aiGenMessage, setAiGenMessage] = useState<any>(null);
+  
+  
+  const [aiReplying, setAiReplying] = useState(false);
+  const [analyticsLinkId, setAnalyticsLinkId] = useState("");
+  const [announcementForm, setAnnouncementForm] = useState<any>(null);
+  const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [announcementsError, setAnnouncementsError] = useState("");
+  const [announcementsLoading, setAnnouncementsLoading] = useState(false);
+  const [bonusHistory, setBonusHistory] = useState<any[]>([]);
+  const [bonusHistoryLoading, setBonusHistoryLoading] = useState(false);
+  const [bonusSearch, setBonusSearch] = useState("");
+  const [bonusSettings, setBonusSettings] = useState<any>(null);
+  const [bonusSettingsLoading, setBonusSettingsLoading] = useState(false);
+  const [bonusView, setBonusView] = useState("");
+  const [dailyBonusStats, setDailyBonusStats] = useState<any>(null);
+  const [dailyBonusStatsLoading, setDailyBonusStatsLoading] = useState(false);
+  const [generatingAI, setGeneratingAI] = useState(false);
+  const [googleDriveAccounts, setGoogleDriveAccounts] = useState<any[]>([]);
+  const [googleDriveError, setGoogleDriveError] = useState("");
+  const [googleDriveLoading, setGoogleDriveLoading] = useState(false);
+  const [modalAction, setModalAction] = useState("");
+  const [modalInput, setModalInput] = useState("");
+  const [selectedTicket, setSelectedTicket] = useState<any>(null);
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [selectedWithdrawal, setSelectedWithdrawal] = useState<any>(null);
+  const [settingsTab, setSettingsTab] = useState("");
+  const [shortenerSubTab, setShortenerSubTab] = useState("");
+  const [smartLinkForm, setSmartLinkForm] = useState<any>(null);
+  const [smartLinks, setSmartLinks] = useState<any[]>([]);
+  const [smartLinkSearch, setSmartLinkSearch] = useState("");
+  const [smartLinksError, setSmartLinksError] = useState("");
+  const [smartLinksLoading, setSmartLinksLoading] = useState(false);
+  const [supportSettings, setSupportSettings] = useState<any>(null);
+  const [supportSettingsLoading, setSupportSettingsLoading] = useState(false);
+  const [systemSettings, setSystemSettings] = useState<any>(null);
+  const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
+  const [taskForm, setTaskForm] = useState<any>(null);
+  const [taskLogs, setTaskLogs] = useState<any[]>([]);
+  const [taskLogsLoading, setTaskLogsLoading] = useState(false);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [tasksError, setTasksError] = useState("");
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [taskView, setTaskView] = useState("");
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [ticketSearch, setTicketSearch] = useState("");
+  const [ticketsError, setTicketsError] = useState("");
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [ticketStatusFilter, setTicketStatusFilter] = useState("");
+  const [users, setUsers] = useState<any[]>([]);
+  const [userSearch, setUserSearch] = useState("");
+  const [userShortenerSettings, setUserShortenerSettings] = useState<any>(null);
+  const [userShortenerSettingsLoading, setUserShortenerSettingsLoading] = useState(false);
+  const [userShortenerSettingsSaving, setUserShortenerSettingsSaving] = useState(false);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userView, setUserView] = useState("");
+  const [verifiedTasks, setVerifiedTasks] = useState<any[]>([]);
+  const [verifiedTasksLoading, setVerifiedTasksLoading] = useState(false);
+  const [verifiedTasksSearch, setVerifiedTasksSearch] = useState("");
+  const [withdrawals, setWithdrawals] = useState<any[]>([]);
+  const [withdrawalsError, setWithdrawalsError] = useState("");
+  const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
+
+  const fetchGoogleDriveAccounts = async () => {
+    setGoogleDriveLoading(true);
+    setGoogleDriveError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/google-drive-accounts`);
+      if (!res.ok) throw new Error("Failed to fetch Google Drive accounts");
+      const json = await res.json();
+      setGoogleDriveAccounts(json);
+    } catch (err: any) {
+      setGoogleDriveError(err.message);
+    } finally {
+      setGoogleDriveLoading(false);
+    }
+  };
+
 
   const handleDisconnectGoogleDrive = async (id: string) => {
     if (
@@ -1914,14 +2039,20 @@ export default function AdminDashboard() {
     }
   };
 
-  const pendingCount = withdrawals.filter((w) => w.status === "Pending").length;
-  const approvedCount = withdrawals.filter(
-    (w) => w.status === "Approved",
-  ).length;
-  const paidCount = withdrawals.filter((w) => w.status === "Paid").length;
-  const rejectedCount = withdrawals.filter(
-    (w) => w.status === "Rejected",
-  ).length;
+  
+  let pendingCount = 0, approvedCount = 0, paidCount = 0, rejectedCount = 0;
+  try {
+    pendingCount = withdrawals.filter((w) => w.status === "Pending").length;
+    approvedCount = withdrawals.filter((w) => w.status === "Approved").length;
+    paidCount = withdrawals.filter((w) => w.status === "Paid").length;
+    rejectedCount = withdrawals.filter((w) => w.status === "Rejected").length;
+  } catch (e) {
+    console.error("Error calculating withdrawal counts:", e);
+  }
+  
+  
+  
+  
 
   return (
     <>
@@ -4904,7 +5035,7 @@ export default function AdminDashboard() {
                     </button>
                   </div>
 
-                  {userShortenerSettingsLoading ? (
+                  {userShortenerSettingsLoading || !userShortenerSettings ? (
                     <div className="flex justify-center py-12">
                       <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                     </div>

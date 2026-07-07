@@ -5865,9 +5865,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       }
 
-      if (!linkSnap || !linkSnap.exists) return res.status(404).json({ success: false, message: "Link not found" });
+      if (!linkSnap || !linkSnap.exists()) return res.status(404).json({ success: false, message: "Link not found" });
       
-      const linkData = linkSnap.exists() ? linkSnap.data() : linkSnap.data();
+      const linkData = linkSnap.data();
       
       if (linkData.password === password) {
          // Optionally track password unlocked in session
