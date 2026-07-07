@@ -26,7 +26,8 @@ import {
   Lock,
   ShieldAlert,
   Smartphone,
-  KeyRound
+  KeyRound,
+  Link as LinkIcon
 } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
@@ -36,6 +37,8 @@ import DailyBonusPage from "./DailyBonusPage";
 import DashboardPage from "./DashboardPage";
 import RewardTasksPage from "./RewardTasksPage";
 import { API_BASE } from "../config/api";
+import { MyLinksPage } from "./MyLinksPage";
+import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
 
 interface PhoneVerificationProps {
   user: any;
@@ -275,7 +278,14 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
 
 export const MiniAppHome: React.FC = () => {
   const { user } = useTelegramAuth();
-  const [currentView, setCurrentView] = useState<string>("home");
+  const [currentView, setCurrentView] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("view") || "home";
+  });
+  const [selectedLinkId, setSelectedLinkId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("linkId");
+  });
   const [isPhoneVerified, setIsPhoneVerified] = useState<boolean>(false);
   const [checkingVerification, setCheckingVerification] = useState<boolean>(true);
 
@@ -398,6 +408,31 @@ export const MiniAppHome: React.FC = () => {
   }
 
   // Render Sub-Views
+  if (currentView === "my-links") {
+    return (
+      <MyLinksPage 
+        user={user} 
+        onBack={() => setCurrentView("home")} 
+        onViewAnalytics={(linkId) => {
+          setSelectedLinkId(linkId);
+          setCurrentView("link-analytics");
+        }}
+      />
+    );
+  }
+
+  if (currentView === "link-analytics") {
+    return (
+      <UrlShortenerAnalyticsPage 
+        linkId={selectedLinkId || ""} 
+        onBack={() => {
+          setSelectedLinkId(null);
+          setCurrentView("my-links");
+        }}
+      />
+    );
+  }
+
   if (currentView === "dashboard") {
     return <DashboardPage onBack={() => setCurrentView("home")} />;
   }
@@ -439,6 +474,7 @@ export const MiniAppHome: React.FC = () => {
 
   const actionButtons = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
+    { id: "my-links", label: "My Short Links", icon: LinkIcon, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
     { id: "balance", label: "Balance", icon: Wallet, color: "bg-emerald-500", shadow: "shadow-emerald-500/20" },
     { id: "refer", label: "Refer & Earn", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
     { id: "daily-bonus", label: "Daily Bonus", icon: Gift, color: "bg-amber-500", shadow: "shadow-amber-500/20" },

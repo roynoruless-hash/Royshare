@@ -17,6 +17,14 @@ function getAppUrl(): string {
     return "https://royshare.online";
 }
 
+function getMiniAppUrl(pathAndQuery: string): string {
+    const rawAppUrl = process.env.APP_URL || "https://royshare.online";
+    const appUrl = (rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") 
+      ? rawAppUrl 
+      : "https://royshare.online";
+    return `${appUrl.replace(/\/$/, "")}${pathAndQuery}`;
+}
+
 async function shortenWithProvider(provider: string, apiKey: string, url: string, publisherId?: string): Promise<string> {
     let endpoint = "";
     let responseText = "";
@@ -1286,7 +1294,7 @@ async function showShortenerDashboard(botToken: string, chatId: number, user: an
     const inlineKeyboard = {
         inline_keyboard: [
             [{ text: "➕ Shorten a New URL", callback_data: "shortlink_another" }],
-            [{ text: "🔗 View All My Links", callback_data: "shortlink_mylinks" }]
+            [{ text: "🔗 View All My Links", web_app: { url: getMiniAppUrl("/?view=my-links") } }]
         ]
     };
 
@@ -1513,8 +1521,8 @@ async function processShortenUrl(botToken: string, chatId: number, user: any) {
     const inlineKeyboard = {
         inline_keyboard: [
             [{ text: "📋 Copy Link", callback_data: `shortlink_copy_${linkId}` }],
-            [{ text: "📈 View Analytics", callback_data: `shortlink_analytics_${linkId}` }],
-            [{ text: "🔗 My Links", callback_data: "shortlink_mylinks" }],
+            [{ text: "📈 View Analytics", web_app: { url: getMiniAppUrl(`/?view=link-analytics&linkId=${linkId}`) } }],
+            [{ text: "🔗 My Links", web_app: { url: getMiniAppUrl("/?view=my-links") } }],
             [{ text: "🔙 Back to Dashboard", callback_data: "shortlink_menu" }]
         ]
     };
