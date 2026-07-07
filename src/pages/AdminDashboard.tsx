@@ -1979,7 +1979,6 @@ export default function AdminDashboard() {
     } else if (activeTab === '🔗 Smart URL Shortener') {
       fetchSmartLinks();
       fetchUserShortenerSettings();
-      fetchAds();
     } else if (activeTab === '💸 Withdrawals') {
       fetchWithdrawals();
     } else if (activeTab === '🎫 Support') {
@@ -2006,7 +2005,6 @@ export default function AdminDashboard() {
       fetchUsers();
     } else if (activeTab === '📢 Ads Manager') {
       if (adView === 'ads' || adView === 'analytics' || adView === 'placement') {
-        fetchAds();
       }
       if (adView === 'placement') {
         fetchAdPlacements();
@@ -3810,7 +3808,6 @@ export default function AdminDashboard() {
                   <button onClick={() => setAdView('ads')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${adView === 'ads' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📋 View Ads</button>
                   <button onClick={() => setAdView('analytics')} className={`flex items-center gap-2 px-4 py-2 font-medium rounded-xl transition-all ${adView === 'analytics' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 Ad Analytics</button>
                   <button onClick={() => { setShowAdPreview(false); setAdForm({ adName: "", adSource: "Custom", adType: "InPage Ad", targetPage: "All Pages", placement: "Floating Overlay", status: "🟢 Active", scriptCode: "", revenue: 0 }); setModalAction('create_ad'); }} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-emerald-900/20">➕ Create Ad</button>
-                  <button onClick={() => { fetchAds(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all border border-slate-700">🔄 Refresh</button>
                 </div>
               </div>
 
