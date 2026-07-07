@@ -5578,7 +5578,18 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         onclickaEnabled: false,
         onclickaSdkScript: "",
         onclickaSdkSpotId: "",
-        onclickaBannerSize: "728x90"
+        onclickaBannerSize: "728x90",
+        network: "disabled",
+        ezmobEnabled: false,
+        ezmobPrebidScript: "",
+        ezmobRendererScript: "",
+        ezmobZoneId: "",
+        ezmobHost: "",
+        ezmobContainerId: "",
+        ezmobPlayerSizeMode: "auto",
+        ezmobDisplayMode: "floating",
+        ezmobEnableTransitions: true,
+        ezmobVpaidMode: true
       };
 
       // Requirement 6: Debug log - Link ID received
@@ -5677,13 +5688,24 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           console.error("Error fetching global shortener settings config:", err);
         }
 
-        // Fetch OnClickA Advertisement Settings
+        // Fetch OnClickA & EZMob Advertisement Settings
         adSettings = {
           onclickaEnabled: false,
           onclickaSdkScript: "",
           onclickaSdkSpotId: "",
           onclickaBannerSize: "728x90",
-          onclickaSpots: []
+          onclickaSpots: [],
+          network: "disabled",
+          ezmobEnabled: false,
+          ezmobPrebidScript: "",
+          ezmobRendererScript: "",
+          ezmobZoneId: "",
+          ezmobHost: "",
+          ezmobContainerId: "",
+          ezmobPlayerSizeMode: "auto",
+          ezmobDisplayMode: "floating",
+          ezmobEnableTransitions: true,
+          ezmobVpaidMode: true
         };
         try {
           const adSettingsSnap = await getDoc(doc(db, "settings", "advertisement"));
@@ -5694,7 +5716,18 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
               onclickaSdkScript: adData.onclickaSdkScript || "",
               onclickaSdkSpotId: adData.onclickaSdkSpotId || "",
               onclickaBannerSize: adData.onclickaBannerSize || "728x90",
-              onclickaSpots: adData.onclickaSpots || []
+              onclickaSpots: adData.onclickaSpots || [],
+              network: adData.network || "disabled",
+              ezmobEnabled: adData.ezmobEnabled ?? (adData.network === "ezmob"),
+              ezmobPrebidScript: adData.ezmobPrebidScript || "https://royshare.online/prebid.js",
+              ezmobRendererScript: adData.ezmobRendererScript || "https://acdn.adnxs.com/video/outstream/ANOutstreamVideo.js",
+              ezmobZoneId: adData.ezmobZoneId || "",
+              ezmobHost: adData.ezmobHost || "xml.ezmob.com",
+              ezmobContainerId: adData.ezmobContainerId || "ezmob-player-container",
+              ezmobPlayerSizeMode: adData.ezmobPlayerSizeMode || "auto",
+              ezmobDisplayMode: adData.ezmobDisplayMode || "floating",
+              ezmobEnableTransitions: adData.ezmobEnableTransitions ?? true,
+              ezmobVpaidMode: adData.ezmobVpaidMode ?? true
             };
           }
         } catch (err) {
@@ -5869,6 +5902,17 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         onclickaSdkSpotId: adSettings.onclickaSdkSpotId || "",
         onclickaBannerSize: adSettings.onclickaBannerSize || "728x90",
         onclickaSpots: adSettings.onclickaSpots || [],
+        network: adSettings.network || "disabled",
+        ezmobEnabled: adSettings.ezmobEnabled ?? false,
+        ezmobPrebidScript: adSettings.ezmobPrebidScript || "",
+        ezmobRendererScript: adSettings.ezmobRendererScript || "",
+        ezmobZoneId: adSettings.ezmobZoneId || "",
+        ezmobHost: adSettings.ezmobHost || "",
+        ezmobContainerId: adSettings.ezmobContainerId || "",
+        ezmobPlayerSizeMode: adSettings.ezmobPlayerSizeMode || "auto",
+        ezmobDisplayMode: adSettings.ezmobDisplayMode || "floating",
+        ezmobEnableTransitions: adSettings.ezmobEnableTransitions ?? true,
+        ezmobVpaidMode: adSettings.ezmobVpaidMode ?? true,
         data: publicItemData
       });
 

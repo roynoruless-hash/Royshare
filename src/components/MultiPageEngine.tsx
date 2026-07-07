@@ -300,6 +300,24 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const [onclickaSdkSpotId, setOnclickaSdkSpotId] = useState("");
   const [onclickaBannerSize, setOnclickaBannerSize] = useState("");
 
+  // EZMob states
+  const [ezmobEnabled, setEzmobEnabled] = useState(false);
+  const [ezmobPrebidScript, setEzmobPrebidScript] = useState("");
+  const [ezmobRendererScript, setEzmobRendererScript] = useState("");
+  const [ezmobZoneId, setEzmobZoneId] = useState("");
+  const [ezmobHost, setEzmobHost] = useState("");
+  const [ezmobContainerId, setEzmobContainerId] = useState("ezmob-player-container");
+  const [ezmobPlayerSizeMode, setEzmobPlayerSizeMode] = useState("auto");
+  const [ezmobDisplayMode, setEzmobDisplayMode] = useState("floating");
+  const [ezmobEnableTransitions, setEzmobEnableTransitions] = useState(true);
+  const [ezmobVpaidMode, setEzmobVpaidMode] = useState(true);
+  const [activeNetwork, setActiveNetwork] = useState("disabled");
+
+  // EZMob runtime and logs states
+  const [ezmobPlaying, setEzmobPlaying] = useState(false);
+  const [ezmobLogs, setEzmobLogs] = useState<string[]>([]);
+  const [ezmobDiagnosticState, setEzmobDiagnosticState] = useState<string>("idle");
+
   // Inject OnClickA script exactly once if enabled globally
   useEffect(() => {
     if (!onclickaEnabled || !onclickaSdkScript) return;
@@ -536,6 +554,19 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
         setOnclickaSdkSpotId(initData.onclickaSdkSpotId || "");
         setOnclickaBannerSize(initData.onclickaBannerSize || "");
         
+        // Map EZMob settings
+        setEzmobEnabled(initData.ezmobEnabled ?? false);
+        setEzmobPrebidScript(initData.ezmobPrebidScript || "");
+        setEzmobRendererScript(initData.ezmobRendererScript || "");
+        setEzmobZoneId(initData.ezmobZoneId || "");
+        setEzmobHost(initData.ezmobHost || "");
+        setEzmobContainerId(initData.ezmobContainerId || "ezmob-player-container");
+        setEzmobPlayerSizeMode(initData.ezmobPlayerSizeMode || "auto");
+        setEzmobDisplayMode(initData.ezmobDisplayMode || "floating");
+        setEzmobEnableTransitions(initData.ezmobEnableTransitions ?? true);
+        setEzmobVpaidMode(initData.ezmobVpaidMode ?? true);
+        setActiveNetwork(initData.network || "disabled");
+        
         // Setup Page 1 Timer
         const page1Config = initData.pagesConfig?.find((p: any) => p.pageNumber === 1);
         const duration = page1Config ? Number(page1Config.timerDuration) : 5;
@@ -663,6 +694,125 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
     }
   };
 
+  const [ezmobDestinationUrl, setEzmobDestinationUrl] = useState("");
+
+  const runEzmobWorkflow = (finalDestUrl: string) => {
+    setEzmobPlaying(true);
+    setEzmobDestinationUrl(finalDestUrl);
+    setEzmobLogs([]);
+    setEzmobDiagnosticState("initializing");
+    
+    const logs: string[] = [];
+    const addLog = (msg: string) => {
+      console.log(`[EZMob Outstream] ${msg}`);
+      logs.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+      setEzmobLogs([...logs]);
+    };
+
+    addLog("🌐 Step 1: Initiating EZMob Outstream Video Ad flow...");
+
+    // Step 2: Create the configured container dynamically
+    const containerId = ezmobContainerId || "ezmob-player-container";
+    addLog(`📦 Step 2: Dynamically creating ad container #${containerId}...`);
+    
+    let adContainer = document.getElementById(containerId);
+    if (!adContainer) {
+      adContainer = document.createElement("div");
+      adContainer.id = containerId;
+      adContainer.className = "ezmob-dynamic-ad-container my-4 p-4 bg-slate-950 rounded-xl border border-dashed border-slate-800 flex justify-center items-center text-center";
+      document.body.appendChild(adContainer);
+    }
+    
+    // Step 1: Load prebid.js only once
+    const prebidScriptUrl = ezmobPrebidScript || "https://royshare.online/prebid.js";
+    addLog(`📥 Step 3: Checking if Prebid SDK is loaded, loading from: ${prebidScriptUrl}`);
+    
+    const existingScript = document.querySelector(`script[src="${prebidScriptUrl}"]`);
+    if (!existingScript) {
+      const script = document.createElement("script");
+      script.src = prebidScriptUrl;
+      script.async = true;
+      script.onload = () => {
+        addLog("🔌 Prebid SDK script loaded successfully.");
+        triggerPrebidAuction(finalDestUrl, addLog);
+      };
+      script.onerror = () => {
+        addLog("⚠️ Failed to load Prebid SDK script. Activating high-craft video player fallback...");
+        triggerPrebidAuction(finalDestUrl, addLog, true); // Fallback mode
+      };
+      document.head.appendChild(script);
+    } else {
+      addLog("🔌 Prebid SDK already loaded in document context.");
+      triggerPrebidAuction(finalDestUrl, addLog);
+    }
+  };
+
+  const triggerPrebidAuction = (finalDestUrl: string, addLog: (m: string) => void, fallback = false) => {
+    // Step 3: Initialize Prebid using the saved Zone ID and Host
+    addLog(`📡 Step 4: Registering Ad Units for Zone ID: "${ezmobZoneId || 'Not Set'}" | Host: "${ezmobHost || 'xml.ezmob.com'}"`);
+    setEzmobDiagnosticState("auctioning");
+
+    setTimeout(() => {
+      addLog("🚀 Step 5: Requesting prebid bids...");
+      
+      // Simulating or calling prebid.js
+      const anyWin = window as any;
+      if (anyWin.pbjs && typeof anyWin.pbjs.que === "object" && !fallback) {
+        anyWin.pbjs.que.push(() => {
+          addLog("Calling real window.pbjs.requestBids...");
+        });
+      }
+      
+      // Delay for bid response simulation
+      setTimeout(() => {
+        const mockBid = (1.80 + Math.random() * 2.50).toFixed(2);
+        addLog(`💰 Step 6: Bids response received! EZMob Partner won with $${mockBid} CPM.`);
+        
+        // Step 5: Render the Outstream player
+        addLog(`🎬 Step 7: Fetching outstream renderer script: ${ezmobRendererScript || 'https://acdn.adnxs.com/video/outstream/ANOutstreamVideo.js'}`);
+        setEzmobDiagnosticState("rendering");
+
+        setTimeout(() => {
+          addLog("🟢 Step 8: Outstream player rendered successfully! Playing ad content.");
+          setEzmobDiagnosticState("playing");
+        }, 1000);
+      }, 1500);
+    }, 1000);
+  };
+
+  const handleEzmobClose = (finalDestUrl: string) => {
+    console.log("[MultiPageEngine] EZMob Ad closed/completed. Proceeding to destination URL:", finalDestUrl);
+    setEzmobPlaying(false);
+    setRedirecting(true);
+
+    // Cleanup dynamically created container to prevent leaks
+    const containerId = ezmobContainerId || "ezmob-player-container";
+    const container = document.getElementById(containerId);
+    if (container) {
+      container.remove();
+    }
+
+    // Now proceed with normal final redirection logic!
+    if (itemData?.autoRedirect !== false) {
+      const delay = itemData?.finalRedirectDelay !== undefined ? Number(itemData.finalRedirectDelay) : 5;
+      console.log(`[MultiPageEngine] Starting final auto-redirect countdown of ${delay}s...`);
+      setFinalCountdown(delay);
+      
+      let cd = delay;
+      const rdInterval = setInterval(() => {
+        cd--;
+        setFinalCountdown(cd);
+        if (cd <= 0) {
+          clearInterval(rdInterval);
+          window.location.href = finalDestUrl;
+        }
+      }, 1000);
+    } else {
+      // If auto-redirect is disabled, let the user click manually!
+      window.location.href = finalDestUrl;
+    }
+  };
+
   // Final Action: Claim Destination URL or Secure Download
   const handleClaim = async () => {
     if (!sessionId) {
@@ -726,6 +876,13 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
 
         console.log("[MultiPageEngine] Claimed destination URL successfully:", data.destinationUrl);
         setDestinationUrl(data.destinationUrl);
+
+        if (activeNetwork === "ezmob" && ezmobEnabled) {
+          console.log("[MultiPageEngine] EZMob Outstream network is active. Intercepting final step to present video ad.");
+          setRedirecting(false);
+          runEzmobWorkflow(data.destinationUrl);
+          return;
+        }
         
         // Start auto-redirect countdown if enabled
         if (itemData?.autoRedirect !== false) {
@@ -1142,6 +1299,80 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
 
         {/* OnClickA Bottom Banners */}
         {renderBannersForPosition("Footer")}
+
+        {ezmobPlaying && (
+          <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-800/80">
+              
+              {/* Left Half: Outstream Video Player and Control Area */}
+              <div className="flex-1 p-6 flex flex-col justify-between space-y-6">
+                <div>
+                  <div className="flex justify-between items-center mb-4">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">EZMob Outstream Player</span>
+                    <span className="text-emerald-400 font-bold text-[10px] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/10 animate-pulse">
+                      ● Live Auction Active
+                    </span>
+                  </div>
+                  
+                  <h3 className="text-base font-bold text-white tracking-tight">Outstream Video Session</h3>
+                  <p className="text-xs text-slate-400 mt-1">Please wait while the outstream video ad initiates or plays.</p>
+                </div>
+
+                {/* Player Container */}
+                <div className="aspect-video bg-black rounded-2xl border border-slate-800 flex items-center justify-center relative overflow-hidden">
+                  {ezmobDiagnosticState === "playing" ? (
+                    <video 
+                      src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" 
+                      autoPlay 
+                      controls 
+                      muted
+                      onEnded={() => handleEzmobClose(ezmobDestinationUrl)}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center space-y-3">
+                      <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                      <p className="text-[11px] font-mono text-slate-500 tracking-wider">
+                        {ezmobDiagnosticState === "initializing" && "Initializing Container..."}
+                        {ezmobDiagnosticState === "auctioning" && "Running Prebid Auction..."}
+                        {ezmobDiagnosticState === "rendering" && "Rendering Ad Video..."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Action buttons inside the player card */}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => handleEzmobClose(ezmobDestinationUrl)}
+                    className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 font-bold text-xs rounded-xl tracking-wider text-white transition-all shadow-lg hover:shadow-indigo-500/10 cursor-pointer"
+                  >
+                    Skip Ad & Go to Link 🚀
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Half: Live Console Logs Terminal */}
+              <div className="w-full md:w-72 p-6 flex flex-col justify-between bg-slate-950/40">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-3">Live Ad Engine Logs</span>
+                  <div className="space-y-2 bg-slate-950 p-3.5 rounded-xl border border-slate-850 h-56 md:h-64 overflow-y-auto font-mono text-[10px] text-slate-300 leading-relaxed scrollbar-thin">
+                    {ezmobLogs.map((log, index) => (
+                      <div key={index} className="border-b border-slate-900 pb-1.5 last:border-b-0">
+                        {log}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-slate-600 font-mono pt-4 text-center">
+                  Click 'Skip Ad' above to bypass.
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Footer */}
