@@ -91,9 +91,6 @@ export default function AdminDashboard() {
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
-  const [ads, setAds] = useState<any[]>([]);
-  const [adsLoading, setAdsLoading] = useState(false);
-  const [adsError, setAdsError] = useState("");
   const [smartLinks, setSmartLinks] = useState<any[]>([]);
   const [smartLinksLoading, setSmartLinksLoading] = useState(false);
   const [smartLinksError, setSmartLinksError] = useState("");
@@ -122,61 +119,10 @@ export default function AdminDashboard() {
     humanVerification: true,
     vpnDetection: false,
     botDetection: true,
-    bannerAdsEnabled: false,
-    totalBannerSlots: 0,
-    bannerSpotIds: [],
-    totalBannerAds: 0,
-    onclickaBanners: [],
     pagesConfig: []
   });
   const [userShortenerSettingsLoading, setUserShortenerSettingsLoading] = useState(false);
   const [userShortenerSettingsSaving, setUserShortenerSettingsSaving] = useState(false);
-
-  const [adPlacements, setAdPlacements] = useState<any>({});
-  const [adPlacementsLoading, setAdPlacementsLoading] = useState(false);
-  const [showAdPreview, setShowAdPreview] = useState(false);
-  const [fullAdPreview, setFullAdPreview] = useState(false);
-  const [adView, setAdView] = useState<'ads' | 'analytics' | 'placement'>('ads');
-  const [adForm, setAdForm] = useState<any>({
-    adName: "", adSource: "Custom", adType: "InPage Ad", targetPage: "All Pages", placement: "Floating Overlay", status: "🟢 Active", scriptCode: "", revenue: 0
-  });
-
-  const [adSettings, setAdSettings] = useState<any>({
-    network: "disabled",
-    enabled: false,
-    verified: false,
-    script: "",
-    adsScriptCode: "",
-    bannerContainerCode: "",
-    onclickaEnabled: false,
-    onclickaSdkScript: "",
-    onclickaSdkSpotId: "",
-    onclickaBannerSize: "728x90",
-    onclickaSpots: [],
-    ezmobPrebidScript: "https://royshare.online/prebid.js",
-    ezmobRendererScript: "https://acdn.adnxs.com/video/outstream/ANOutstreamVideo.js",
-    ezmobZoneId: "",
-    ezmobHost: "xml.ezmob.com",
-    ezmobContainerId: "ezmob-player-container",
-    ezmobPlayerSizeMode: "auto",
-    ezmobDisplayMode: "floating",
-    ezmobEnableTransitions: true,
-    ezmobVpaidMode: true
-  });
-  const [adSubTab, setAdSubTab] = useState<'general' | 'onclicka' | 'ezmob'>('onclicka');
-  const [spotDiagnostics, setSpotDiagnostics] = useState<Record<string, any>>({});
-  const [spotPreviews, setSpotPreviews] = useState<Record<string, boolean>>({});
-  const [spotDiagShow, setSpotDiagShow] = useState<Record<string, boolean>>({});
-  const [ezmobTestLogs, setEzmobTestLogs] = useState<string[]>([]);
-  const [ezmobTestState, setEzmobTestState] = useState<'IDLE' | 'LOADING' | 'READY' | 'PLAYING' | 'CLOSED'>('IDLE');
-  const [ezmobDiagnostics, setEzmobDiagnostics] = useState<Record<string, string>>({});
-  const [diagnosticLogs, setDiagnosticLogs] = useState<string[]>([]);
-  const [diagnosticStatus, setDiagnosticStatus] = useState<'IDLE' | 'RUNNING' | 'PASS' | 'FAIL'>('IDLE');
-  const [showLivePreview, setShowLivePreview] = useState(false);
-  const [adSettingsLoading, setAdSettingsLoading] = useState(false);
-  const [adSettingsFeedback, setAdSettingsFeedback] = useState("");
-  const [adSettingsError, setAdSettingsError] = useState("");
-  const [adSettingsLastUpdated, setAdSettingsLastUpdated] = useState<any>(null);
 
   const [systemSettings, setSystemSettings] = useState<any>({
     botSettings: {},
@@ -7518,7 +7464,7 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {activeTab === '📢 Advertisement Settings' && (
+          {false && activeTab === '📢 Advertisement Settings' && (
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row justify-between gap-4 items-center border-b border-slate-800 pb-4">
                 <div>
