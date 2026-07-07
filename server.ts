@@ -6258,6 +6258,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const {
         destinationUrl,
         customAlias,
+        isPasswordProtected,
+        password,
         totalPages,
         autoRedirect,
         finalRedirectDelay,
@@ -6297,6 +6299,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         destinationUrl,
         alias,
         shortUrl,
+        isPasswordProtected: isPasswordProtected === true,
+        password: password || "",
         totalPages: Number(totalPages) || 1,
         autoRedirect: autoRedirect !== false,
         finalRedirectDelay: Number(finalRedirectDelay) || 0,
