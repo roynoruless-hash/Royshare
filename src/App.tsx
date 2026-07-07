@@ -48,7 +48,6 @@ const ReferralProgramPage = lazy(() => import("./pages/ReferralProgramPage"));
 const EnterpriseSecurityPage = lazy(() => import("./pages/EnterpriseSecurityPage"));
 const FastGlobalDeliveryPage = lazy(() => import("./pages/FastGlobalDeliveryPage"));
 
-import AdTestingPage from "./pages/AdTestingPage";
 import MoreMenu from "./components/MoreMenu";
 
 import { TelegramAuthProvider } from "./context/TelegramAuthContext";
@@ -290,10 +289,6 @@ export default function App() {
 
     if (window.location.pathname === "/features/security") {
       return <EnterpriseSecurityPage />;
-    }
-
-    if (window.location.pathname === "/ad-test") {
-      return <AdTestingPage />;
     }
 
     if (window.location.pathname === "/features/delivery") {
