@@ -5820,13 +5820,14 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const publicItemData = { ...itemData };
       delete publicItemData.destinationUrl; // SECURITY: Never leak destination URL at session init!
       delete publicItemData.ipList;
+      delete publicItemData.password; // SECURITY: Never leak password at session init!
 
       res.json({
         success: true,
         sessionId,
         totalPages,
         pagesConfig,
-
+        isPasswordProtected: !!itemData.password || !!itemData.isPasswordProtected,
         data: publicItemData
       });
 

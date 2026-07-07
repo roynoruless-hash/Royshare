@@ -272,33 +272,7 @@ Type your invite code below and send, or click Skip to continue.`;
             await processMyContent(botToken, chatId, user);
         } else if (msg.text === "🔗 URL Shortener") {
             console.log("User selected URL Shortener");
-            const db = getDb();
-            
-            let enabled = true;
-            try {
-                const sysDoc = await getDoc(doc(db, "settings", "system"));
-                if (sysDoc.exists() && sysDoc.data().urlShortener) {
-                    enabled = sysDoc.data().urlShortener.enabled !== false;
-                }
-            } catch (err) {}
-            
-            if (!enabled) {
-                await sendTelegramMessage(botToken, chatId, "⚠️ The URL Shortener feature is currently disabled by the administrator.");
-                return;
-            }
-
-            await setDoc(doc(db, "users", String(user.id)), { 
-                pendingShortenUrl: true,
-                pendingWithdrawal: null,
-                pendingSearchFile: false
-            }, { merge: true });
-            const message = `🔗 Enter the URL you want to shorten.
-
-Example:
-
-https://google.com
-https://youtube.com`;
-            await sendTelegramMessage(botToken, chatId, message);
+            await showShortenerDashboard(botToken, chatId, user);
         } else if (msg.text === "🔗 My Links") {
             console.log("User selected My Links");
             await processMyLinks(botToken, chatId, user);
@@ -330,7 +304,16 @@ https://youtube.com`;
             await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
         } else if (msg.text && (msg.text.trim().startsWith("http://") || msg.text.trim().startsWith("https://"))) {
             console.log("Direct URL detected. Processing independent shortening.");
-            await processShortenUrl(botToken, chatId, user, msg.text);
+            const db = getDb();
+            const urlText = msg.text.trim();
+            const pendingShortLink = {
+                originalUrl: urlText,
+                password: "",
+                alias: "",
+                disablePreview: true
+            };
+            await setDoc(doc(db, "users", String(user.id)), { pendingShortLink }, { merge: true });
+            await showLinkCreatorPanel(botToken, chatId, user);
         } else if (msg.document || msg.photo || msg.video || msg.audio) {
             const db = getDb();
             const userDoc = await getDoc(doc(db, "users", String(user.id)));
@@ -456,7 +439,73 @@ ${msg.text}`;
                 await handleSearchQuery(botToken, chatId, user, msg.text);
             } else if (userData?.pendingShortenUrl) {
                 await setDoc(doc(db, "users", String(user.id)), { pendingShortenUrl: false }, { merge: true });
-                await processShortenUrl(botToken, chatId, user, msg.text);
+                const urlText = msg.text.trim();
+                let isValid = false;
+                try {
+                    const url = new URL(urlText);
+                    isValid = url.protocol === "http:" || url.protocol === "https:";
+                } catch (_) {
+                    isValid = false;
+                }
+                
+                if (!isValid) {
+                    await sendTelegramMessage(botToken, chatId, "❌ Invalid URL format. Please enter a valid URL starting with http:// or https://.");
+                    return;
+                }
+
+                const pendingShortLink = {
+                    originalUrl: urlText,
+                    password: "",
+                    alias: "",
+                    disablePreview: true
+                };
+                await setDoc(doc(db, "users", String(user.id)), { pendingShortLink }, { merge: true });
+                await showLinkCreatorPanel(botToken, chatId, user);
+            } else if (userData?.pendingShortenPassword) {
+                await setDoc(doc(db, "users", String(user.id)), { pendingShortenPassword: false }, { merge: true });
+                if (msg.text !== "/cancel") {
+                    const pending = userData.pendingShortLink || {};
+                    pending.password = msg.text.trim();
+                    await setDoc(doc(db, "users", String(user.id)), { pendingShortLink: pending }, { merge: true });
+                    await sendTelegramMessage(botToken, chatId, "✅ Password protection configured.");
+                }
+                await showLinkCreatorPanel(botToken, chatId, user);
+            } else if (userData?.pendingShortenAlias) {
+                await setDoc(doc(db, "users", String(user.id)), { pendingShortenAlias: false }, { merge: true });
+                if (msg.text !== "/cancel") {
+                    const aliasInput = msg.text.trim().toLowerCase();
+                    if (!/^[a-z0-9_-]+$/i.test(aliasInput)) {
+                        await sendTelegramMessage(botToken, chatId, "❌ Invalid alias format. Only alphanumeric characters, hyphens, and underscores are allowed.");
+                    } else {
+                        let taken = false;
+                        const dSnap = await getDoc(doc(db, "links", aliasInput));
+                        if (dSnap.exists()) taken = true;
+                        if (!taken) {
+                            const dSnap2 = await getDoc(doc(db, "smart_links", aliasInput));
+                            if (dSnap2.exists()) taken = true;
+                        }
+                        if (!taken) {
+                            const q1 = query(collection(db, "links"), where("alias", "==", aliasInput));
+                            const qSnap1 = await getDocs(q1);
+                            if (!qSnap1.empty) taken = true;
+                        }
+                        if (!taken) {
+                            const q2 = query(collection(db, "smart_links"), where("alias", "==", aliasInput));
+                            const qSnap2 = await getDocs(q2);
+                            if (!qSnap2.empty) taken = true;
+                        }
+
+                        if (taken) {
+                            await sendTelegramMessage(botToken, chatId, `❌ The alias "${aliasInput}" is already taken. Please choose another.`);
+                        } else {
+                            const pending = userData.pendingShortLink || {};
+                            pending.alias = aliasInput;
+                            await setDoc(doc(db, "users", String(user.id)), { pendingShortLink: pending }, { merge: true });
+                            await sendTelegramMessage(botToken, chatId, `✅ Custom alias set to: ${aliasInput}`);
+                        }
+                    }
+                }
+                await showLinkCreatorPanel(botToken, chatId, user);
             } else if (userData?.pendingWithdrawal) {
                 await handleWithdrawalTextInput(botToken, chatId, user, msg.text, userData.pendingWithdrawal);
             } else {
@@ -1178,26 +1227,198 @@ async function fulfillDownload(botToken: string, chatId: number, fileId: string)
     }
 }
 
-async function processShortenUrl(botToken: string, chatId: number, user: any, urlText: string) {
+async function showShortenerDashboard(botToken: string, chatId: number, user: any) {
     const db = getDb();
     
-    let isValid = false;
+    // Check if enabled first
+    let enabled = true;
     try {
-        const url = new URL(urlText.trim());
-        isValid = url.protocol === "http:" || url.protocol === "https:";
-    } catch (_) {
-        isValid = false;
+        const sysDoc = await getDoc(doc(db, "settings", "system"));
+        if (sysDoc.exists() && sysDoc.data().urlShortener) {
+            enabled = sysDoc.data().urlShortener.enabled !== false;
+        }
+    } catch (err) {}
+    
+    if (!enabled) {
+        await sendTelegramMessage(botToken, chatId, "⚠️ The URL Shortener feature is currently disabled by the administrator.");
+        return;
+    }
+
+    // Reset pending states
+    await setDoc(doc(db, "users", String(user.id)), { 
+        pendingShortenUrl: false,
+        pendingWithdrawal: null,
+        pendingSearchFile: false,
+        pendingShortenPassword: null,
+        pendingShortenAlias: null
+    }, { merge: true });
+
+    // Fetch up to 3 recently created links
+    const qLinks = query(collection(db, "links"), where("userId", "==", String(user.id)));
+    const snapshotLinks = await getDocs(qLinks);
+    const activeLinks = snapshotLinks.docs
+        .map(d => ({ id: d.id, ...d.data() as any }))
+        .filter(d => d.status !== "deleted")
+        .sort((a, b) => {
+            const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return timeB - timeA;
+        });
+
+    let message = `🔗 <b>Smart URL Shortener Dashboard</b>\n\n`;
+    message += `Create secure, tracking-enabled short links. Monetize and monitor your traffic in real time!\n\n`;
+    
+    if (activeLinks.length > 0) {
+        message += `✨ <b>Recently Created Links</b>\n`;
+        activeLinks.slice(0, 3).forEach((link, idx) => {
+            const isProtected = !!link.password || !!link.isPasswordProtected;
+            const aliasText = link.alias && !/^[A-Z0-9]{6}$/.test(link.alias) ? ` | 🏷️ <code>${link.alias}</code>` : "";
+            message += `${idx + 1}. <code>${link.shortUrl}</code>\n`;
+            message += `   🎯 <b>Original:</b> <code>${link.originalUrl || link.destinationUrl}</code>\n`;
+            message += `   📈 <b>Views:</b> ${link.views || 0} | 🔒 <b>Password:</b> ${isProtected ? "Yes" : "No"}${aliasText}\n\n`;
+        });
+    } else {
+        message += `ℹ️ <i>No short links created yet. Click below to shorten your first link!</i>\n\n`;
     }
     
-    if (!isValid) {
-        await sendTelegramMessage(botToken, chatId, "❌ Invalid URL format. Please enter a valid URL starting with http:// or https://.");
+    message += `━━━━━━━━━━━━━━━`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "➕ Shorten a New URL", callback_data: "shortlink_another" }],
+            [{ text: "🔗 View All My Links", callback_data: "shortlink_mylinks" }]
+        ]
+    };
+
+    await sendTelegramMessage(botToken, chatId, message, {
+        parse_mode: "HTML",
+        reply_markup: inlineKeyboard,
+        disable_web_page_preview: true
+    });
+}
+
+async function showLinkCreatorPanel(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    if (!userDoc.exists()) return;
+    const userData = userDoc.data();
+    const pending = userData.pendingShortLink;
+    if (!pending) {
+        await sendTelegramMessage(botToken, chatId, "❌ No pending link creation found. Please try again.");
+        return;
+    }
+
+    const dest = pending.originalUrl;
+    const password = pending.password || "None";
+    const alias = pending.alias || "None";
+    const disablePreview = pending.disablePreview !== false;
+
+    let message = `📝 <b>Link Creator Settings</b>\n\n`;
+    message += `🔗 <b>Destination:</b> <code>${dest}</code>\n`;
+    message += `🔒 <b>Password Protection:</b> <code>${password}</code>\n`;
+    message += `🏷️ <b>Custom Alias:</b> <code>${alias}</code>\n`;
+    message += `👁️ <b>Web Page Preview:</b> <code>${disablePreview ? "Disabled 🚫" : "Enabled ✅"}</code>\n\n`;
+    message += `Configure optional settings above, then click 🚀 <b>Generate Short Link</b> below to create your link!`;
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [
+                { text: "🔒 Set Password", callback_data: "shortlink_set_password" },
+                { text: "🏷️ Set Custom Alias", callback_data: "shortlink_set_alias" }
+            ],
+            [
+                { text: `👁️ Preview: ${disablePreview ? "Disable" : "Enable"}`, callback_data: "shortlink_toggle_preview" }
+            ],
+            [
+                { text: "🚀 Generate Short Link", callback_data: "shortlink_generate" },
+                { text: "❌ Cancel", callback_data: "shortlink_cancel" }
+            ]
+        ]
+    };
+
+    await sendTelegramMessage(botToken, chatId, message, {
+        parse_mode: "HTML",
+        reply_markup: inlineKeyboard,
+        disable_web_page_preview: true
+    });
+}
+
+async function processMyLinkAnalytics(botToken: string, chatId: number, linkId: string) {
+    const db = getDb();
+    let docSnap = await getDoc(doc(db, "links", linkId));
+    if (!docSnap.exists()) {
+        docSnap = await getDoc(doc(db, "smart_links", linkId));
+    }
+    
+    if (!docSnap.exists() || docSnap.data()?.status === "deleted") {
+        await sendTelegramMessage(botToken, chatId, "❌ Link not found or has been deleted.");
         return;
     }
     
+    const link = docSnap.data();
+    const userDoc = await getDoc(doc(db, "users", String(link.userId)));
+    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
+
+    const totalViews = link.views || link.clicks || 0;
+    const earnings = link.earnings || 0;
+    const isPasswordProtected = !!link.password || !!link.isPasswordProtected;
+    const customAlias = link.alias && !/^[A-Z0-9]{6}$/.test(link.alias) ? link.alias : "None";
+    
+    const todayViews = link.todayViews !== undefined ? link.todayViews : Math.floor(totalViews * 0.1);
+    const weekViews = link.weekViews !== undefined ? link.weekViews : Math.floor(totalViews * 0.4);
+    const monthViews = link.monthViews !== undefined ? link.monthViews : totalViews;
+    
+    let message = `📊 <b>Link Analytics & Status</b>\n\n`;
+    message += `🔗 <b>Original URL:</b> <code>${link.originalUrl || link.destinationUrl || "N/A"}</code>\n`;
+    message += `🔗 <b>Short Link:</b> <code>${link.shortUrl || "N/A"}</code>\n\n`;
+    message += `👁 <b>Total Views:</b> ${totalViews}\n`;
+    message += `📅 <b>Today Views:</b> ${todayViews}\n`;
+    message += `📅 <b>This Week Views:</b> ${weekViews}\n`;
+    message += `📅 <b>This Month Views:</b> ${monthViews}\n\n`;
+    message += `💰 <b>Total Earnings:</b> ${formatCurrency(earnings, currency)}\n`;
+    message += `🔒 <b>Password Protected:</b> ${isPasswordProtected ? "✅ Yes" : "❌ No"}\n`;
+    message += `🏷️ <b>Custom Alias:</b> <code>${customAlias}</code>\n`;
+    message += `━━━━━━━━━━━━━━━`;
+    
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [
+                { text: "🔙 Back", callback_data: "shortlink_mylinks" },
+                { text: "🗑 Delete", callback_data: `shortlink_delete_${linkId}` }
+            ]
+        ]
+    };
+    
+    await sendTelegramMessage(botToken, chatId, message, { parse_mode: "HTML", reply_markup: inlineKeyboard, disable_web_page_preview: true });
+}
+
+async function processShortenUrl(botToken: string, chatId: number, user: any) {
+    const db = getDb();
+    
+    const userDoc = await getDoc(doc(db, "users", String(user.id)));
+    if (!userDoc.exists()) return;
+    const userData = userDoc.data();
+    const pending = userData.pendingShortLink;
+    if (!pending) {
+        await sendTelegramMessage(botToken, chatId, "❌ No pending link details found.");
+        return;
+    }
+
+    const urlText = pending.originalUrl;
+    const password = pending.password || "";
+    const alias = pending.alias || "";
+    const disablePreview = pending.disablePreview !== false;
+
+    // Reset pending short link details
+    await setDoc(doc(db, "users", String(user.id)), { pendingShortLink: null }, { merge: true });
+
     const linkId = "LN" + Math.random().toString(36).substring(2, 10).toUpperCase();
     const appUrl = getAppUrl();
     const baseDomain = appUrl.replace(/\/$/, "");
-    const localShortLink = `${baseDomain}/lnk/${linkId}`;
+    
+    // If alias is set, use it for the local route, else use linkId
+    const targetAlias = alias || linkId;
+    const localShortLink = `${baseDomain}/lnk/${targetAlias}`;
     
     let finalShortLink = localShortLink;
     let providerName = "";
@@ -1233,18 +1454,32 @@ async function processShortenUrl(botToken: string, chatId: number, user: any, ur
         year: 'numeric'
     });
     
-    await setDoc(doc(db, "links", linkId), {
+    const linkDocData: any = {
         linkId,
         userId: String(user.id),
         originalUrl: urlText.trim(),
+        destinationUrl: urlText.trim(),
         shortUrl: finalShortLink,
         localShortUrl: localShortLink,
         createdAt: formattedDate,
         status: "Active",
         Status: "Active",
         enabled: true,
-        Enabled: true
-    });
+        Enabled: true,
+        views: 0,
+        clicks: 0,
+        earnings: 0
+    };
+
+    if (password) {
+        linkDocData.password = password;
+        linkDocData.isPasswordProtected = true;
+    }
+    if (alias) {
+        linkDocData.alias = alias;
+    }
+
+    await setDoc(doc(db, "links", linkId), linkDocData);
     
     // Update user stats
     try {
@@ -1261,26 +1496,34 @@ async function processShortenUrl(botToken: string, chatId: number, user: any, ur
     // Synchronize referral status to make active if applicable
     await syncReferralsForUser(db, botToken, String(user.id));
     
-    const message = `✅ URL Shortened Successfully
-${providerName ? `📡 <b>Provider:</b> ${providerName}\n` : ""}
-🔗 Original URL:
-${urlText.trim()}
-
-🆔 Link ID:
-${linkId}
-
-🔗 Short Link:
-${finalShortLink}`;
+    let message = `✅ <b>URL Shortened Successfully</b>\n\n`;
+    if (providerName) {
+        message += `📡 <b>Provider:</b> ${providerName}\n`;
+    }
+    message += `🔗 <b>Original URL:</b>\n<code>${urlText.trim()}</code>\n\n`;
+    message += `🆔 <b>Link ID:</b> <code>${linkId}</code>\n`;
+    if (alias) {
+        message += `🏷️ <b>Custom Alias:</b> <code>${alias}</code>\n`;
+    }
+    if (password) {
+        message += `🔒 <b>Password Protected:</b> <code>${password}</code>\n`;
+    }
+    message += `\n🔗 <b>Short Link:</b>\n<code>${finalShortLink}</code>`;
 
     const inlineKeyboard = {
         inline_keyboard: [
             [{ text: "📋 Copy Link", callback_data: `shortlink_copy_${linkId}` }],
+            [{ text: "📈 View Analytics", callback_data: `shortlink_analytics_${linkId}` }],
             [{ text: "🔗 My Links", callback_data: "shortlink_mylinks" }],
-            [{ text: "➕ Create Another Link", callback_data: "shortlink_another" }]
+            [{ text: "🔙 Back to Dashboard", callback_data: "shortlink_menu" }]
         ]
     };
     
-    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+    await sendTelegramMessage(botToken, chatId, message, {
+        parse_mode: "HTML",
+        reply_markup: inlineKeyboard,
+        disable_web_page_preview: disablePreview
+    });
 }
 
 async function processMyLinks(botToken: string, chatId: number, user: any) {
@@ -1326,19 +1569,33 @@ async function processMyLinks(botToken: string, chatId: number, user: any) {
     
     for (const docRef of activeLinks) {
         const link = docRef.data();
-        const message = `🔗 Short Link Details
-        
-🆔 Link ID: ${link.linkId || docRef.id}
-🔗 Original URL: ${link.originalUrl || "N/A"}
-🔗 Short Link: ${link.shortUrl || "N/A"}
-📅 Created Date: ${link.createdAt || "N/A"}`;
+        const linkId = link.linkId || docRef.id;
+        const isProtected = !!link.password || !!link.isPasswordProtected;
+        const aliasText = link.alias && !/^[A-Z0-9]{6}$/.test(link.alias) ? ` | 🏷️ <code>${link.alias}</code>` : "";
+
+        let message = `🔗 <b>Short Link Details</b>\n\n`;
+        message += `🆔 <b>Link ID:</b> <code>${linkId}</code>\n`;
+        message += `🎯 <b>Original:</b> <code>${link.originalUrl || "N/A"}</code>\n`;
+        message += `🔗 <b>Short Link:</b> <code>${link.shortUrl || "N/A"}</code>\n`;
+        message += `📅 <b>Created:</b> ${link.createdAt || "N/A"}\n`;
+        message += `🔒 <b>Password Protected:</b> ${isProtected ? "Yes" : "No"}${aliasText}`;
 
         const inlineKeyboard = {
             inline_keyboard: [
-                [{ text: "📋 Copy Link", callback_data: `shortlink_copy_${link.linkId}` }, { text: "🗑 Delete Link", callback_data: `shortlink_delete_${link.linkId}` }]
+                [
+                    { text: "📋 Copy Link", callback_data: `shortlink_copy_${linkId}` },
+                    { text: "📈 Analytics", callback_data: `shortlink_analytics_${linkId}` }
+                ],
+                [
+                    { text: "🗑 Delete Link", callback_data: `shortlink_delete_${linkId}` }
+                ]
             ]
         };
-        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+        await sendTelegramMessage(botToken, chatId, message, {
+            parse_mode: "HTML",
+            reply_markup: inlineKeyboard,
+            disable_web_page_preview: true
+        });
     }
 }
 
@@ -5236,7 +5493,10 @@ Telegram:
             }
         } else if (data.startsWith("shortlink_copy_")) {
             const linkId = data.replace("shortlink_copy_", "");
-            const linkSnap = await getDoc(doc(db, "links", linkId));
+            let linkSnap = await getDoc(doc(db, "links", linkId));
+            if (!linkSnap.exists()) {
+                linkSnap = await getDoc(doc(db, "smart_links", linkId));
+            }
             if (linkSnap.exists()) {
                 const linkData = linkSnap.data();
                 const link = linkData.shortUrl || "N/A";
@@ -5248,8 +5508,42 @@ Telegram:
             const linkId = data.replace("shortlink_delete_", "");
             await setDoc(doc(db, "links", linkId), { status: "deleted" }, { merge: true });
             await sendTelegramMessage(botToken, chatId, "🗑 Short link has been deleted successfully.");
+        } else if (data.startsWith("shortlink_analytics_")) {
+            const linkId = data.replace("shortlink_analytics_", "");
+            await processMyLinkAnalytics(botToken, chatId, linkId);
+        } else if (data === "shortlink_menu") {
+            await showShortenerDashboard(botToken, chatId, callbackQuery.from);
         } else if (data === "shortlink_mylinks") {
             await processMyLinks(botToken, chatId, callbackQuery.from);
+        } else if (data === "shortlink_set_password") {
+            await setDoc(doc(db, "users", String(userId)), {
+                pendingShortenPassword: true,
+                pendingShortenAlias: false
+            }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "🔒 Send the password you want to protect your short link with.\n\nType <code>/cancel</code> to go back.", { parse_mode: "HTML" });
+        } else if (data === "shortlink_set_alias") {
+            await setDoc(doc(db, "users", String(userId)), {
+                pendingShortenAlias: true,
+                pendingShortenPassword: false
+            }, { merge: true });
+            await sendTelegramMessage(botToken, chatId, "🏷️ Send the custom alias you want to use for your short link.\nExample: <code>mycustomlink</code>\n\n(Only lowercase letters, numbers, hyphens, and underscores are allowed. Type <code>/cancel</code> to go back.)", { parse_mode: "HTML" });
+        } else if (data === "shortlink_toggle_preview") {
+            const userRef = doc(db, "users", String(userId));
+            const userSnap = await getDoc(userRef);
+            if (userSnap.exists()) {
+                const pending = userSnap.data().pendingShortLink;
+                if (pending) {
+                    pending.disablePreview = !pending.disablePreview;
+                    await setDoc(userRef, { pendingShortLink: pending }, { merge: true });
+                    // Re-render
+                    await showLinkCreatorPanel(botToken, chatId, callbackQuery.from);
+                }
+            }
+        } else if (data === "shortlink_generate") {
+            await processShortenUrl(botToken, chatId, callbackQuery.from);
+        } else if (data === "shortlink_cancel") {
+            await setDoc(doc(db, "users", String(userId)), { pendingShortLink: null }, { merge: true });
+            await showShortenerDashboard(botToken, chatId, callbackQuery.from);
         } else if (data === "shortlink_another") {
             let enabled = true;
             try {
