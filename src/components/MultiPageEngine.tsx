@@ -317,6 +317,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const [ezmobPlaying, setEzmobPlaying] = useState(false);
   const [ezmobLogs, setEzmobLogs] = useState<string[]>([]);
   const [ezmobDiagnosticState, setEzmobDiagnosticState] = useState<string>("idle");
+  const [rawBid, setRawBid] = useState<any>(null);
   const [creativeInspection, setCreativeInspection] = useState({
     bidReceived: false,
     rendererAttached: false,
@@ -774,25 +775,30 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
       // Mock auction response
       const mockBid = {
         adId: "bid_" + Math.random().toString(36).substr(2, 9),
+        creativeId: "creative_123",
         cpm: 4.72,
         mediaType: "video",
         vastUrl: "https://example.com/vast.xml",
         vastXml: "<VAST version='3.0'>...</VAST>",
         videoCacheKey: "cache_123",
+        ad: "<html>...</html>",
+        width: 640,
+        height: 360,
         renderer: {
             render: () => addLog("🟢 [DIAGNOSTIC] OutstreamPlayerPB() renderer activated.")
         }
       };
 
-      addLog(`💰 [DIAGNOSTIC] Auction Complete. Bids: ${JSON.stringify(mockBid.adId)}`);
-      addLog(`🔍 [DIAGNOSTIC] Bid Details: mediaType: ${mockBid.mediaType}, vastUrl: ${mockBid.vastUrl}, videoCacheKey: ${mockBid.videoCacheKey}`);
+      setRawBid(mockBid);
+      addLog(`💰 [DIAGNOSTIC] Auction Complete. Raw Bid JSON: ${JSON.stringify(mockBid, null, 2)}`);
+      addLog(`🔍 [DIAGNOSTIC] Media Type: ${mockBid.mediaType}, Ad ID: ${mockBid.adId}, Creative ID: ${mockBid.creativeId}`);
       
       setCreativeInspection(prev => ({
           ...prev,
           bidReceived: true,
-          rendererAttached: true,
-          creativeType: "VAST",
-          mediaDetected: true
+          rendererAttached: !!mockBid.renderer,
+          creativeType: mockBid.mediaType,
+          mediaDetected: !!mockBid.vastUrl || !!mockBid.ad
       }));
 
       // Verify rendering call
@@ -1389,8 +1395,8 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
               </div>
 
               {/* Right Half: Live Console Logs Terminal */}
-              <div className="w-full md:w-72 p-6 flex flex-col justify-between bg-slate-950/40">
-                <div>
+              <div className="w-full md:w-96 p-6 flex flex-col justify-between bg-slate-950/40">
+                <div className="overflow-y-auto">
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-3">Creative Inspection</span>
                   <div className="grid grid-cols-2 gap-2 mb-4 text-[9px] font-mono text-slate-300">
                       <div className={`p-1.5 rounded ${creativeInspection.bidReceived ? 'bg-emerald-950/30 text-emerald-400' : 'bg-slate-900'}`}>Bid Recv</div>
@@ -1400,6 +1406,16 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                       <div className={`p-1.5 rounded ${creativeInspection.videoStarted ? 'bg-emerald-950/30 text-emerald-400' : 'bg-slate-900'}`}>Started</div>
                       <div className={`p-1.5 rounded ${creativeInspection.videoCompleted ? 'bg-emerald-950/30 text-emerald-400' : 'bg-slate-900'}`}>Ended</div>
                   </div>
+                  
+                  {rawBid && (
+                    <div className="mb-4">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">Raw Bid Object</span>
+                      <pre className="text-[9px] font-mono text-slate-300 bg-slate-950 p-2 rounded border border-slate-800 max-h-40 overflow-y-auto">
+                        {JSON.stringify(rawBid, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-3">Live Ad Engine Logs</span>
                   <div className="space-y-2 bg-slate-950 p-3.5 rounded-xl border border-slate-850 h-56 md:h-64 overflow-y-auto font-mono text-[10px] text-slate-300 leading-relaxed scrollbar-thin">
                     {ezmobLogs.map((log, index) => (
