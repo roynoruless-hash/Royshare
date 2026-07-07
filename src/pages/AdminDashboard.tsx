@@ -211,6 +211,7 @@ export default function AdminDashboard() {
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
   const [smartLinks, setSmartLinks] = useState<any[]>([]);
+  const [analyticsLinkId, setAnalyticsLinkId] = useState<string | null>(null);
   const [smartLinksLoading, setSmartLinksLoading] = useState(false);
   const [smartLinksError, setSmartLinksError] = useState("");
   const [smartLinkSearch, setSmartLinkSearch] = useState("");
@@ -2180,7 +2181,13 @@ export default function AdminDashboard() {
   ).length;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans pt-20">
+    <>
+      {analyticsLinkId && (
+         <div className="fixed inset-0 z-[100] bg-[#020617] overflow-y-auto">
+            <LinkAnalyticsPage linkId={analyticsLinkId} onBack={() => setAnalyticsLinkId(null)} />
+         </div>
+      )}
+      <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans pt-20">
       {/* Header */}
       <div className="mb-8 border-b border-slate-800 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -4763,6 +4770,56 @@ export default function AdminDashboard() {
 
               {shortenerSubTab === "self" ? (
                 <div className="space-y-6">
+                  <div className="space-y-4 mb-8">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">✨ Recently Created</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                      {smartLinks.slice(0, 3).map(link => (
+                        <div key={link.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
+                           <div className="flex justify-between items-start">
+                             <div className="flex flex-col">
+                               <span className="text-white font-bold text-sm truncate max-w-[200px]" title={link.destinationUrl}>{link.destinationUrl}</span>
+                               <span className="text-indigo-400 text-xs font-mono">{link.shortUrl}</span>
+                             </div>
+                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${link.status === "Enabled" ? "bg-emerald-500/15 text-emerald-400" : "bg-rose-500/15 text-rose-400"}`}>{link.status}</span>
+                           </div>
+                           <div className="flex flex-wrap gap-2 mt-auto">
+                              <button onClick={() => {
+                                  if (navigator.clipboard) {
+                                     navigator.clipboard.writeText(link.shortUrl || link.destinationUrl);
+                                     alert("Copied to clipboard!");
+                                  }
+                              }} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded transition">📋 Copy</button>
+                              <button onClick={() => {
+                                  const shareData = { title: 'Link', url: link.shortUrl || link.destinationUrl };
+                                  if (navigator.share && navigator.canShare(shareData)) {
+                                     navigator.share(shareData);
+                                  } else {
+                                     alert("Share not supported");
+                                  }
+                              }} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded transition">📤 Share</button>
+                              <button onClick={() => setAnalyticsLinkId(link.id || link.alias)} className="px-2 py-1 bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 text-xs rounded transition">📊 Analytics</button>
+                              <button onClick={() => {
+                                setSmartLinkForm({
+                                  ...link,
+                                  autoGenerateAlias: !link.customAlias && link.alias ? false : true,
+                                });
+                                setModalAction("edit_smart_link");
+                              }} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded transition">✏️ Edit</button>
+                              <button onClick={async () => {
+                                if (confirm("Delete this smart link?")) {
+                                  try {
+                                    const res = await fetch(`/api/admin/smart-links/${link.id}`, { method: "DELETE" });
+                                    if (res.ok) fetchSmartLinks();
+                                  } catch(e) {}
+                                }
+                              }} className="px-2 py-1 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 text-xs rounded transition">🗑️ Delete</button>
+                           </div>
+                        </div>
+                      ))}
+                      {smartLinks.length === 0 && <p className="text-slate-500 text-sm">No links found.</p>}
+                    </div>
+                  </div>
+
                   <div className="flex flex-col md:flex-row justify-between gap-4 items-center">
                     <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                       🔗 Self-Hosted Smart URL Shortener (SELF MODE)
@@ -4986,14 +5043,47 @@ export default function AdminDashboard() {
                                       : "N/A"}
                                   </td>
                                   <td className="p-4">
-                                    <span
-                                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${link.status === "Enabled" ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/15 text-rose-400 border border-rose-500/20"}`}
-                                    >
-                                      {link.status}
-                                    </span>
+                                    <div className="flex flex-col gap-1 items-start">
+                                      <span
+                                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${link.status === "Enabled" ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/15 text-rose-400 border border-rose-500/20"}`}
+                                      >
+                                        {link.status === "Enabled" ? "Active" : "Disabled"}
+                                      </span>
+                                      {link.isPasswordProtected && (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/20">
+                                          Password Protected
+                                        </span>
+                                      )}
+                                      {link.alias && !/^[A-Z0-9]{6}$/.test(link.alias) && (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
+                                          Custom Alias
+                                        </span>
+                                      )}
+                                    </div>
                                   </td>
                                   <td className="p-4 text-center">
                                     <div className="flex items-center justify-center gap-2">
+                                      <button onClick={() => {
+                                            if (navigator.clipboard) {
+                                               navigator.clipboard.writeText(link.shortUrl || link.destinationUrl);
+                                               alert("Copied to clipboard!");
+                                            }
+                                        }} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium transition cursor-pointer">
+                                        📋 Copy
+                                      </button>
+                                      <button onClick={() => {
+                                            const shareData = { title: 'Link', url: link.shortUrl || link.destinationUrl };
+                                            if (navigator.share && navigator.canShare(shareData)) {
+                                               navigator.share(shareData);
+                                            } else {
+                                               alert("Share not supported. Copy instead!");
+                                            }
+                                        }} className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium transition cursor-pointer">
+                                        📤 Share
+                                      </button>
+                                      <button onClick={() => setAnalyticsLinkId(link.id || link.alias)} className="px-2 py-1 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded font-medium transition cursor-pointer border border-blue-500/30">
+                                        📊 Analytics
+                                      </button>
                                       <button
                                         onClick={() => {
                                           setSmartLinkForm({
@@ -13330,40 +13420,38 @@ export default function AdminDashboard() {
                           />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="flex items-center">
-                            <label className="flex items-center gap-2 text-sm font-medium text-slate-400 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={smartLinkForm.autoGenerateAlias}
-                                onChange={(e) =>
-                                  setSmartLinkForm({
-                                    ...smartLinkForm,
-                                    autoGenerateAlias: e.target.checked,
-                                  })
-                                }
-                                className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
-                              />
-                              Auto-Alias
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-2">Password Protected Link</label>
+                          <div className="flex items-center gap-4 mb-3">
+                            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                              <input type="radio" checked={!smartLinkForm.isPasswordProtected} onChange={() => setSmartLinkForm({...smartLinkForm, isPasswordProtected: false})} className="text-indigo-600 focus:ring-indigo-500" /> No
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                              <input type="radio" checked={smartLinkForm.isPasswordProtected} onChange={() => setSmartLinkForm({...smartLinkForm, isPasswordProtected: true})} className="text-indigo-600 focus:ring-indigo-500" /> Yes
+                            </label>
+                          </div>
+                          {smartLinkForm.isPasswordProtected && (
+                            <div className="mb-4">
+                              <label className="block text-sm font-medium text-slate-400 mb-1">Password</label>
+                              <input type="text" value={smartLinkForm.password || ""} onChange={(e) => setSmartLinkForm({...smartLinkForm, password: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-indigo-500 text-xs" />
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-slate-400 mb-2">Custom Alias</label>
+                          <div className="flex items-center gap-4 mb-3">
+                            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                              <input type="radio" checked={smartLinkForm.autoGenerateAlias} onChange={() => setSmartLinkForm({...smartLinkForm, autoGenerateAlias: true, customAlias: ""})} className="text-indigo-600 focus:ring-indigo-500" /> No
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                              <input type="radio" checked={!smartLinkForm.autoGenerateAlias} onChange={() => setSmartLinkForm({...smartLinkForm, autoGenerateAlias: false})} className="text-indigo-600 focus:ring-indigo-500" /> Yes
                             </label>
                           </div>
                           {!smartLinkForm.autoGenerateAlias && (
-                            <div>
-                              <label className="block text-sm font-medium text-slate-400 mb-1">
-                                ✍️ Custom Alias
-                              </label>
-                              <input
-                                type="text"
-                                value={smartLinkForm.customAlias}
-                                onChange={(e) =>
-                                  setSmartLinkForm({
-                                    ...smartLinkForm,
-                                    customAlias: e.target.value,
-                                  })
-                                }
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-1.5 text-white focus:outline-none focus:border-indigo-500 text-xs"
-                                placeholder="e.g. my-custom-link"
-                              />
+                            <div className="mb-4">
+                              <label className="block text-sm font-medium text-slate-400 mb-1">Alias</label>
+                              <input type="text" value={smartLinkForm.customAlias} onChange={(e) => setSmartLinkForm({...smartLinkForm, customAlias: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-indigo-500 text-xs" placeholder="myalias" />
                             </div>
                           )}
                         </div>
@@ -15841,6 +15929,6 @@ export default function AdminDashboard() {
         </div>
       ) : null}
     </div>
+    </>
   );
 }
-

@@ -5548,7 +5548,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
   app.post("/api/smart-links/session/init", async (req, res) => {
     try {
-      const { type, id, browser, device, country } = req.body;
+      const { type, id, browser, device, country, referrer } = req.body;
       if (!type || !id) return res.status(400).json({ success: false, message: "Missing required parameters" });
 
       const ip = req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "Unknown";
@@ -5867,6 +5867,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         country,
         device,
         browser,
+        referrer: referrer || "Direct",
         createdAt: new Date().toISOString()
       });
 
@@ -5919,6 +5920,52 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     } catch (err: any) {
       console.error("Error initiating smart link session:", err);
       res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
+  
+  app.post("/api/smart-links/session/verify-password", async (req, res) => {
+    try {
+      const { sessionId, password } = req.body;
+      if (!sessionId || !password) return res.status(400).json({ success: false, message: "Missing sessionId or password" });
+
+      const sessionSnap = await getDoc(doc(db, "shortener_sessions", sessionId));
+      if (!sessionSnap.exists()) return res.status(404).json({ success: false, message: "Session not found" });
+      const sessionData = sessionSnap.data();
+
+      // Find the link
+      let linkSnap = await getDoc(doc(db, "smart_links", sessionData.linkId));
+      if (!linkSnap.exists()) {
+         linkSnap = await getDoc(doc(db, "links", sessionData.linkId));
+      }
+      if (!linkSnap.exists()) {
+        const qLinkAlias = query(collection(db, "links"), where("alias", "==", sessionData.linkId));
+        const qLinkAliasSnap = await getDocs(qLinkAlias);
+        if (!qLinkAliasSnap.empty) {
+          linkSnap = qLinkAliasSnap.docs[0];
+        } else {
+          const qSmart = query(collection(db, "smart_links"), where("alias", "==", sessionData.linkId));
+          const qSmartSnap = await getDocs(qSmart);
+          if (!qSmartSnap.empty) {
+             linkSnap = qSmartSnap.docs[0];
+          }
+        }
+      }
+
+      if (!linkSnap || !linkSnap.exists) return res.status(404).json({ success: false, message: "Link not found" });
+      
+      const linkData = linkSnap.exists() ? linkSnap.data() : linkSnap.data();
+      
+      if (linkData.password === password) {
+         // Optionally track password unlocked in session
+         await updateDoc(doc(db, "shortener_sessions", sessionId), { passwordVerified: true });
+         return res.json({ success: true });
+      } else {
+         return res.status(401).json({ success: false, message: "Incorrect password" });
+      }
+    } catch (err: any) {
+      console.error(err);
+      return res.status(500).json({ success: false, message: "Server error" });
     }
   });
 
@@ -6215,6 +6262,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const {
         destinationUrl,
         customAlias,
+        isPasswordProtected,
+        password,
         totalPages,
         autoRedirect,
         finalRedirectDelay,
@@ -6230,6 +6279,9 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       let alias = customAlias ? customAlias.trim() : "";
       if (alias) {
+        if (!/^[a-zA-Z0-9_-]+$/.test(alias)) {
+          return res.status(400).json({ error: "Alias must only contain letters, numbers, dashes, and underscores." });
+        }
         const q = query(collection(db, "smart_links"), where("alias", "==", alias));
         const qSnap = await getDocs(q);
         if (!qSnap.empty) {
@@ -6262,6 +6314,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         destinationUrl,
         alias,
         shortUrl,
+        isPasswordProtected: isPasswordProtected === true,
+        password: password || "",
         totalPages: Number(totalPages) || 1,
         autoRedirect: autoRedirect !== false,
         finalRedirectDelay: Number(finalRedirectDelay) || 0,
