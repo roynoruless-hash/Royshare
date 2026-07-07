@@ -60,10 +60,6 @@ export default function AdminDashboard() {
   });
   const [taskView, setTaskView] = useState<'tasks' | 'stats'>('tasks');
 
-  const [adSearch, setAdSearch] = useState("");
-  const [adFilterNetwork, setAdFilterNetwork] = useState("All");
-  const [adFilterType, setAdFilterType] = useState("All");
-
   const [bonusSettings, setBonusSettings] = useState<any>(null);
   const [bonusSettingsLoading, setBonusSettingsLoading] = useState(false);
   const [bonusHistory, setBonusHistory] = useState<any[]>([]);
@@ -996,19 +992,8 @@ export default function AdminDashboard() {
     window.open(`${API_BASE}/api/admin/users/export`, "_blank");
   };
 
-  const fetchAds = async () => {
-    setAdsLoading(true);
-    setAdsError("");
-    try {
-      const res = await fetch(`${API_BASE}/api/admin/ads`);
-      if (!res.ok) throw new Error("Failed to fetch ads");
-      setAds(await res.json());
-    } catch (err: any) {
-      setAdsError(err.message);
-    } finally {
-      setAdsLoading(false);
-    }
-  };
+
+  // END OF AD SETTINGS
 
   const fetchAdPlacements = async () => {
     setAdPlacementsLoading(true);
@@ -3896,49 +3881,6 @@ export default function AdminDashboard() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Search and Filters Bar */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">🔍 Search Ads</label>
-                      <input 
-                        type="text"
-                        value={adSearch}
-                        onChange={(e) => setAdSearch(e.target.value)}
-                        placeholder="Search by Name, Zone ID, Placement..."
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-white text-xs placeholder-slate-600 focus:outline-none focus:border-blue-500 font-medium"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">🔌 Filter Network</label>
-                      <select
-                        value={adFilterNetwork}
-                        onChange={(e) => setAdFilterNetwork(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-blue-500 font-bold"
-                      >
-                        <option value="All">All Networks</option>
-                        <option value="Custom">Custom</option>
-                        <option value="Direct">Direct</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">🎯 Filter Type</label>
-                      <select
-                        value={adFilterType}
-                        onChange={(e) => setAdFilterType(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-blue-500 font-bold"
-                      >
-                        <option value="All">All Types</option>
-                        <option value="Banner">Banner</option>
-                        <option value="Native">Native</option>
-                        <option value="Direct Link">Direct Link</option>
-                        <option value="Interstitial">Interstitial</option>
-                        <option value="Display">Display Banner</option>
-                        <option value="Video Slider">Video Slider</option>
-                        <option value="Pop-Under">Pop-Under</option>
-                        <option value="In-stream Video">In-stream Video</option>
-                      </select>
-                    </div>
-                  </div>
 
                   <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
                     <div className="overflow-x-auto">

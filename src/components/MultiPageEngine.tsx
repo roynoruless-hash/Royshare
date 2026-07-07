@@ -526,8 +526,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
 
       {/* Main Content Arena */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 w-full max-w-7xl mx-auto">
-        {/* OnClickA Top Header Banners */}
-
 
         <div className="w-full max-w-xl bg-slate-900/80 backdrop-blur-md rounded-2xl p-8 border border-white/10 shadow-2xl space-y-6">
           <AnimatePresence mode="wait">
@@ -548,8 +546,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                     {currentPageConfig ? currentPageConfig.instructions || itemData?.instructions : itemData?.instructions || "Follow the instructions below to unlock your destination link."}
                   </p>
                 </div>
-
-                {/* Above Verify OnClickA Banners */}
 
                 {/* Progress Indicators */}
                 <div className="bg-slate-950/60 rounded-xl p-6 border border-white/5 space-y-4 text-sm relative overflow-hidden">
@@ -675,8 +671,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                   </div>
                 )}
 
-                {/* Below Verify OnClickA Banners */}
-
                 {/* Scroll reference anchor */}
                 <div ref={bottomRef} className="h-2" />
               </motion.div>
@@ -698,8 +692,6 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                     </p>
                   </div>
                 </div>
-
-                {/* Above Verify OnClickA Banners */}
 
                 {type === "download" ? (
                   // DOWNLOAD FINAL CORE VIEW
