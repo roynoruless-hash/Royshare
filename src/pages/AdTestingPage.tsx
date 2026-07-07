@@ -10,13 +10,14 @@ export default function AdTestingPage() {
     setLogs(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), type, message }]);
   };
 
-  const runAd = () => {
+  const runAd = async () => {
     if (!sandboxRef.current) return;
     addLog('system', 'Initializing sandbox...');
     
     const sandboxDoc = sandboxRef.current.contentDocument;
     if (!sandboxDoc) return;
 
+    // Reset sandbox
     sandboxDoc.open();
     sandboxDoc.write(`
       <html>
@@ -32,12 +33,49 @@ export default function AdTestingPage() {
             };
           </script>
         </head>
-        <body>
-          ${scriptInput}
-        </body>
+        <body></body>
       </html>
     `);
     sandboxDoc.close();
+
+    addLog('system', 'Parsing HTML...');
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(scriptInput, 'text/html');
+    addLog('system', 'HTML Parsed.');
+
+    const nodes = Array.from(doc.body.childNodes);
+    
+    for (const node of nodes) {
+      if (node.nodeName === 'SCRIPT') {
+        const scriptNode = node as HTMLScriptElement;
+        if (scriptNode.src) {
+          addLog('system', `External Script Found: ${scriptNode.src}`);
+          await new Promise((resolve) => {
+            const s = sandboxDoc.createElement('script');
+            s.src = scriptNode.src;
+            s.async = false;
+            s.onload = () => {
+              addLog('system', 'External Script Loaded: ' + scriptNode.src);
+              resolve(null);
+            };
+            s.onerror = () => {
+              addLog('error', `Script load error: ${scriptNode.src}`);
+              resolve(null);
+            };
+            sandboxDoc.body.appendChild(s);
+          });
+        } else {
+          addLog('system', 'Executing Inline Script...');
+          const s = sandboxDoc.createElement('script');
+          s.text = scriptNode.text;
+          sandboxDoc.body.appendChild(s);
+          addLog('system', 'Inline Script Executed.');
+        }
+      } else {
+        sandboxDoc.body.appendChild(sandboxDoc.importNode(node, true));
+      }
+    }
+    addLog('system', 'All scripts processed. Ad Container ready.');
   };
 
   useEffect(() => {
@@ -77,6 +115,7 @@ export default function AdTestingPage() {
             ref={sandboxRef}
             className="w-full h-64 bg-white rounded-lg border-0"
             title="sandbox"
+            sandbox="allow-scripts allow-same-origin allow-forms"
           />
         </div>
       </div>
