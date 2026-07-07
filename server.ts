@@ -5546,43 +5546,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   // SMART URL SHORTENER PUBLIC & ADMIN APIs
   // ==========================================
 
-  app.get("/api/onclicka/vast", async (req, res) => {
-    const { spotId, url } = req.query;
-    if (!spotId && !url) {
-      return res.status(400).json({ success: false, error: "Missing spotId or url parameter" });
-    }
-    try {
-      let targetUrl = "";
-      if (url) {
-        targetUrl = decodeURIComponent(url as string);
-      } else {
-        targetUrl = `https://syndication.onclckmn.com/vast?spotId=${spotId}`;
-      }
-
-      // Ensure protocol is valid
-      if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
-        return res.status(400).json({ success: false, error: "Invalid URL protocol. Must start with http:// or https://" });
-      }
-
-      const response = await fetch(targetUrl, {
-        headers: {
-          "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "application/xml, text/xml, */*"
-        }
-      });
-      if (!response.ok) {
-        return res.status(response.status).json({ success: false, error: `Ad server returned status ${response.status}` });
-      }
-      const xmlText = await response.text();
-      res.set("Content-Type", "application/xml");
-      res.set("Access-Control-Allow-Origin", "*");
-      return res.send(xmlText);
-    } catch (err: any) {
-      console.error(`[OnClickA VAST Proxy] Error fetching URL:`, err);
-      return res.status(500).json({ success: false, error: err.message || "Network Error" });
-    }
-  });
-
   app.post("/api/smart-links/session/init", async (req, res) => {
     try {
       const { type, id, browser, device, country } = req.body;
@@ -5720,16 +5683,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           onclickaSdkScript: "",
           onclickaSdkSpotId: "",
           onclickaBannerSize: "728x90",
-          onclickaSpots: [],
-          onclickaVideoEnabled: false,
-          onclickaVideoTimeout: 8,
-          onclickaVideoRetryAttempts: 2,
-          onclickaVideoSpots: [],
-          onclickaVideoAutoRotation: true,
-          onclickaVideoFallbackToBanner: true,
-          onclickaVideoShowDebugLogs: true,
-          onclickaAdType: "banner",
-          onclickaVastUrl: ""
+          onclickaSpots: []
         };
         try {
           const adSettingsSnap = await getDoc(doc(db, "settings", "advertisement"));
@@ -5740,16 +5694,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
               onclickaSdkScript: adData.onclickaSdkScript || "",
               onclickaSdkSpotId: adData.onclickaSdkSpotId || "",
               onclickaBannerSize: adData.onclickaBannerSize || "728x90",
-              onclickaSpots: adData.onclickaSpots || [],
-              onclickaVideoEnabled: adData.onclickaVideoEnabled ?? false,
-              onclickaVideoTimeout: adData.onclickaVideoTimeout ?? 8,
-              onclickaVideoRetryAttempts: adData.onclickaVideoRetryAttempts ?? 2,
-              onclickaVideoSpots: adData.onclickaVideoSpots || [],
-              onclickaVideoAutoRotation: adData.onclickaVideoAutoRotation ?? true,
-              onclickaVideoFallbackToBanner: adData.onclickaVideoFallbackToBanner ?? true,
-              onclickaVideoShowDebugLogs: adData.onclickaVideoShowDebugLogs ?? true,
-              onclickaAdType: adData.onclickaAdType || "banner",
-              onclickaVastUrl: adData.onclickaVastUrl || ""
+              onclickaSpots: adData.onclickaSpots || []
             };
           }
         } catch (err) {
@@ -5924,15 +5869,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         onclickaSdkSpotId: adSettings.onclickaSdkSpotId || "",
         onclickaBannerSize: adSettings.onclickaBannerSize || "728x90",
         onclickaSpots: adSettings.onclickaSpots || [],
-        onclickaVideoEnabled: adSettings.onclickaVideoEnabled ?? false,
-        onclickaVideoTimeout: adSettings.onclickaVideoTimeout ?? 8,
-        onclickaVideoRetryAttempts: adSettings.onclickaVideoRetryAttempts ?? 2,
-        onclickaVideoSpots: adSettings.onclickaVideoSpots || [],
-        onclickaVideoAutoRotation: adSettings.onclickaVideoAutoRotation ?? true,
-        onclickaVideoFallbackToBanner: adSettings.onclickaVideoFallbackToBanner ?? true,
-        onclickaVideoShowDebugLogs: adSettings.onclickaVideoShowDebugLogs ?? true,
-        onclickaAdType: adSettings.onclickaAdType || "banner",
-        onclickaVastUrl: adSettings.onclickaVastUrl || "",
         data: publicItemData
       });
 
@@ -7483,16 +7419,40 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     });
     app.use(vite.middlewares);
   } else {
-    app.get('/', (req, res, next) => {
-      debugLog("ROOT ROUTE HIT");
-      next();
-    });
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    
+    const serveIndexWithComment = (req: express.Request, res: express.Response) => {
       const indexPath = path.join(distPath, 'index.html');
-      debugLog(`Serving index from: ${indexPath}`);
-      res.sendFile(indexPath);
+      debugLog(`Serving index dynamically from: ${indexPath}`);
+      try {
+        let html = fs.readFileSync(indexPath, 'utf8');
+        if (!html.includes('EZMob Site Validation Code: EZMTNDAFBDSCOTJPM5F')) {
+          debugLog("Comment missing in index.html, dynamically injecting...");
+          const comment = '\n    <!-- EZMob Site Validation Code: EZMTNDAFBDSCOTJPM5F -->\n  ';
+          if (html.includes('</head>')) {
+            html = html.replace('</head>', `${comment}</head>`);
+          } else {
+            html = html + comment;
+          }
+        }
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+      } catch (err: any) {
+        debugLog(`Failed to read index.html dynamically: ${err.message}`);
+        res.sendFile(indexPath);
+      }
+    };
+
+    app.get('/', serveIndexWithComment);
+    app.get('/index.html', serveIndexWithComment);
+
+    app.use(express.static(distPath, { index: false }));
+
+    app.get('*', (req, res, next) => {
+      if (!req.headers.accept || req.headers.accept.includes("text/html")) {
+        return serveIndexWithComment(req, res);
+      }
+      next();
     });
   }
 
