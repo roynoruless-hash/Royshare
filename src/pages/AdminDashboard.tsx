@@ -2335,7 +2335,7 @@ export default function AdminDashboard() {
         <div className="space-y-8 max-w-7xl mx-auto">
           {/* Navigation Buttons */}
           <div className="flex flex-wrap gap-3">
-            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "🔗 Smart URL Shortener", "📥 Google Drive Accounts", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "⚙️ System Settings", "📢 Advertisement Settings"].map((btn) => (
+            {["Overview", "👥 Users", "💸 Withdrawals", "🎫 Support", "📢 Announcements", "💰 Rewards", "🎁 Daily Bonus", "🔗 Smart URL Shortener", "📥 Google Drive Accounts", "📉 Analytics", "📢 Broadcast", "💰 Verified Tasks", "🛡 Security Center", "📜 Activity Logs", "📥 Backup & Restore", "⚙️ System Settings"].map((btn) => (
               <button 
                 key={btn} 
                 onClick={() => {
