@@ -38,12 +38,15 @@ export default function AdTestingPage() {
     `);
     sandboxDoc.close();
 
-    addLog('system', 'Parsing HTML...');
+    addLog('system', `Parsing HTML... Input length: ${scriptInput.length}`);
     const parser = new DOMParser();
     const doc = parser.parseFromString(scriptInput, 'text/html');
     addLog('system', 'HTML Parsed.');
 
-    const nodes = Array.from(doc.body.childNodes);
+    const nodes = [
+      ...Array.from(doc.head.childNodes),
+      ...Array.from(doc.body.childNodes)
+    ];
     
     for (const node of nodes) {
       if (node.nodeName === 'SCRIPT') {
@@ -58,11 +61,11 @@ export default function AdTestingPage() {
               addLog('system', 'External Script Loaded: ' + scriptNode.src);
               resolve(null);
             };
-            s.onerror = () => {
+            s.onerror = (e) => {
               addLog('error', `Script load error: ${scriptNode.src}`);
               resolve(null);
             };
-            sandboxDoc.body.appendChild(s);
+            sandboxDoc.head.appendChild(s); // Append to head for better compatibility
           });
         } else {
           addLog('system', 'Executing Inline Script...');
@@ -71,7 +74,7 @@ export default function AdTestingPage() {
           sandboxDoc.body.appendChild(s);
           addLog('system', 'Inline Script Executed.');
         }
-      } else {
+      } else if (node.nodeName !== '#text' || node.textContent?.trim()) {
         sandboxDoc.body.appendChild(sandboxDoc.importNode(node, true));
       }
     }
