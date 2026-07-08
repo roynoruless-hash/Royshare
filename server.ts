@@ -2118,12 +2118,15 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
   });
 
   app.post("/api/admin/users/:id/message", async (req, res) => {
+    debugLog(`[DEBUG] Received request at /api/admin/users/${req.params.id}/message`);
     try {
       const { id } = req.params;
       const { type, content } = req.body;
-      // Note: this assumes we send it via telegram bot API if user ID is a tg chat id.
-      // But we just return success for now.
-      res.json({ success: true });
+      debugLog(`[DEBUG] Message details: id=${id}, type=${type}, content=${content}`);
+      
+      await sendTgMessage(id, content || "No content provided.");
+      
+      res.json({ success: true, message: "Message sent" });
     } catch (e: any) {
       console.error("Admin user message error:", e);
       res.status(500).json({ error: "Server error" });
