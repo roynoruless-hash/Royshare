@@ -41,8 +41,8 @@ import { API_BASE } from "../config/api";
 import { MyLinksPage } from "./MyLinksPage";
 import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
 import { MyContentPage } from "./MyContentPage";
+import ReferralCenter from "./ReferralCenter";
 import DriveUploadPage from "./DriveUploadPage";
-// ReferralAnalytics and ReferralList imports removed
 
 interface PhoneVerificationProps {
   user: any;
@@ -285,6 +285,7 @@ export const MiniAppHome: React.FC = () => {
   const [currentView, setCurrentView] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
     const page = params.get("page");
+    if (page === "referral") return "referral";
     if (page === "content") return "dashboard";
     if (page === "files") return "my-content";
     if (page === "links") return "my-links";
@@ -479,6 +480,20 @@ export const MiniAppHome: React.FC = () => {
           <h2 className="text-xl font-bold text-white">Daily Bonus</h2>
         </header>
         <DailyBonusPage />
+      </div>
+    );
+  }
+
+  if (currentView === "referral") {
+    return (
+      <div className="min-h-screen bg-[#020617]">
+        <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+          <button onClick={() => setCurrentView("home")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors">
+            <ArrowLeft className="w-6 h-6 text-slate-400" />
+          </button>
+          <h2 className="text-xl font-bold text-white">Referral Center</h2>
+        </header>
+        <ReferralCenter />
       </div>
     );
   }

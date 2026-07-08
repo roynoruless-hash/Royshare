@@ -1021,7 +1021,7 @@ function AdminDashboardContent() {
     }
   };
 
-  const handleUserAction = async (userId: string, action: string) => {
+  const handleUserAction = async (userId: string, action: string, input?: string) => {
     if (
       action === "delete" &&
       !confirm("⚠️ Are you sure you want to permanently delete this user?")
@@ -1049,23 +1049,48 @@ function AdminDashboardContent() {
 
     setModalLoading(true);
     try {
-      const endpoint =
-        action === "delete"
-          ? `${API_BASE}/api/admin/users/${userId}`
-          : `${API_BASE}/api/admin/users/${userId}/${action}`;
+      let endpoint = "";
+      let method = "POST";
+      let body: any = { adminId: "Admin" };
+
+      if (["add_balance", "deduct_balance", "add_bonus", "add_reward", "freeze", "unfreeze"].includes(action)) {
+        endpoint = `${API_BASE}/api/admin/users/${userId}/wallet`;
+        method = "PUT";
+        const parsed = JSON.parse(input || "{}");
+        body = {
+          amount: parsed.amount,
+          reason: parsed.reason,
+          action: action,
+        };
+      } else {
+        endpoint =
+          action === "delete"
+            ? `${API_BASE}/api/admin/users/${userId}`
+            : `${API_BASE}/api/admin/users/${userId}/${action}`;
+        method = action === "delete" ? "DELETE" : "POST";
+      }
 
       const res = await fetch(endpoint, {
-        method: action === "delete" ? "DELETE" : "POST",
+        method: method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminId: "Admin" }),
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();
       if (res.ok) {
         alert(data.message || "Action completed successfully");
-        fetchUsers();
-        if (selectedUser?.id === userId) setSelectedUser(null);
-        if (modalAction === "view_user") setModalAction("none");
+        // Update users list and the selected user in the modal
+        const updatedUsers = await (await fetch(`${API_BASE}/api/admin/users`)).json();
+        setUsers(updatedUsers);
+        if (selectedUser?.id === userId) {
+          const updatedSelectedUser = updatedUsers.find((u: any) => u.id === userId);
+          setSelectedUser(updatedSelectedUser);
+        }
+        
+        // Only close modal if it wasn't a wallet action
+        if (!["add_balance", "deduct_balance", "add_bonus", "add_reward", "freeze", "unfreeze"].includes(action) && modalAction === "view_user") {
+          setModalAction("none");
+        }
       } else {
         alert(data.error || "Action failed");
       }
@@ -1968,16 +1993,22 @@ function AdminDashboardContent() {
         method = "PUT";
         body = adForm;
       } else if (
-        modalAction === "add_balance" ||
-        modalAction === "deduct_balance"
+        [
+          "add_balance",
+          "deduct_balance",
+          "add_bonus",
+          "add_reward",
+          "freeze",
+          "unfreeze",
+        ].includes(modalAction)
       ) {
-        endpoint = `/api/admin/users/${selectedUser.id}/balance`;
+        endpoint = `/api/admin/users/${selectedUser.id}/wallet`;
         method = "PUT";
         const parsed = JSON.parse(modalInput || "{}");
         body = {
           amount: parsed.amount,
           reason: parsed.reason,
-          action: modalAction === "add_balance" ? "add" : "deduct",
+          action: modalAction,
         };
       } else if (modalAction === "ban_user") {
         endpoint = `/api/admin/users/${selectedUser.id}/status`;
@@ -2620,6 +2651,12 @@ function AdminDashboardContent() {
               </button>
             ))}
           </div>
+
+          {activeTab === "🚀 Referral System" && (
+            <div className="p-8 text-center text-slate-500">
+              Referral System UI under development.
+            </div>
+          )}
 
           {activeTab === "💰 Verified Tasks" && (
             <div className="space-y-6">

@@ -1853,40 +1853,80 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
-  app.put("/api/admin/users/:id/balance", async (req, res) => {
+  app.put("/api/admin/users/:id/wallet", async (req, res) => {
     try {
       const { id } = req.params;
       const { amount, reason, action } = req.body;
-      const userRef = doc(db, "users", id);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) return res.status(404).json({ error: "User not found" });
+      
+      const numAmount = Number(amount || 0);
+      if (numAmount < 0) throw new Error("Amount must be greater than 0");
 
-      const userData = userSnap.data();
-      const numAmount = Number(amount);
-      let newBalance = Number(userData.balance || 0);
-
-      if (action === 'add') newBalance += numAmount;
-      else if (action === 'deduct') newBalance = newBalance - numAmount; // Removed Math.max(0) to allow deductions from total balance
-
-      const fileEarnings = userData?.fileEarnings || 0;
-      const linkEarnings = userData?.linkEarnings || 0;
-      const referralEarnings = userData?.referralEarnings || 0;
-      const bonusBalance = userData?.bonusBalance !== undefined ? userData.bonusBalance : (userData?.bonus || 0);
-      const rewardBalance = userData?.rewardBalance || 0;
-      const withdrawnAmount = userData?.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData?.totalWithdrawn || 0);
-      const pendingWithdrawals = userData?.pendingWithdrawals || 0;
-
-      const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + newBalance - withdrawnAmount - pendingWithdrawals;
-
-      await setDoc(userRef, { balance: newBalance, availableBalance }, { merge: true });
-
-      // In a real app we'd trigger a telegram bot message here
-      // e.g. bot.api.sendMessage(id, `Admin ${action === 'add' ? 'added' : 'deducted'} ₹${amount}. Reason: ${reason}`);
-
-      res.json({ success: true, newBalance });
+      await runTransaction(db, async (transaction) => {
+        const userRef = doc(db, "users", id);
+        const userSnap = await transaction.get(userRef);
+        if (!userSnap.exists()) throw new Error("User not found");
+        
+        const userData = userSnap.data();
+        let updateData: any = {};
+        
+        const currentBalance = Number(userData.balance || 0);
+        const currentBonusBalance = Number(userData.bonusBalance || 0);
+        const currentRewardBalance = Number(userData.rewardBalance || 0);
+        
+        switch (action) {
+            case 'add_balance':
+                updateData.balance = currentBalance + numAmount;
+                break;
+            case 'deduct_balance':
+                if (currentBalance < numAmount) throw new Error("Insufficient balance");
+                updateData.balance = currentBalance - numAmount;
+                break;
+            case 'add_bonus':
+                updateData.bonusBalance = currentBonusBalance + numAmount;
+                break;
+            case 'add_reward':
+                updateData.rewardBalance = currentRewardBalance + numAmount;
+                break;
+            case 'freeze':
+                updateData.walletFrozen = true;
+                break;
+            case 'unfreeze':
+                updateData.walletFrozen = false;
+                break;
+            default:
+                throw new Error("Invalid action");
+        }
+        
+        // Recalculate availableBalance
+        const fileEarnings = userData?.fileEarnings || 0;
+        const linkEarnings = userData?.linkEarnings || 0;
+        const referralEarnings = userData?.referralEarnings || 0;
+        const bonusBalance = updateData.bonusBalance !== undefined ? updateData.bonusBalance : (userData?.bonusBalance || 0);
+        const rewardBalance = updateData.rewardBalance !== undefined ? updateData.rewardBalance : (userData?.rewardBalance || 0);
+        const withdrawnAmount = userData?.withdrawnAmount !== undefined ? userData.withdrawnAmount : (userData?.totalWithdrawn || 0);
+        const pendingWithdrawals = userData?.pendingWithdrawals || 0;
+        const newBalance = updateData.balance !== undefined ? updateData.balance : currentBalance;
+        
+        updateData.availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + newBalance - withdrawnAmount - pendingWithdrawals;
+        
+        transaction.update(userRef, updateData);
+        
+        // Log to Activity Logs
+        const logRef = doc(collection(db, "activityLogs"));
+        transaction.set(logRef, {
+            adminId: "admin",
+            targetUserId: id,
+            action,
+            amount: numAmount,
+            reason,
+            createdAt: new Date()
+        });
+      });
+      
+      res.json({ success: true, message: "Wallet updated successfully" });
     } catch (e: any) {
-      console.error("Admin balance update error:", e);
-      res.status(500).json({ error: "Server error" });
+      console.error("Admin wallet update error:", e);
+      res.status(500).json({ error: e.message || "Server error" });
     }
   });
 
