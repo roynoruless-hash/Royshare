@@ -493,7 +493,7 @@ export const MiniAppHome: React.FC = () => {
           </button>
           <h2 className="text-xl font-bold text-white">Referral Center</h2>
         </header>
-        <ReferralCenter />
+        <ReferralCenter user={user} />
       </div>
     );
   }
