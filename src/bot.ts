@@ -1675,87 +1675,20 @@ async function triggerActiveReferral(db: any, botToken: string, userId: string) 
 }
 
 async function processReferAndEarn(botToken: string, chatId: number, user: any) {
-    const db = getDb();
-    const userId = String(user.id);
-    const userDoc = await getDoc(doc(db, "users", userId));
-    const userData = userDoc.exists() ? userDoc.data() : null;
-    const currency = userData?.currency || "INR";
-    const inviteCode = userData?.referralCode || `RS${userId.slice(-6).toUpperCase()}`;
+    const appUrl = getAppUrl();
+    const webAppUrl = `${appUrl}/refer`;
     
-    // Get bot username dynamically if possible
-    let botUsername = "RoyShareEarnBot";
-    try {
-        const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
-        const bToken = settingsDoc.data()?.botToken;
-        if (bToken) {
-            const botMeRes = await fetch(`https://api.telegram.org/bot${bToken}/getMe`);
-            const botMeData = await botMeRes.json();
-            if (botMeData.ok && botMeData.result?.username) {
-                botUsername = botMeData.result.username;
-            }
-        }
-    } catch (e) {
-        console.error("Error getting bot username inside processReferAndEarn:", e);
-    }
+    const message = `👥 *RoyShare Referral Center*
 
-    const referralLink = `https://t.me/${botUsername}?start=${inviteCode}`;
+Welcome to the new RoyShare Referral System!
 
-    // Query referrals for this user
-    const refQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
-    const refSnap = await getDocs(refQuery);
-
-    let totalReferrals = 0;
-    let todaysReferrals = 0;
-    let pendingReferrals = 0;
-    let successfulReferrals = 0;
-
-    const todayStr = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-
-    refSnap.forEach(docSnap => {
-        const data = docSnap.data();
-        totalReferrals++;
-        if (data.joinDate === todayStr) {
-            todaysReferrals++;
-        }
-        if (data.status === "approved") {
-            successfulReferrals++;
-        } else {
-            pendingReferrals++;
-        }
-    });
-
-    const earnings = userData?.referralEarnings || 0;
-
-    const message = `👥 *Refer & Earn Dashboard*
-
-🔑 *My Invite Code:* 
-\`${inviteCode}\`
-
-🔗 *My Referral Link:* 
-\`${referralLink}\`
-
-📊 *Referral Stats:*
-━━━━━━━━━━━━━━━━━━━━
-👥 *Total Referrals:* ${totalReferrals}
-📅 *Today's Referrals:* ${todaysReferrals}
-⏳ *Pending Referrals:* ${pendingReferrals}
-✅ *Successful Referrals:* ${successfulReferrals}
-💰 *Referral Earnings:* ${formatCurrency(earnings, currency)}
-━━━━━━━━━━━━━━━━━━━━`;
+Click the button below to open your secure Referral Center in the Mini App, where you can find your invite link, track analytics, and manage your rewards.`;
 
     const inlineKeyboard = {
         inline_keyboard: [
-            [
-                { text: "📋 Copy Referral Link", callback_data: `referral_copy_${inviteCode}` },
-                { text: "📤 Share Link", url: `https://t.me/share/url?url=${encodeURIComponent(referralLink)}` }
-            ],
-            [
-                { text: "📜 Referral History", callback_data: "referral_history" },
-                { text: "🔄 Refresh", callback_data: "referral_refresh" }
-            ]
+            [{ text: "🚀 Open Referral Center", web_app: { url: webAppUrl } }]
         ]
     };
-
     await sendTelegramMessage(botToken, chatId, message, { parse_mode: "Markdown", reply_markup: inlineKeyboard });
 }
 
