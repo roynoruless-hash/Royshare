@@ -49,6 +49,7 @@ import {
 
 import React from 'react';
 import ReferralAdminManager from "../components/ReferralAdminManager";
+import UserDetailsModal from "../components/UserDetailsModal";
 interface ErrorBoundaryProps {
   children: React.ReactNode;
 }
@@ -2061,6 +2062,17 @@ function AdminDashboardContent() {
          <div className="fixed inset-0 z-[100] bg-[#020617] overflow-y-auto">
             <LinkAnalyticsPage linkId={analyticsLinkId} onBack={() => setAnalyticsLinkId(null)} />
          </div>
+      )}
+
+      {modalAction === "view_user" && selectedUser && (
+        <UserDetailsModal 
+          user={selectedUser} 
+          onClose={() => {
+            setModalAction("none");
+            setSelectedUser(null);
+          }}
+          onAction={handleUserAction}
+        />
       )}
 
       {modalAction === "view_withdrawal" && selectedWithdrawal && (
@@ -5046,7 +5058,8 @@ function AdminDashboardContent() {
                               <td className="px-6 py-4 text-right">
                                 <div className="flex items-center justify-end gap-1">
                                   <button
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                      e.stopPropagation();
                                       setSelectedUser(u);
                                       setModalAction("view_user");
                                     }}
