@@ -41,6 +41,7 @@ import { API_BASE } from "../config/api";
 import { MyLinksPage } from "./MyLinksPage";
 import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
 import { MyContentPage } from "./MyContentPage";
+import DriveUploadPage from "./DriveUploadPage";
 // ReferralAnalytics and ReferralList imports removed
 
 interface PhoneVerificationProps {

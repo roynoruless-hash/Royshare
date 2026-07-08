@@ -48,6 +48,7 @@ import {
 
 
 import React from 'react';
+import ReferralAdminManager from "../components/ReferralAdminManager";
 interface ErrorBoundaryProps {
   children: React.ReactNode;
 }
@@ -9755,79 +9756,7 @@ function AdminDashboardContent() {
                     )}
 
                     {settingsTab === "👥 Referral Settings" && (
-                      <div className="space-y-4 max-w-lg">
-                        {[
-                          "Referral Reward",
-                          "Referral Commission %",
-                          "Maximum Referral Reward",
-                        ].map((field) => (
-                          <div key={field}>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">
-                              {field}
-                            </label>
-                            <input
-                              type="text"
-                              value={
-                                systemSettings?.referralSettings?.[field] || ""
-                              }
-                              onChange={(e) =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  referralSettings: {
-                                    ...systemSettings.referralSettings,
-                                    [field]: e.target.value,
-                                  },
-                                })
-                              }
-                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500"
-                            />
-                          </div>
-                        ))}
-                        <div className="flex items-center gap-4 mt-6">
-                          <label className="flex items-center gap-2 text-slate-300">
-                            <input
-                              type="radio"
-                              name="referralsEnabled"
-                              checked={
-                                systemSettings?.referralSettings?.enabled ===
-                                true
-                              }
-                              onChange={() =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  referralSettings: {
-                                    ...systemSettings.referralSettings,
-                                    enabled: true,
-                                  },
-                                })
-                              }
-                              className="w-4 h-4 text-indigo-600"
-                            />
-                            Enable Referral System
-                          </label>
-                          <label className="flex items-center gap-2 text-slate-300">
-                            <input
-                              type="radio"
-                              name="referralsEnabled"
-                              checked={
-                                systemSettings?.referralSettings?.enabled ===
-                                false
-                              }
-                              onChange={() =>
-                                setSystemSettings({
-                                  ...systemSettings,
-                                  referralSettings: {
-                                    ...systemSettings.referralSettings,
-                                    enabled: false,
-                                  },
-                                })
-                              }
-                              className="w-4 h-4 text-indigo-600"
-                            />
-                            Disable Referral System
-                          </label>
-                        </div>
-                      </div>
+                      <ReferralAdminManager systemSettings={systemSettings} setSystemSettings={setSystemSettings} />
                     )}
 
                     {settingsTab === "🎁 Bonus Settings" && bonusSettings && (
