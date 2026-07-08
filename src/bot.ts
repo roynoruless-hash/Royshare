@@ -1539,72 +1539,42 @@ async function processMyLinks(botToken: string, chatId: number, user: any) {
     const userDoc = await getDoc(doc(db, "users", String(user.id)));
     const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
     
-    // Fetch uploads (files)
-    const qUploads = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
-    const snapshotUploads = await getDocs(qUploads);
-    
-    // Fetch shortened links
+    // Fetch shortened links (STRICTLY separate from uploads!)
     const qLinks = query(collection(db, "links"), where("userId", "==", String(user.id)));
     const snapshotLinks = await getDocs(qLinks);
     
-    const activeUploads = snapshotUploads.docs.filter(d => d.data().status !== "deleted");
     const activeLinks = snapshotLinks.docs.filter(d => d.data().status !== "deleted");
     
-    if (activeUploads.length === 0 && activeLinks.length === 0) {
-        await sendTelegramMessage(botToken, chatId, "📭 No active files uploaded or links shortened yet.\nUse 📤 Upload File or 🔗 URL Shortener to create your first link.");
-        return;
-    }
+    const webAppUrl = getMiniAppUrl("/?view=my-links");
     
-    for (const docRef of activeUploads) {
-        const file = docRef.data();
-        const displaySize = typeof file.fileSize === 'number' ? formatBytes(file.fileSize) : (file.fileSize || "N/A");
-        const formattedDate = file.uploadDate || file.uploadedAt || "N/A";
-        const earningsVal = typeof file.earnings === 'number' ? file.earnings : 0;
-        const message = `📄 File Name: ${file.fileName || "N/A"}
-📦 File Size: ${displaySize}
-📅 Upload Date: ${formattedDate}
-📥 Total Downloads: ${file.downloads || 0}
-💰 Total Earnings: ${formatCurrency(earningsVal, currency)}
-🔗 Download Link: ${file.generatedLink || file.publicLink || file.downloadLink || "N/A"}`;
-
-        const inlineKeyboard = {
-            inline_keyboard: [
-                [{ text: "📊 Stats", callback_data: `stats_${docRef.id}` }, { text: "🗑 Delete Link", callback_data: `delete_${docRef.id}` }]
-            ]
-        };
-        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
-    }
+    let message = `🔗 <b>My Short Links Manager</b>\n\n`;
+    message += `Click the button below to view, edit, copy, and delete your links inside the dedicated RoyShare URL Shortener Mini App.\n\n`;
     
-    for (const docRef of activeLinks) {
-        const link = docRef.data();
-        const linkId = link.linkId || docRef.id;
-        const isProtected = !!link.password || !!link.isPasswordProtected;
-        const aliasText = link.alias && !/^[A-Z0-9]{6}$/.test(link.alias) ? ` | 🏷️ <code>${link.alias}</code>` : "";
-
-        let message = `🔗 <b>Short Link Details</b>\n\n`;
-        message += `🆔 <b>Link ID:</b> <code>${linkId}</code>\n`;
-        message += `🎯 <b>Original:</b> <code>${link.originalUrl || "N/A"}</code>\n`;
-        message += `🔗 <b>Short Link:</b> <code>${link.shortUrl || "N/A"}</code>\n`;
-        message += `📅 <b>Created:</b> ${link.createdAt || "N/A"}\n`;
-        message += `🔒 <b>Password Protected:</b> ${isProtected ? "Yes" : "No"}${aliasText}`;
-
-        const inlineKeyboard = {
-            inline_keyboard: [
-                [
-                    { text: "📋 Copy Link", callback_data: `shortlink_copy_${linkId}` },
-                    { text: "📈 Analytics", callback_data: `shortlink_analytics_${linkId}` }
-                ],
-                [
-                    { text: "🗑 Delete Link", callback_data: `shortlink_delete_${linkId}` }
-                ]
-            ]
-        };
-        await sendTelegramMessage(botToken, chatId, message, {
-            parse_mode: "HTML",
-            reply_markup: inlineKeyboard,
-            disable_web_page_preview: true
+    if (activeLinks.length === 0) {
+        message += `📭 You have no active shortened links yet. Use 🔗 URL Shortener from the main menu to shorten your first link!`;
+    } else {
+        message += `📊 Total Active Links: <b>${activeLinks.length}</b>\n\n`;
+        activeLinks.slice(0, 5).forEach((docRef, idx) => {
+            const link = docRef.data();
+            message += `${idx + 1}. <code>${link.shortUrl || "N/A"}</code>\n`;
+            message += `🎯 Original: <code>${link.originalUrl || "N/A"}</code>\n\n`;
         });
+        if (activeLinks.length > 5) {
+            message += `<i>...and ${activeLinks.length - 5} more links. Open the Mini App to view all!</i>`;
+        }
     }
+
+    const inlineKeyboard = {
+        inline_keyboard: [
+            [{ text: "🔗 Open My Links", web_app: { url: webAppUrl } }]
+        ]
+    };
+
+    await sendTelegramMessage(botToken, chatId, message, {
+        parse_mode: "HTML",
+        reply_markup: inlineKeyboard,
+        disable_web_page_preview: true
+    });
 }
 
 async function syncReferralsForUser(db: any, botToken: string, referredUserId: string) {
