@@ -1676,7 +1676,7 @@ async function triggerActiveReferral(db: any, botToken: string, userId: string) 
 
 async function processReferAndEarn(botToken: string, chatId: number, user: any) {
     const appUrl = getAppUrl();
-    const webAppUrl = `${appUrl}/refer`;
+    const webAppUrl = `${appUrl}/referral`;
     
     const message = `👥 *RoyShare Referral Center*
 
