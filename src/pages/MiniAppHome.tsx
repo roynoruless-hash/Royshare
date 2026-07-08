@@ -41,8 +41,7 @@ import { API_BASE } from "../config/api";
 import { MyLinksPage } from "./MyLinksPage";
 import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
 import { MyContentPage } from "./MyContentPage";
-import ReferralAnalytics from "../components/ReferralAnalytics";
-import ReferralList from "../components/ReferralList";
+// ReferralAnalytics and ReferralList imports removed
 
 interface PhoneVerificationProps {
   user: any;
@@ -511,6 +510,10 @@ export const MiniAppHome: React.FC = () => {
   ];
 
   const handleAction = (id: string) => {
+    if (id === "refer") {
+      window.location.href = "/refer";
+      return;
+    }
     setCurrentView(id);
   };
 
@@ -641,98 +644,7 @@ export const MiniAppHome: React.FC = () => {
           </motion.div>
         )}
 
-        {/* 👥 Refer & Earn Dedicated View */}
-        {currentView === "refer" && (
-          <motion.div
-            key="refer-view"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="min-h-screen bg-[#020617] text-white"
-          >
-            <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
-              <button onClick={() => setCurrentView("home")} className="p-2 hover:bg-slate-800 rounded-xl transition-colors">
-                <ArrowLeft className="w-6 h-6 text-slate-400" />
-              </button>
-              <h2 className="text-xl font-bold text-white">Refer & Earn</h2>
-            </header>
-
-            <main className="p-6 space-y-6">
-              {/* Stats & List */}
-              <div className="grid grid-cols-1 gap-6">
-                <ReferralAnalytics userId={user.id} />
-                <ReferralList userId={user.id} />
-              </div>
-              
-              {/* Existing Referral Info */}
-              <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-3xl p-6 text-center shadow-xl">
-                <Share2 className="w-12 h-12 mx-auto mb-3 text-indigo-200 animate-bounce" />
-                <h3 className="text-xl font-bold mb-2">Invite Friends & Earn Lifetime Commissions</h3>
-                <p className="text-indigo-100 text-xs leading-relaxed max-w-sm mx-auto">
-                  Earn 10% on every single reward task or survey your friends complete. There is absolutely no limit!
-                </p>
-              </div>
-
-              {/* Referral Code Box */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Your Referral Code</p>
-                <div className="flex items-center justify-between bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-                  <span className="font-mono font-bold text-lg text-indigo-400">{user.referralCode}</span>
-                  <button 
-                    onClick={() => {
-                      navigator.clipboard.writeText(user.referralCode);
-                      setCopiedCode(true);
-                      setTimeout(() => setCopiedCode(false), 2000);
-                    }}
-                    className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-indigo-400"
-                  >
-                    {copiedCode ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Referral Link Box */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Your Invite Link</p>
-                <div className="flex items-center justify-between bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-                  <span className="text-xs text-slate-400 truncate pr-4">{referralLink}</span>
-                  <button 
-                    onClick={() => {
-                      navigator.clipboard.writeText(referralLink);
-                      setCopiedLink(true);
-                      setTimeout(() => setCopiedLink(false), 2000);
-                    }}
-                    className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-indigo-400 shrink-0"
-                  >
-                    {copiedLink ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Steps */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">How it works</h4>
-                <div className="space-y-3">
-                  {[
-                    { step: "1", title: "Copy Link", desc: "Share your premium invite link with your circle." },
-                    { step: "2", title: "Friends Join", desc: "They register on RoyShare using your link." },
-                    { step: "3", title: "Start Earning", desc: "You get 10% commission on all their earnings instantly." },
-                  ].map((s) => (
-                    <div key={s.step} className="flex gap-4 p-4 rounded-xl bg-slate-900/30 border border-slate-850">
-                      <div className="w-8 h-8 rounded-full bg-indigo-500/10 text-indigo-400 font-bold flex items-center justify-center border border-indigo-500/20 shrink-0">
-                        {s.step}
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm text-white">{s.title}</p>
-                        <p className="text-xs text-slate-400 leading-relaxed mt-0.5">{s.desc}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </main>
-          </motion.div>
-        )}
+        {/* 👥 Refer & Earn Dedicated View (Removed - Replaced by /refer) */}
 
         {/* 🏆 Leaderboard Dedicated View */}
         {currentView === "leaderboard" && (

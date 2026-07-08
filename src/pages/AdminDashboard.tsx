@@ -2592,6 +2592,7 @@ function AdminDashboardContent() {
               "🛡 Security Center",
               "📜 Activity Logs",
               "📥 Backup & Restore",
+              "🚀 Referral System",
               "⚙️ System Settings",
             ].map((btn) => (
               <button
