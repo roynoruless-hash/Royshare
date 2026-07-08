@@ -2062,6 +2062,304 @@ function AdminDashboardContent() {
          </div>
       )}
 
+      {modalAction === "view_withdrawal" && selectedWithdrawal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 shadow-2xl space-y-6 relative my-8 max-h-[90vh] overflow-y-auto text-slate-100">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                💸 Withdrawal Details
+              </h3>
+              <button
+                onClick={() => {
+                  setModalAction("none");
+                  setSelectedWithdrawal(null);
+                }}
+                className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-full transition cursor-pointer font-bold text-xs"
+              >
+                ✖
+              </button>
+            </div>
+
+            <div className="space-y-4 text-sm text-slate-300">
+              <div className="grid grid-cols-2 gap-4 bg-slate-950/50 p-4 rounded-2xl border border-slate-800">
+                <div>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Request ID</span>
+                  <span className="font-mono text-xs text-indigo-400 font-semibold">{selectedWithdrawal.id}</span>
+                </div>
+                <div>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Status</span>
+                  <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold mt-1 ${
+                    selectedWithdrawal.status === "Pending"
+                      ? "bg-yellow-500/20 text-yellow-400"
+                      : selectedWithdrawal.status === "Approved"
+                        ? "bg-emerald-500/20 text-emerald-400"
+                        : selectedWithdrawal.status === "Paid"
+                          ? "bg-blue-500/20 text-blue-400"
+                          : "bg-red-500/20 text-red-400"
+                  }`}>
+                    {selectedWithdrawal.status}
+                  </span>
+                </div>
+                <div>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">User</span>
+                  <span className="font-medium text-white block">{selectedWithdrawal.firstName} {selectedWithdrawal.lastName}</span>
+                  <span className="block text-[10px] text-slate-400">@{selectedWithdrawal.username || "unknown"} (TG: {selectedWithdrawal.userId})</span>
+                </div>
+                <div>
+                  <span className="block text-[10px] uppercase font-bold text-slate-500">Submitted Date</span>
+                  <span className="text-xs">{new Date(selectedWithdrawal.createdAt).toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Amount and fee details */}
+              <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800 space-y-2">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800/50">
+                  <span className="text-slate-400 font-medium">Requested Amount</span>
+                  <span className="text-lg font-bold text-white">
+                    {selectedWithdrawal.method === "USDT" ? `${selectedWithdrawal.amount} USDT` : `₹${selectedWithdrawal.amount}`}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                  <span>Processing Fee ({selectedWithdrawal.method === "USDT" ? "Fixed" : "5%"})</span>
+                  <span>
+                    {selectedWithdrawal.method === "USDT" ? `${selectedWithdrawal.processingFee || 1} USDT` : `₹${selectedWithdrawal.processingFee || (selectedWithdrawal.amount * 0.05).toFixed(2)}`}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-slate-800/50 font-semibold text-emerald-400">
+                  <span>Estimated Receive</span>
+                  <span className="text-base font-bold text-emerald-400">
+                    {selectedWithdrawal.method === "USDT" ? `${selectedWithdrawal.receiveAmount || (selectedWithdrawal.amount - 1)} USDT` : `₹${selectedWithdrawal.receiveAmount || (selectedWithdrawal.amount * 0.95).toFixed(2)}`}
+                  </span>
+                </div>
+              </div>
+
+              {/* Payment Method Details */}
+              <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800 space-y-3">
+                <h4 className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2 border-b border-slate-800 pb-1.5">
+                  💳 Payment Method: <span className="text-indigo-400 font-bold">{selectedWithdrawal.method}</span>
+                </h4>
+
+                {selectedWithdrawal.method === "UPI" && (
+                  <div className="space-y-1">
+                    <span className="block text-[10px] uppercase font-bold text-slate-500">UPI ID</span>
+                    <span className="font-mono text-sm text-white select-all bg-slate-900 px-3 py-2 rounded-xl border border-slate-800 block">{selectedWithdrawal.upiId || "N/A"}</span>
+                  </div>
+                )}
+
+                {selectedWithdrawal.method === "Bank" && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <span className="block text-[10px] uppercase font-bold text-slate-500">Account Holder Name</span>
+                      <span className="text-sm text-white bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 block">{selectedWithdrawal.accountHolderName || "N/A"}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] uppercase font-bold text-slate-500">Bank Name</span>
+                      <span className="text-xs text-white bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 block">{selectedWithdrawal.bankName || "N/A"}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] uppercase font-bold text-slate-500">IFSC Code</span>
+                      <span className="font-mono text-xs text-white bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 block select-all">{selectedWithdrawal.ifscCode || "N/A"}</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="block text-[10px] uppercase font-bold text-slate-500">Account Number</span>
+                      <span className="font-mono text-sm text-white bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 block select-all">{selectedWithdrawal.accountNumber || "N/A"}</span>
+                    </div>
+                  </div>
+                )}
+
+                {selectedWithdrawal.method === "USDT" && (
+                  <div className="space-y-2">
+                    <div>
+                      <span className="block text-[10px] uppercase font-bold text-slate-500">Wallet Address</span>
+                      <span className="font-mono text-xs text-white select-all bg-slate-900 px-3 py-2 rounded-xl border border-slate-800 block break-all">{selectedWithdrawal.walletAddress || "N/A"}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] uppercase font-bold text-slate-500">Network</span>
+                      <span className="text-xs text-white bg-slate-900 px-3 py-1 rounded-xl border border-slate-800 block">TRC20 (Fixed)</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* If marked paid, display reference */}
+              {selectedWithdrawal.status === "Paid" && selectedWithdrawal.transactionReference && (
+                <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-2xl space-y-1">
+                  <span className="block text-[10px] uppercase font-bold text-blue-400">Transaction Reference</span>
+                  <span className="font-mono text-sm text-white block select-all">{selectedWithdrawal.transactionReference}</span>
+                </div>
+              )}
+
+              {/* If rejected, display reason */}
+              {selectedWithdrawal.status === "Rejected" && selectedWithdrawal.rejectReason && (
+                <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl space-y-1">
+                  <span className="block text-[10px] uppercase font-bold text-red-400">Rejection Reason</span>
+                  <span className="text-sm text-white block">{selectedWithdrawal.rejectReason}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Action buttons inside modal */}
+            {selectedWithdrawal.status === "Pending" && (
+              <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (confirm("Are you sure you want to approve this withdrawal request?")) {
+                      setModalLoading(true);
+                      try {
+                        const res = await fetch(`${API_BASE}/api/admin/withdrawals/${selectedWithdrawal.id}/approve`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" }
+                        });
+                        const resData = await res.json();
+                        if (res.ok) {
+                          alert(resData.message || "Withdrawal approved successfully!");
+                          fetchWithdrawals();
+                          setModalAction("none");
+                          setSelectedWithdrawal(null);
+                        } else {
+                          alert(resData.error || "Approval failed.");
+                        }
+                      } catch (err: any) {
+                        alert(err.message);
+                      } finally {
+                        setModalLoading(false);
+                      }
+                    }
+                  }}
+                  disabled={modalLoading}
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition shadow-lg cursor-pointer disabled:opacity-50 text-center text-sm"
+                >
+                  🟢 Approve Request
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const reason = prompt("Enter rejection reason:");
+                    if (reason === null) return; // Cancelled
+                    if (!reason.trim()) {
+                      alert("Rejection reason is required.");
+                      return;
+                    }
+                    setModalLoading(true);
+                    fetch(`${API_BASE}/api/admin/withdrawals/${selectedWithdrawal.id}/reject`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ rejectReason: reason, rejectionType: "normal" })
+                    })
+                      .then(async (res) => {
+                        const resData = await res.json();
+                        if (res.ok) {
+                          alert(resData.message || "Withdrawal rejected.");
+                          fetchWithdrawals();
+                          setModalAction("none");
+                          setSelectedWithdrawal(null);
+                        } else {
+                          alert(resData.error || "Rejection failed.");
+                        }
+                      })
+                      .catch((err) => alert(err.message))
+                      .finally(() => setModalLoading(false));
+                  }}
+                  disabled={modalLoading}
+                  className="flex-1 py-3 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white font-semibold rounded-xl transition cursor-pointer disabled:opacity-50 text-center text-sm"
+                >
+                  🔴 Reject Request
+                </button>
+              </div>
+            )}
+
+            {selectedWithdrawal.status === "Approved" && (
+              <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const reference = prompt("Enter TX reference / Payment Transaction ID:");
+                    if (reference === null) return; // Cancelled
+                    if (!reference.trim()) {
+                      alert("Transaction reference is required to mark as paid.");
+                      return;
+                    }
+                    setModalLoading(true);
+                    try {
+                      const res = await fetch(`${API_BASE}/api/admin/withdrawals/${selectedWithdrawal.id}/paid`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ transactionReference: reference })
+                      });
+                      const resData = await res.json();
+                      if (res.ok) {
+                        alert(resData.message || "Withdrawal marked as Paid!");
+                        fetchWithdrawals();
+                        setModalAction("none");
+                        setSelectedWithdrawal(null);
+                      } else {
+                        alert(resData.error || "Failed to mark as paid.");
+                      }
+                    } catch (err: any) {
+                      alert(err.message);
+                    } finally {
+                      setModalLoading(false);
+                    }
+                  }}
+                  disabled={modalLoading}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition shadow-lg cursor-pointer disabled:opacity-50 text-center text-sm"
+                >
+                  💸 Mark as Paid
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const reason = prompt("Enter rejection reason:");
+                    if (reason === null) return; // Cancelled
+                    if (!reason.trim()) {
+                      alert("Rejection reason is required.");
+                      return;
+                    }
+                    setModalLoading(true);
+                    fetch(`${API_BASE}/api/admin/withdrawals/${selectedWithdrawal.id}/reject`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ rejectReason: reason, rejectionType: "normal" })
+                    })
+                      .then(async (res) => {
+                        const resData = await res.json();
+                        if (res.ok) {
+                          alert(resData.message || "Withdrawal rejected.");
+                          fetchWithdrawals();
+                          setModalAction("none");
+                          setSelectedWithdrawal(null);
+                        } else {
+                          alert(resData.error || "Rejection failed.");
+                        }
+                      })
+                      .catch((err) => alert(err.message))
+                      .finally(() => setModalLoading(false));
+                  }}
+                  disabled={modalLoading}
+                  className="flex-1 py-3 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white font-semibold rounded-xl transition cursor-pointer disabled:opacity-50 text-center text-sm"
+                >
+                  🔴 Reject Request
+                </button>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setModalAction("none");
+                  setSelectedWithdrawal(null);
+                }}
+                className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition cursor-pointer text-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {(modalAction === "create_smart_link" || modalAction === "edit_smart_link") && smartLinkForm && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-2xl w-full shadow-2xl space-y-6 my-8 max-h-[90vh] overflow-y-auto text-slate-100">

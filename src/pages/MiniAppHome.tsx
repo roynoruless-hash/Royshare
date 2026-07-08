@@ -41,6 +41,8 @@ import { API_BASE } from "../config/api";
 import { MyLinksPage } from "./MyLinksPage";
 import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
 import { MyContentPage } from "./MyContentPage";
+import ReferralAnalytics from "../components/ReferralAnalytics";
+import ReferralList from "../components/ReferralList";
 
 interface PhoneVerificationProps {
   user: any;
@@ -282,6 +284,12 @@ export const MiniAppHome: React.FC = () => {
   const { user } = useTelegramAuth();
   const [currentView, setCurrentView] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
+    const page = params.get("page");
+    if (page === "content") return "dashboard";
+    if (page === "files") return "my-content";
+    if (page === "links") return "my-links";
+    if (page === "analytics") return "link-analytics";
+    if (page === "upload") return "upload";
     return params.get("view") || "home";
   });
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(() => {
@@ -442,6 +450,10 @@ export const MiniAppHome: React.FC = () => {
         }}
       />
     );
+  }
+
+  if (currentView === "upload") {
+    return <DriveUploadPage onBack={() => setCurrentView("home")} />;
   }
 
   if (currentView === "dashboard") {
@@ -646,6 +658,13 @@ export const MiniAppHome: React.FC = () => {
             </header>
 
             <main className="p-6 space-y-6">
+              {/* Stats & List */}
+              <div className="grid grid-cols-1 gap-6">
+                <ReferralAnalytics userId={user.id} />
+                <ReferralList userId={user.id} />
+              </div>
+              
+              {/* Existing Referral Info */}
               <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-3xl p-6 text-center shadow-xl">
                 <Share2 className="w-12 h-12 mx-auto mb-3 text-indigo-200 animate-bounce" />
                 <h3 className="text-xl font-bold mb-2">Invite Friends & Earn Lifetime Commissions</h3>

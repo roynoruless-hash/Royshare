@@ -193,10 +193,17 @@ export async function handleUpdate(botToken: string, update: any) {
                         registrationStep: 'invite_code'
                     }, { merge: true });
 
-                    // Check for automatic referral by link (pendingReferrerId)
-                    const latestDoc = await getDoc(userDocRef);
-                    const latestData = latestDoc.data();
-                    const pendingRefId = latestData?.pendingReferrerId;
+                    // Check for pre-registration by mobile number or automatic referral by link (pendingReferrerId)
+                    const preRegDoc = await getDoc(doc(db, "referral_pre_registrations", mobile));
+                    let pendingRefId = null;
+
+                    if (preRegDoc.exists()) {
+                        pendingRefId = preRegDoc.data()?.referrerId;
+                        await setDoc(userDocRef, { pendingReferrerId: pendingRefId }, { merge: true });
+                    } else {
+                        const latestDoc = await getDoc(userDocRef);
+                        pendingRefId = latestDoc.data()?.pendingReferrerId;
+                    }
 
                     if (pendingRefId) {
                         try {
@@ -795,53 +802,22 @@ async function completeRegistrationAndCreditReferrer(db: any, botToken: string, 
                         referredLastName: userData.lastName || "",
                         joinDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
                         createdAt: now,
-                        status: "approved",
+                        status: "Registered", // RoyShare V4 pending status
+                        urlClickCount: 0,
+                        downloadCount: 0,
+                        withdrawalStatus: "None",
                         rewardAmount: rewardAmount,
-                        rewardCredited: true
+                        rewardCredited: false
                     });
 
-                    const currentReferrals = rData.referrals || 0;
-                    const currentBalance = rData.availableBalance || 0;
-                    const currentReferralEarnings = rData.referralEarnings || 0;
-                    const currentTotalEarnings = rData.totalEarnings || 0;
-
-                    const newReferralsCount = currentReferrals + 1;
-                    const newBalance = currentBalance + rewardAmount;
-                    const newReferralEarnings = currentReferralEarnings + rewardAmount;
-                    const newTotalEarnings = currentTotalEarnings + rewardAmount;
-
-                    await setDoc(doc(db, "users", cleanReferredBy), {
-                        referrals: newReferralsCount,
-                        availableBalance: newBalance,
-                        referralEarnings: newReferralEarnings,
-                        totalEarnings: newTotalEarnings
-                    }, { merge: true });
-
-                    const { dateStr, timeStr } = formatTransactionDateTime(new Date());
-                    const txData = {
-                        amount: rewardAmount,
-                        type: "Referral Commission",
-                        date: dateStr,
-                        time: timeStr,
-                        userId: cleanReferredBy,
-                        createdAt: now
-                    };
-                    await Promise.all([
-                        addDoc(collection(db, "transactionHistory"), txData),
-                        addDoc(collection(db, "transactions"), txData)
-                    ]);
-
-                    const refCurrency = rData.currency || "INR";
-                    const notificationMsg = `🎉 *New Referral Joined*
+                    const notificationMsg = `🎉 *New Referral Registered*
 
 👤 *Name:*
 ${userData.enteredName || userData.firstName || "New Friend"}
 
-*Referral Count:*
-${newReferralsCount}
+Status: *🟢 Registered*
 
-*Reward:*
-${formatCurrency(rewardAmount, refCurrency)}`;
+_Invite commission will be unlocked after your friend completes their URL/download work and submits their first withdrawal!_`;
 
                     await sendTelegramMessage(botToken, Number(cleanReferredBy), notificationMsg, { parse_mode: "Markdown" });
                 }
@@ -1194,8 +1170,8 @@ ${generatedLink}`;
     const inlineKeyboard = {
         inline_keyboard: [
             [{ text: "📋 Copy Link", callback_data: `mycontent_copy_${uniqueFileId}` }],
-            [{ text: "📁 My Content", callback_data: "mycontent_back" }],
-            [{ text: "📤 Upload Another File", callback_data: "mycontent_upload" }]
+            [{ text: "📁 My Content", web_app: { url: getMiniAppUrl(`/app?page=content&userId=${chatId}`) } }],
+            [{ text: "📤 Upload Another File", web_app: { url: getMiniAppUrl(`/app?page=upload&userId=${chatId}`) } }]
         ]
     };
     
@@ -1294,7 +1270,7 @@ async function showShortenerDashboard(botToken: string, chatId: number, user: an
     const inlineKeyboard = {
         inline_keyboard: [
             [{ text: "➕ Shorten a New URL", callback_data: "shortlink_another" }],
-            [{ text: "🔗 View All My Links", web_app: { url: getMiniAppUrl("/?view=my-links") } }]
+            [{ text: "🔗 View All My Links", web_app: { url: getMiniAppUrl(`/app?page=links&userId=${chatId}`) } }]
         ]
     };
 
@@ -1521,8 +1497,8 @@ async function processShortenUrl(botToken: string, chatId: number, user: any) {
     const inlineKeyboard = {
         inline_keyboard: [
             [{ text: "📋 Copy Link", callback_data: `shortlink_copy_${linkId}` }],
-            [{ text: "📈 View Analytics", web_app: { url: getMiniAppUrl(`/?view=link-analytics&linkId=${linkId}`) } }],
-            [{ text: "🔗 My Links", web_app: { url: getMiniAppUrl("/?view=my-links") } }],
+            [{ text: "📈 View Analytics", web_app: { url: getMiniAppUrl(`/app?page=analytics&linkId=${linkId}&userId=${chatId}`) } }],
+            [{ text: "🔗 My Links", web_app: { url: getMiniAppUrl(`/app?page=links&userId=${chatId}`) } }],
             [{ text: "🔙 Back to Dashboard", callback_data: "shortlink_menu" }]
         ]
     };
@@ -1545,7 +1521,7 @@ async function processMyLinks(botToken: string, chatId: number, user: any) {
     
     const activeLinks = snapshotLinks.docs.filter(d => d.data().status !== "deleted");
     
-    const webAppUrl = getMiniAppUrl("/?view=my-links");
+    const webAppUrl = getMiniAppUrl(`/app?page=links&userId=${user.id}`);
     
     let message = `🔗 <b>My Short Links Manager</b>\n\n`;
     message += `Click the button below to view, edit, copy, and delete your links inside the dedicated RoyShare URL Shortener Mini App.\n\n`;
@@ -2236,95 +2212,14 @@ function formatBytes(bytes: number): string {
 }
 
 async function processMyContent(botToken: string, chatId: number, user: any, pageIndex: number = 0) {
-    const db = getDb();
-    const userDoc = await getDoc(doc(db, "users", String(user.id)));
-    const currency = userDoc.exists() ? (userDoc.data()?.currency || "INR") : "INR";
-    
-    // Fetch user's active files
-    const q = query(collection(db, "uploads"), where("userId", "==", String(user.id)));
-    const snapshot = await getDocs(q);
-    
-    const allFiles: any[] = [];
-    snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.status !== "deleted") {
-            allFiles.push({ id: docSnap.id, ...data });
-        }
-    });
-    
-    if (allFiles.length === 0) {
-        const message = `📁 My Content\n\nYou have not uploaded any files yet.\n\nStart by uploading your first file.`;
-        const inlineKeyboard = {
-            inline_keyboard: [
-                [{ text: "📤 Upload File", callback_data: "mycontent_upload" }]
-            ]
-        };
-        await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
-        return;
-    }
-    
-    // Sort files by uploadDate desc (or createdAt if not exists)
-    allFiles.sort((a, b) => {
-        const timeA = new Date(a.uploadDate || a.uploadedAt || a.timestamp || 0).getTime();
-        const timeB = new Date(b.uploadDate || b.uploadedAt || b.timestamp || 0).getTime();
-        return timeB - timeA;
-    });
-    
-    const totalFiles = allFiles.length;
-    const totalDownloads = allFiles.reduce((sum, f) => sum + (f.downloads || 0), 0);
-    const totalEarnings = allFiles.reduce((sum, f) => sum + (f.earnings || 0), 0);
-    const totalSizeBytes = allFiles.reduce((sum, f) => sum + parseFileSizeToBytes(f.fileSize), 0);
-    const storageUsed = formatBytes(totalSizeBytes);
-    
-    const pageSize = 5;
-    const pageFiles = allFiles.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize);
-    const nextPageIndex = (pageIndex + 1) * pageSize < totalFiles ? pageIndex + 1 : 0;
-    
-    let message = `📁 My Content\n\n`;
-    message += `📊 Total Files: ${totalFiles}\n\n`;
-    message += `💾 Total Storage Used: ${storageUsed}\n\n`;
-    message += `👁 Total Downloads: ${totalDownloads}\n\n`;
-    message += `💰 Total Earnings: ${formatCurrency(totalEarnings, currency)}\n\n`;
-    message += `━━━━━━━━━━━━━━━\n\n`;
-    
-    const numEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
-    
-    pageFiles.forEach((file, idx) => {
-        const seqNumber = numEmojis[idx];
-        const displaySize = typeof file.fileSize === 'number' ? formatBytes(file.fileSize) : (file.fileSize || "N/A");
-        const displayDate = file.uploadDate || (file.uploadedAt ? file.uploadedAt.split(' ')[0] : "N/A");
-        
-        message += `${seqNumber} ${file.fileName || "Unnamed File"}\n\n`;
-        message += `📦 Size: ${displaySize}\n\n`;
-        message += `📅 Uploaded: ${displayDate}\n\n`;
-        message += `👁 Downloads: ${file.downloads || 0}\n\n`;
-        message += `💰 Earnings: ${formatCurrency(file.earnings || 0, currency)}\n\n`;
-        message += `━━━━━━━━━━━━━━━\n\n`;
-    });
-    
-    const fileButtons = pageFiles.map((file, idx) => ({
-        text: numEmojis[idx],
-        callback_data: `mycontent_view_${file.id}`
-    }));
-    
+    const webAppUrl = getMiniAppUrl(`/app?page=files&userId=${user.id}`);
+    const message = `📁 <b>My Files Manager</b>\n\nClick the button below to view, edit, copy, rename, and delete your files inside the RoyShare Mini App.`;
     const inlineKeyboard = {
-        inline_keyboard: [] as any[][]
+        inline_keyboard: [
+            [{ text: "📁 Open Files Manager", web_app: { url: webAppUrl } }]
+        ]
     };
-    
-    if (fileButtons.length > 0) {
-        inlineKeyboard.inline_keyboard.push(fileButtons);
-    }
-    
-    inlineKeyboard.inline_keyboard.push([
-        { text: "📤 Upload New File", callback_data: "mycontent_upload" },
-        { text: "🔍 Search File", callback_data: "mycontent_search" }
-    ]);
-    inlineKeyboard.inline_keyboard.push([
-        { text: "📊 Content Stats", callback_data: "mycontent_stats" },
-        { text: "📄 Next Page", callback_data: `mycontent_next_${nextPageIndex}` }
-    ]);
-    
-    await sendTelegramMessage(botToken, chatId, message, { reply_markup: inlineKeyboard });
+    await sendTelegramMessage(botToken, chatId, message, { parse_mode: "HTML", reply_markup: inlineKeyboard });
 }
 
 async function processMyFileDetails(botToken: string, chatId: number, fileId: string) {
@@ -2552,12 +2447,18 @@ async function handleSearchQuery(botToken: string, chatId: number, user: any, se
 
 function getMainMenuKeyboard(userId?: string | number) {
     const appUrl = getAppUrl();
-    const webAppUrl = userId ? `${appUrl}/?userId=${userId}` : appUrl;
+    const userIdQuery = userId ? `&userId=${userId}` : "";
     return {
         keyboard: [
-            [{ text: "🚀 Self Earning", web_app: { url: webAppUrl } }],
-            [{ text: "📤 Upload File" }, { text: "🔗 URL Shortener" }],
-            [{ text: "📁 My Content" }, { text: "🔗 My Links" }],
+            [{ text: "🚀 Self Earning", web_app: { url: userId ? `${appUrl}/?userId=${userId}` : appUrl } }],
+            [
+                { text: "📤 Upload File", web_app: { url: userId ? `${appUrl}/app?page=upload&userId=${userId}` : `${appUrl}/app?page=upload` } },
+                { text: "🔗 URL Shortener" }
+            ],
+            [
+                { text: "📁 My Content", web_app: { url: userId ? `${appUrl}/app?page=content&userId=${userId}` : `${appUrl}/app?page=content` } },
+                { text: "🔗 My Links", web_app: { url: userId ? `${appUrl}/app?page=links&userId=${userId}` : `${appUrl}/app?page=links` } }
+            ],
             [{ text: "📢 Announcements" }, { text: "⚙️ Settings" }],
             [{ text: "💰 Balance" }, { text: "👥 Refer & Earn" }],
             [{ text: "💸 Withdraw" }, { text: "📜 Withdrawal History" }],

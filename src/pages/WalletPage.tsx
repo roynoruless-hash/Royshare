@@ -27,9 +27,18 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
   // Form State
   const [amount, setAmount] = useState<string>("");
   const [upiId, setUpiId] = useState<string>(user?.upiId || "");
+  
+  // Payment Methods: UPI, BANK, USDT
+  const [paymentMethod, setPaymentMethod] = useState<"UPI" | "BANK" | "USDT">("UPI");
+  const [accountHolderName, setAccountHolderName] = useState<string>(user?.bankDetails?.accountHolderName || "");
+  const [accountNumber, setAccountNumber] = useState<string>(user?.bankDetails?.accountNumber || "");
+  const [ifscCode, setIfscCode] = useState<string>(user?.bankDetails?.ifscCode || "");
+  const [bankName, setBankName] = useState<string>(user?.bankDetails?.bankName || "");
+  const [walletAddress, setWalletAddress] = useState<string>(user?.usdtWalletAddress || "");
+
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
-  const [successData, setSuccessData] = useState<{ id: string; amount: number } | null>(null);
+  const [successData, setSuccessData] = useState<{ id: string; amount: number; method: string; receiveAmount: number; details: string } | null>(null);
 
   // System settings for minimum withdrawal
   const [minWithdrawal, setMinWithdrawal] = useState<number>(100);
@@ -39,12 +48,23 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
   const [history, setHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
 
-  // Sync UPI ID if user changes
+  // Sync UPI ID and details if user changes
   useEffect(() => {
-    if (user?.upiId) {
-      setUpiId(user.upiId);
+    if (user) {
+      if (user.upiId) {
+        setUpiId(user.upiId);
+      }
+      if (user.bankDetails) {
+        setAccountHolderName(user.bankDetails.accountHolderName || "");
+        setAccountNumber(user.bankDetails.accountNumber || "");
+        setIfscCode(user.bankDetails.ifscCode || "");
+        setBankName(user.bankDetails.bankName || "");
+      }
+      if (user.usdtWalletAddress) {
+        setWalletAddress(user.usdtWalletAddress || "");
+      }
     }
-  }, [user?.upiId]);
+  }, [user]);
 
   if (!user) return null;
 
@@ -138,18 +158,69 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
       return;
     }
 
-    if (parsedAmount < minWithdrawal) {
-      setError(`Minimum withdrawal amount is ₹${minWithdrawal}.`);
+    const isUsdt = paymentMethod === "USDT";
+    const USDT_RATE = 90;
+    const amountInINR = isUsdt ? parsedAmount * USDT_RATE : parsedAmount;
+
+    // Check minimum withdrawal
+    if (amountInINR < minWithdrawal) {
+      if (isUsdt) {
+        setError(`Minimum withdrawal amount is ${(minWithdrawal / USDT_RATE).toFixed(2)} USDT (₹${minWithdrawal}).`);
+      } else {
+        setError(`Minimum withdrawal amount is ₹${minWithdrawal}.`);
+      }
       return;
     }
 
-    if (parsedAmount > displayBalance) {
+    // Check available balance
+    if (amountInINR > displayBalance) {
       setError("Insufficient wallet balance.");
       return;
     }
 
-    if (!upiId.trim()) {
-      setError("Please enter your UPI ID.");
+    // Validate specific method fields
+    if (paymentMethod === "UPI") {
+      if (!upiId.trim()) {
+        setError("Please enter your UPI ID.");
+        return;
+      }
+    } else if (paymentMethod === "BANK") {
+      if (!accountHolderName.trim()) {
+        setError("Please enter the Account Holder Name.");
+        return;
+      }
+      if (!accountNumber.trim()) {
+        setError("Please enter the Account Number.");
+        return;
+      }
+      if (!ifscCode.trim()) {
+        setError("Please enter the IFSC Code.");
+        return;
+      }
+      if (!bankName.trim()) {
+        setError("Please enter the Bank Name.");
+        return;
+      }
+    } else if (paymentMethod === "USDT") {
+      if (!walletAddress.trim()) {
+        setError("Please enter your USDT Wallet Address.");
+        return;
+      }
+    }
+
+    // Calculate processing fee & receive amount
+    let fee = 0;
+    let receive = 0;
+    if (isUsdt) {
+      fee = 1; // 1 USDT fixed fee
+      receive = parsedAmount - fee;
+    } else {
+      fee = Number((parsedAmount * 0.05).toFixed(2)); // 5% fee
+      receive = Number((parsedAmount - fee).toFixed(2));
+    }
+
+    if (receive <= 0) {
+      setError("Withdrawal amount is too small after processing fee.");
       return;
     }
 
@@ -163,7 +234,15 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
         body: JSON.stringify({
           userId: String(user.id),
           amount: parsedAmount,
+          method: paymentMethod === "UPI" ? "UPI ID" : paymentMethod === "BANK" ? "Bank Account" : "USDT (TRC20)",
           upiId: upiId.trim(),
+          accountHolderName: accountHolderName.trim(),
+          accountNumber: accountNumber.trim(),
+          ifscCode: ifscCode.trim(),
+          bankName: bankName.trim(),
+          walletAddress: walletAddress.trim(),
+          processingFee: fee,
+          receiveAmount: receive
         }),
       });
 
@@ -173,7 +252,13 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
         return;
       }
 
-      setSuccessData({ id: data.withdrawalId, amount: parsedAmount });
+      setSuccessData({
+        id: data.withdrawalId,
+        amount: parsedAmount,
+        method: paymentMethod === "UPI" ? "UPI ID" : paymentMethod === "BANK" ? "Bank Account" : "USDT (TRC20)",
+        receiveAmount: receive,
+        details: paymentMethod === "UPI" ? upiId.trim() : paymentMethod === "BANK" ? `${bankName.trim()} (${accountNumber.trim()})` : walletAddress.trim()
+      });
       setAmount("");
     } catch (err) {
       console.error("Error submitting withdrawal:", err);
@@ -182,6 +267,8 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
       setLoading(false);
     }
   };
+
+  const parsedAmt = parseFloat(amount) || 0;
 
   return (
     <div className="min-h-screen bg-[#020617] text-white">
@@ -351,11 +438,23 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-slate-500">Amount</span>
-                      <span className="text-emerald-400 font-bold">₹{successData.amount}</span>
+                      <span className="text-emerald-400 font-bold font-mono">
+                        {successData.method.includes("USDT") ? `${successData.amount} USDT` : `₹${successData.amount}`}
+                      </span>
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-slate-500">Method</span>
-                      <span className="text-white">UPI ID</span>
+                      <span className="text-white font-semibold">{successData.method}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500">You Will Receive</span>
+                      <span className="text-indigo-400 font-bold font-mono">
+                        {successData.method.includes("USDT") ? `${successData.receiveAmount} USDT` : `₹${successData.receiveAmount}`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs border-t border-slate-900 pt-2">
+                      <span className="text-slate-500">Payout Details</span>
+                      <span className="text-slate-300 font-mono text-right break-all max-w-[180px]">{successData.details}</span>
                     </div>
                   </div>
 
@@ -382,19 +481,88 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
                 /* Main Withdrawal Form */
                 <form onSubmit={handleWithdrawSubmit} className="space-y-6">
                   
-                  {/* Miniature Balance Display */}
+                  {/* Dynamic Balance Display */}
                   <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex justify-between items-center">
                     <div>
                       <p className="text-slate-500 text-xs font-semibold">Available Balance</p>
-                      <h4 className="text-2xl font-black text-white mt-1">₹{displayBalance.toLocaleString()}</h4>
+                      <h4 className="text-2xl font-black text-white mt-1">
+                        {paymentMethod === "USDT" 
+                          ? `${(displayBalance / 90).toFixed(2)} USDT` 
+                          : `₹${displayBalance.toLocaleString()}`
+                        }
+                      </h4>
+                      {paymentMethod === "USDT" && (
+                        <p className="text-[10px] text-slate-500 mt-1 font-mono">≈ ₹{displayBalance.toLocaleString()}</p>
+                      )}
                     </div>
                     <div className="text-right">
                       <p className="text-slate-500 text-xs font-semibold">Minimum Withdrawal</p>
                       {loadingSettings ? (
                         <Loader2 className="w-4 h-4 animate-spin text-slate-400 ml-auto mt-2" />
                       ) : (
-                        <h4 className="text-lg font-bold text-slate-300 mt-1">₹{minWithdrawal}</h4>
+                        <h4 className="text-lg font-bold text-slate-300 mt-1">
+                          {paymentMethod === "USDT" 
+                            ? `${(minWithdrawal / 90).toFixed(2)} USDT` 
+                            : `₹${minWithdrawal}`
+                          }
+                        </h4>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Payment Method Animated Selector Cards */}
+                  <div className="space-y-3">
+                    <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider">
+                      Select Payment Method
+                    </label>
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => { setPaymentMethod("UPI"); setError(""); }}
+                        className={`flex flex-col items-center justify-center p-3.5 rounded-2xl border transition-all relative overflow-hidden active:scale-95 ${
+                          paymentMethod === "UPI"
+                            ? "bg-blue-600/10 border-blue-500 text-white shadow-lg shadow-blue-500/5"
+                            : "bg-slate-900/40 border-slate-800 text-slate-400 hover:bg-slate-900/80 hover:text-slate-200"
+                        }`}
+                      >
+                        <CreditCard className="w-5 h-5 mb-1.5 text-blue-400" />
+                        <span className="text-[11px] font-bold">UPI ID</span>
+                        {paymentMethod === "UPI" && (
+                          <div className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setPaymentMethod("BANK"); setError(""); }}
+                        className={`flex flex-col items-center justify-center p-3.5 rounded-2xl border transition-all relative overflow-hidden active:scale-95 ${
+                          paymentMethod === "BANK"
+                            ? "bg-purple-600/10 border-purple-500 text-white shadow-lg shadow-purple-500/5"
+                            : "bg-slate-900/40 border-slate-800 text-slate-400 hover:bg-slate-900/80 hover:text-slate-200"
+                        }`}
+                      >
+                        <Wallet className="w-5 h-5 mb-1.5 text-purple-400" />
+                        <span className="text-[11px] font-bold">Bank A/C</span>
+                        {paymentMethod === "BANK" && (
+                          <div className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-purple-500 rounded-full animate-pulse" />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setPaymentMethod("USDT"); setError(""); }}
+                        className={`flex flex-col items-center justify-center p-3.5 rounded-2xl border transition-all relative overflow-hidden active:scale-95 ${
+                          paymentMethod === "USDT"
+                            ? "bg-emerald-600/10 border-emerald-500 text-white shadow-lg shadow-emerald-500/5"
+                            : "bg-slate-900/40 border-slate-800 text-slate-400 hover:bg-slate-900/80 hover:text-slate-200"
+                        }`}
+                      >
+                        <TrendingUp className="w-5 h-5 mb-1.5 text-emerald-400" />
+                        <span className="text-[11px] font-bold">USDT</span>
+                        {paymentMethod === "USDT" && (
+                          <div className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                        )}
+                      </button>
                     </div>
                   </div>
 
@@ -409,31 +577,155 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
                   <div className="space-y-4">
                     <div>
                       <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">
-                        Withdrawal Amount (INR)
+                        Withdrawal Amount ({paymentMethod === "USDT" ? "USDT" : "INR"})
                       </label>
                       <div className="relative">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-lg">₹</span>
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-lg">
+                          {paymentMethod === "USDT" ? "$" : "₹"}
+                        </span>
                         <input
                           type="number"
                           value={amount}
                           onChange={(e) => setAmount(e.target.value)}
-                          placeholder={`${minWithdrawal}+`}
+                          placeholder={paymentMethod === "USDT" ? `${(minWithdrawal / 90).toFixed(2)}+` : `${minWithdrawal}+`}
                           className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-10 pr-4 text-white font-bold placeholder-slate-700 focus:outline-none focus:border-blue-500 transition-colors"
                         />
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">
-                        Saved UPI ID (Editable)
-                      </label>
-                      <input
-                        type="text"
-                        value={upiId}
-                        onChange={(e) => setUpiId(e.target.value)}
-                        placeholder="example@upi"
-                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 px-4 text-white font-mono placeholder-slate-700 focus:outline-none focus:border-blue-500 transition-colors"
-                      />
+                    {/* Method-Specific Inputs */}
+                    {paymentMethod === "UPI" && (
+                      <div>
+                        <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">
+                          UPI ID
+                        </label>
+                        <input
+                          type="text"
+                          value={upiId}
+                          onChange={(e) => setUpiId(e.target.value)}
+                          placeholder="example@upi"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 px-4 text-white font-mono placeholder-slate-700 focus:outline-none focus:border-blue-500 transition-colors"
+                        />
+                      </div>
+                    )}
+
+                    {paymentMethod === "BANK" && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">
+                            Bank Name
+                          </label>
+                          <input
+                            type="text"
+                            value={bankName}
+                            onChange={(e) => setBankName(e.target.value)}
+                            placeholder="State Bank of India"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-3 px-4 text-white placeholder-slate-700 focus:outline-none focus:border-purple-500 transition-colors"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">
+                            Account Holder Name
+                          </label>
+                          <input
+                            type="text"
+                            value={accountHolderName}
+                            onChange={(e) => setAccountHolderName(e.target.value)}
+                            placeholder="John Doe"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-3 px-4 text-white placeholder-slate-700 focus:outline-none focus:border-purple-500 transition-colors"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">
+                            Account Number
+                          </label>
+                          <input
+                            type="text"
+                            value={accountNumber}
+                            onChange={(e) => setAccountNumber(e.target.value)}
+                            placeholder="1234567890"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-3 px-4 text-white font-mono placeholder-slate-700 focus:outline-none focus:border-purple-500 transition-colors"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">
+                            IFSC Code
+                          </label>
+                          <input
+                            type="text"
+                            value={ifscCode}
+                            onChange={(e) => setIfscCode(e.target.value.toUpperCase())}
+                            placeholder="SBIN0001234"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-3 px-4 text-white font-mono placeholder-slate-700 focus:outline-none focus:border-purple-500 transition-colors"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {paymentMethod === "USDT" && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">
+                            USDT Wallet Address (TRC20 Only)
+                          </label>
+                          <input
+                            type="text"
+                            value={walletAddress}
+                            onChange={(e) => setWalletAddress(e.target.value)}
+                            placeholder="TXxxxxxxxxx..."
+                            className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 px-4 text-white font-mono placeholder-slate-700 focus:outline-none focus:border-emerald-500 transition-colors"
+                          />
+                        </div>
+                        <div className="bg-emerald-500/5 border border-emerald-500/10 p-3 rounded-xl text-xs text-emerald-400 leading-relaxed font-semibold">
+                          ⚠️ Make sure to enter a valid <b>TRC20 network</b> wallet address. Sending to any other network will result in permanent loss of funds.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Real-time Dynamic Calculation Block */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-3.5">
+                    <h5 className="text-slate-400 text-[10px] font-bold uppercase tracking-widest border-b border-slate-900 pb-2">
+                      Live Calculation
+                    </h5>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-500">Requested Amount</span>
+                      <span className="text-slate-300 font-bold font-mono">
+                        {paymentMethod === "USDT" ? `${parsedAmt} USDT` : `₹${parsedAmt.toLocaleString()}`}
+                      </span>
+                    </div>
+
+                    {paymentMethod === "USDT" && (
+                      <div className="flex justify-between items-center text-[10px] bg-slate-900/50 p-2.5 rounded-xl border border-slate-850 text-slate-400 font-mono">
+                        <span>Deducted Balance (₹90/USDT)</span>
+                        <span>₹{(parsedAmt * 90).toLocaleString()}</span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-500">
+                        Processing Fee {paymentMethod === "USDT" ? "(Fixed 1 USDT)" : "(5%)"}
+                      </span>
+                      <span className="text-red-400 font-bold font-mono">
+                        {paymentMethod === "USDT" 
+                          ? `${parsedAmt > 0 ? "1.00" : "0.00"} USDT` 
+                          : `₹${(parsedAmt * 0.05).toFixed(2)}`
+                        }
+                      </span>
+                    </div>
+
+                    <div className="border-t border-slate-900 my-1" />
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-400 text-xs font-bold uppercase tracking-wider">
+                        You Will Receive
+                      </span>
+                      <span className="text-emerald-400 text-lg font-black font-mono">
+                        {paymentMethod === "USDT" 
+                          ? `${Math.max(0, parsedAmt - (parsedAmt > 0 ? 1 : 0)).toFixed(2)} USDT` 
+                          : `₹${Math.max(0, parsedAmt * 0.95).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        }
+                      </span>
                     </div>
                   </div>
 
@@ -446,7 +738,7 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white py-4 rounded-2xl font-bold shadow-xl shadow-blue-500/10 active:scale-98 transition-all flex items-center justify-center gap-2"
+                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white py-4 rounded-2xl font-bold shadow-xl shadow-blue-500/10 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {loading ? (
                       <>
@@ -517,10 +809,16 @@ export const WalletPage: React.FC<{ onBack: () => void; initialTab?: string }> =
                                 {w.status}
                               </span>
                             </div>
-                            <p className="text-slate-400 text-xs font-mono mt-1.5">UPI ID: {w.upiId || "N/A"}</p>
+                            <p className="text-slate-400 text-xs font-mono mt-1.5">
+                              {w.method === "USDT (TRC20)" ? `USDT Address: ${w.walletAddress || "N/A"}` :
+                               w.method === "Bank Account" ? `Bank: ${w.bankName || "N/A"} - A/C: ${w.accountNumber || "N/A"}` :
+                               `UPI ID: ${w.upiId || "N/A"}`}
+                            </p>
                           </div>
                           <div className="text-right">
-                            <h5 className="text-lg font-black text-white">₹{w.amount}</h5>
+                            <h5 className="text-lg font-black text-white">
+                              {w.method === "USDT (TRC20)" ? `${w.amount} USDT` : `₹${w.amount}`}
+                            </h5>
                             <p className="text-[10px] text-slate-500 font-medium mt-1">
                               {w.createdAt ? new Date(w.createdAt).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" }) : "N/A"}
                             </p>

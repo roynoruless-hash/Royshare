@@ -12,6 +12,13 @@ export interface User {
   phoneVerifiedInMiniApp?: boolean;
   upiId?: string;
   mobile?: string;
+  bankDetails?: {
+    bankName?: string;
+    accountHolderName?: string;
+    accountNumber?: string;
+    ifscCode?: string;
+  };
+  usdtWalletAddress?: string;
   
   // Wallet
   balance: number; // ₹

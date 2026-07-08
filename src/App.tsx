@@ -185,6 +185,11 @@ export default function App() {
       return <MultiPageEngine type={detectedType} id={detectedLinkId} />;
     }
 
+    if (window.location.pathname === "/refer" || window.location.pathname === "/referral") {
+      const ReferralLandingPage = lazy(() => import("./pages/ReferralLandingPage"));
+      return <ReferralLandingPage />;
+    }
+
     if (window.location.pathname === "/daily-bonus") {
       return <DailyBonusPage />;
     }

@@ -15,7 +15,7 @@ import {
   RefreshCw
 } from "lucide-react";
 
-export default function DriveUploadPage() {
+export default function DriveUploadPage({ onBack }: { onBack?: () => void } = {}) {
   const [tgId, setTgId] = useState<string | null>(null);
   const [phase, setPhase] = useState<"checking" | "disconnected" | "idle" | "uploading" | "finalizing" | "success" | "error">("checking");
   const [error, setError] = useState<string | null>(null);
@@ -416,6 +416,11 @@ export default function DriveUploadPage() {
         {/* HEADER */}
         <div id="upload-header" className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800">
           <div className="flex items-center gap-3">
+            {onBack && (
+              <button onClick={onBack} className="mr-1 p-2 bg-slate-800/50 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors" title="Back">
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            )}
             <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
               <Cloud className="w-6 h-6 animate-pulse" />
             </div>

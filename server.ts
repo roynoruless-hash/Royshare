@@ -2538,6 +2538,820 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+// =========================================================
+  // ROYSHARE REFERRAL SYSTEM V4 (BACKEND MODULES & APIs)
+  // =========================================================
+
+  // Helper to send Telegram messages
+  async function sendTelegramMessageLocal(botToken: string, chatId: number, text: string, options: any = {}) {
+    try {
+      if (!botToken) return;
+      const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: text,
+          parse_mode: options.parse_mode || "Markdown",
+          reply_markup: options.reply_markup
+        })
+      });
+      return await res.json();
+    } catch (err) {
+      console.error("Error sending local Telegram message:", err);
+    }
+  }
+
+  // Format Date/Time helper
+  function formatTransactionDateTimeLocal(date: Date) {
+    const dateStr = date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+    const timeStr = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
+    return { dateStr, timeStr };
+  }
+
+  // Aggregates real-time URL clicks and file downloads for a referred user
+  async function getUserActivityStatsLocal(db: any, userId: string) {
+    let downloadCount = 0;
+    let clickCount = 0;
+    try {
+      const uploadsQuery = query(collection(db, "uploads"), where("userId", "==", String(userId)));
+      const uploadsSnap = await getDocs(uploadsQuery);
+      uploadsSnap.forEach((doc) => {
+        downloadCount += Number(doc.data().downloads || 0);
+      });
+    } catch (err) {
+      console.error("Error fetching user activity downloads:", err);
+    }
+
+    try {
+      const linksQuery = query(collection(db, "links"), where("userId", "==", String(userId)));
+      const linksSnap = await getDocs(linksQuery);
+      linksSnap.forEach((doc) => {
+        clickCount += Number(doc.data().completedRedirects || doc.data().downloads || doc.data().clicks || 0);
+      });
+    } catch (err) {
+      console.error("Error fetching user activity links:", err);
+    }
+
+    return { downloadCount, clickCount };
+  }
+
+  // Checks if the referred user has submitted at least one withdrawal request
+  async function getFirstWithdrawalStatusLocal(db: any, userId: string) {
+    try {
+      const q = query(collection(db, "withdrawals"), where("userId", "==", String(userId)));
+      const snap = await getDocs(q);
+      return !snap.empty;
+    } catch (err) {
+      console.error("Error fetching user withdrawal status:", err);
+      return false;
+    }
+  }
+
+  // Evaluates the referral rules and updates status. If approved, credits referral earnings!
+  async function evaluateReferralStatusLocal(db: any, referredUserId: string, botToken: string) {
+    try {
+      const userDocRef = doc(db, "users", String(referredUserId));
+      const userSnap = await getDoc(userDocRef);
+      if (!userSnap.exists()) return;
+      const userData = userSnap.data();
+
+      // Check if referredBy is set
+      const referrerId = userData.referredBy || userData.pendingReferrerId;
+      if (!referrerId) return;
+
+      // Get or create referral doc
+      const refDocRef = doc(db, "referrals", String(referredUserId));
+      const refSnap = await getDoc(refDocRef);
+      let referralData = refSnap.exists() ? refSnap.data() : null;
+
+      // Load current stats
+      const { downloadCount, clickCount } = await getUserActivityStatsLocal(db, referredUserId);
+      const hasWithdrawal = await getFirstWithdrawalStatusLocal(db, referredUserId);
+
+      // Fetch referral settings
+      const systemDoc = await getDoc(doc(db, "settings", "system"));
+      let minClicks = 20;
+      let minDownloads = 50;
+      let withdrawalRequired = true;
+      let referralEnable = true;
+      let levels = [
+        { name: "Bronze", commission: 5, minReferrals: 0, maxReferrals: 25, enabled: true },
+        { name: "Silver", commission: 10, minReferrals: 26, maxReferrals: 100, enabled: true },
+        { name: "Gold", commission: 15, minReferrals: 101, maxReferrals: 500, enabled: true },
+        { name: "Diamond", commission: 25, minReferrals: 501, maxReferrals: 999999, enabled: true }
+      ];
+      let milestones = [
+        { referrals: 10, reward: 50, enabled: true },
+        { referrals: 25, reward: 200, enabled: true },
+        { referrals: 50, reward: 500, enabled: true },
+        { referrals: 100, reward: 1500, enabled: true },
+        { referrals: 500, reward: 5000, enabled: true }
+      ];
+
+      if (systemDoc.exists()) {
+        const data = systemDoc.data();
+        const rSettings = data?.referralSystemV4;
+        if (rSettings) {
+          if (rSettings.minUrlClicks !== undefined) minClicks = Number(rSettings.minUrlClicks);
+          if (rSettings.minDownloads !== undefined) minDownloads = Number(rSettings.minDownloads);
+          if (rSettings.withdrawalRequired !== undefined) withdrawalRequired = !!rSettings.withdrawalRequired;
+          if (rSettings.referralLevels) levels = rSettings.referralLevels;
+          if (rSettings.milestones) milestones = rSettings.milestones;
+          if (rSettings.referralEnable !== undefined) referralEnable = !!rSettings.referralEnable;
+        }
+      }
+
+      if (!referralEnable) return;
+
+      // Check same mobile number condition
+      let mobileMatched = false;
+      let preRegRef = null;
+      const userMobile = String(userData.mobile || userData.phone || "");
+      if (userMobile) {
+        const preRegSnap = await getDocs(query(collection(db, "referral_pre_registrations"), where("mobile", "==", userMobile)));
+        if (!preRegSnap.empty) {
+          preRegSnap.forEach(d => {
+            if (String(d.data().referrerId) === String(referrerId)) {
+              mobileMatched = true;
+              preRegRef = d.data();
+            }
+          });
+        }
+      }
+
+      // Determine Status Timeline
+      let currentStatus = "Waiting Registration";
+      if (userData.registrationStep === 'completed') {
+        currentStatus = "Registered";
+      }
+
+      // If registered, let's see if they are "Working"
+      if (currentStatus === "Registered" && (clickCount > 0 || downloadCount > 0)) {
+        currentStatus = "Working";
+      }
+
+      // Check targets
+      if (clickCount >= minClicks) {
+        currentStatus = "Reached Click Target";
+      }
+      if (downloadCount >= minDownloads) {
+        currentStatus = "Reached Download Target";
+      }
+
+      // Check withdrawal submission
+      if (hasWithdrawal) {
+        currentStatus = "Withdrawal Submitted";
+      }
+
+      // Conditions
+      const condMobile = mobileMatched;
+      const condActivity = (clickCount >= minClicks) || (downloadCount >= minDownloads);
+      const condWithdrawal = !withdrawalRequired || hasWithdrawal;
+
+      const allConditionsMet = condMobile && condActivity && condWithdrawal;
+
+      if (allConditionsMet) {
+        currentStatus = "Referral Approved";
+      } else if (userData.registrationStep === 'completed' && !mobileMatched) {
+        currentStatus = "Rejected"; // Mobile mismatch
+      }
+
+      // Prepare payload
+      const refPayload: any = {
+        referrerId: String(referrerId),
+        referredUserId: String(referredUserId),
+        telegramId: String(referredUserId),
+        mobileNumber: userMobile,
+        referredName: userData.enteredName || userData.firstName || "Referred User",
+        referredUsername: userData.username || "",
+        urlClickCount: clickCount,
+        downloadCount: downloadCount,
+        withdrawalStatus: hasWithdrawal ? "Submitted" : "None",
+        status: currentStatus,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (preRegRef) {
+        refPayload.referrerName = (preRegRef as any).referrerName;
+      }
+
+      let isNewlyApproved = false;
+
+      if (!referralData) {
+        refPayload.createdAt = new Date().toISOString();
+        await setDoc(refDocRef, refPayload);
+        referralData = refPayload;
+      } else {
+        if (referralData.status !== "Commission Paid" && referralData.status !== "Referral Approved" && currentStatus === "Referral Approved") {
+          isNewlyApproved = true;
+        }
+        await setDoc(refDocRef, refPayload, { merge: true });
+      }
+
+      // If newly approved, credit reward & unlock lifetime passive commission!
+      if (isNewlyApproved) {
+        // 1. Mark status as "Commission Paid"
+        await setDoc(refDocRef, { status: "Commission Paid" }, { merge: true });
+
+        // 2. Calculate referrer's level & commission
+        const referrerDocRef = doc(db, "users", String(referrerId));
+        const referrerSnap = await getDoc(referrerDocRef);
+        if (referrerSnap.exists()) {
+          const referrerData = referrerSnap.data();
+          
+          // Count total approved referrals
+          const approvedRefsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", String(referrerId)), where("status", "in", ["Referral Approved", "Commission Paid"])));
+          const approvedCount = approvedRefsSnap.size;
+
+          // Find applicable level
+          let matchedLevel = levels[0];
+          for (const level of levels) {
+            if (level.enabled && approvedCount >= level.minReferrals && approvedCount <= level.maxReferrals) {
+              matchedLevel = level;
+            }
+          }
+
+          const commissionPercent = matchedLevel ? matchedLevel.commission : 10;
+          const referredUserLifetimeEarnings = Number(userData.totalEarnings || 0);
+          const rewardValue = (referredUserLifetimeEarnings * (commissionPercent / 100)) + 10; // Rs. 10 base signup reward + % of lifetime earnings!
+
+          const currentBalance = Number(referrerData.availableBalance || 0);
+          const currentReferralEarnings = Number(referrerData.referralEarnings || 0);
+          const currentTotalEarnings = Number(referrerData.totalEarnings || 0);
+
+          const newBalance = currentBalance + rewardValue;
+          const newReferralEarnings = currentReferralEarnings + rewardValue;
+          const newTotalEarnings = currentTotalEarnings + rewardValue;
+
+          const todayStr = new Date().toISOString().split("T")[0];
+          const todayReferralEarnings = Number(referrerData.todayReferralEarnings || 0) + rewardValue;
+          const monthlyReferralEarnings = Number(referrerData.monthlyReferralEarnings || 0) + rewardValue;
+
+          await setDoc(referrerDocRef, {
+            referrals: approvedCount,
+            referralLevel: matchedLevel.name,
+            referralLevelCommission: commissionPercent,
+            availableBalance: newBalance,
+            referralEarnings: newReferralEarnings,
+            totalEarnings: newTotalEarnings,
+            todayReferralEarnings,
+            monthlyReferralEarnings,
+            lastReferralApprovedDate: new Date().toISOString()
+          }, { merge: true });
+
+          // Record Transaction
+          const { dateStr, timeStr } = formatTransactionDateTimeLocal(new Date());
+          const txData = {
+            amount: rewardValue,
+            type: "Referral Commission",
+            date: dateStr,
+            time: timeStr,
+            userId: String(referrerId),
+            createdAt: new Date().toISOString(),
+            details: `Commission for referring ${userData.enteredName || userData.firstName || "Friend"} (Level: ${matchedLevel.name})`
+          };
+
+          await Promise.all([
+            addDoc(collection(db, "transactionHistory"), txData),
+            addDoc(collection(db, "transactions"), txData)
+          ]);
+
+          // Evaluate Milestones
+          for (const milestone of milestones) {
+            if (milestone.enabled && approvedCount >= milestone.referrals) {
+              const milestoneId = `milestone_${referrerId}_${milestone.referrals}`;
+              const claimSnap = await getDoc(doc(db, "claimed_milestones", milestoneId));
+              if (!claimSnap.exists()) {
+                await setDoc(doc(db, "claimed_milestones", milestoneId), {
+                  userId: String(referrerId),
+                  referrals: milestone.referrals,
+                  reward: milestone.reward,
+                  claimedAt: new Date().toISOString()
+                });
+
+                // Credit Milestone Reward
+                const finalBalance = newBalance + milestone.reward;
+                const finalTotalEarnings = newTotalEarnings + milestone.reward;
+                await setDoc(referrerDocRef, {
+                  availableBalance: finalBalance,
+                  totalEarnings: finalTotalEarnings
+                }, { merge: true });
+
+                const milestoneTx = {
+                  amount: milestone.reward,
+                  type: "Milestone Reward",
+                  date: dateStr,
+                  time: timeStr,
+                  userId: String(referrerId),
+                  createdAt: new Date().toISOString(),
+                  details: `Reward for reaching ${milestone.referrals} successful referrals!`
+                };
+
+                await Promise.all([
+                  addDoc(collection(db, "transactionHistory"), milestoneTx),
+                  addDoc(collection(db, "transactions"), milestoneTx)
+                ]);
+
+                // Notify referrer of Milestone
+                const milestoneNotify = `🏆 *Milestone Unlocked!*
+                
+🎉 Congratulations! You have successfully referred *${milestone.referrals}* friends!
+💰 You have been credited a bonus reward of *₹${milestone.reward}*!`;
+                await sendTelegramMessageLocal(botToken, Number(referrerId), milestoneNotify, { parse_mode: "Markdown" });
+              }
+            }
+          }
+
+          // Notify referrer of successful referral
+          const notificationMsg = `🎉 *Referral Approved & Unlocked!*
+
+👤 *Friend:* ${userData.enteredName || userData.firstName || "New Friend"}
+📱 *Mobile:* ${userData.mobile || userData.phone || "N/A"} (Matched ✅)
+📈 *Your Referral Count:* ${approvedCount}
+🏆 *Your Level:* ${matchedLevel.name} (${commissionPercent}% Commission)
+
+💰 *Commission Paid:* ₹${rewardValue.toFixed(2)}
+*(Includes base reward + ${commissionPercent}% of their lifetime earnings!)*`;
+
+          await sendTelegramMessageLocal(botToken, Number(referrerId), notificationMsg, { parse_mode: "Markdown" });
+        }
+      }
+    } catch (err) {
+      console.error("Error evaluating referral status local:", err);
+    }
+  }
+
+  // Route 1: Get Referral settings
+  app.get("/api/referral/settings", async (req, res) => {
+    try {
+      const systemDoc = await getDoc(doc(db, "settings", "system"));
+      let data: any = {
+        referralEnable: true,
+        commissionPercent: 10,
+        minUrlClicks: 20,
+        minDownloads: 50,
+        withdrawalRequired: true,
+        shareMessage: "🚀 Join RoyShare and earn passive income! Upload files & shorten links to get paid.\n\nUse my invite code {CODE} to register:\n{LINK}",
+        landingPageBanner: "Invite & Earn Lifetime Commission",
+        referralRules: "1. Your friend must verify their mobile number on the landing page.\n2. They must register on Telegram using the exact same mobile number.\n3. They must reach either 20 shortener clicks or 50 file downloads on RoyShare.\n4. They must submit their first withdrawal request.",
+        referralLevels: [
+          { name: "Bronze", commission: 5, minReferrals: 0, maxReferrals: 25, enabled: true },
+          { name: "Silver", commission: 10, minReferrals: 26, maxReferrals: 100, enabled: true },
+          { name: "Gold", commission: 15, minReferrals: 101, maxReferrals: 500, enabled: true },
+          { name: "Diamond", commission: 25, minReferrals: 501, maxReferrals: 999999, enabled: true }
+        ],
+        milestones: [
+          { referrals: 10, reward: 50, enabled: true },
+          { referrals: 25, reward: 200, enabled: true },
+          { referrals: 50, reward: 500, enabled: true },
+          { referrals: 100, reward: 1500, enabled: true },
+          { referrals: 500, reward: 5000, enabled: true }
+        ]
+      };
+
+      if (systemDoc.exists()) {
+        const sysData = systemDoc.data();
+        if (sysData.referralSystemV4) {
+          data = { ...data, ...sysData.referralSystemV4 };
+        }
+      }
+
+      res.json(data);
+    } catch (err: any) {
+      console.error("Error in GET /api/referral/settings:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Route 2: Verify Referral code
+  app.get("/api/referral/verify-code", async (req, res) => {
+    try {
+      const code = String(req.query.code || "").trim();
+      if (!code) {
+        return res.status(400).json({ success: false, message: "Referral code is required" });
+      }
+
+      // Try searching users by referralCode
+      let referrerDoc = null;
+      const q1 = query(collection(db, "users"), where("referralCode", "==", code));
+      const snap1 = await getDocs(q1);
+      if (!snap1.empty) {
+        referrerDoc = snap1.docs[0];
+      } else {
+        // Fallback: search by user document ID directly
+        const userDocRef = doc(db, "users", code);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          referrerDoc = userDocSnap;
+        }
+      }
+
+      if (!referrerDoc) {
+        return res.status(404).json({ success: false, message: "Invalid Referral Code" });
+      }
+
+      const rData = referrerDoc.data();
+      const approvedRefsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", String(referrerDoc.id)), where("status", "in", ["Referral Approved", "Commission Paid"])));
+      const approvedCount = approvedRefsSnap.size;
+
+      // Determine their current level
+      const systemDoc = await getDoc(doc(db, "settings", "system"));
+      let levels = [
+        { name: "Bronze", commission: 5, minReferrals: 0, maxReferrals: 25, enabled: true },
+        { name: "Silver", commission: 10, minReferrals: 26, maxReferrals: 100, enabled: true },
+        { name: "Gold", commission: 15, minReferrals: 101, maxReferrals: 500, enabled: true },
+        { name: "Diamond", commission: 25, minReferrals: 501, maxReferrals: 999999, enabled: true }
+      ];
+      if (systemDoc.exists() && systemDoc.data()?.referralSystemV4?.referralLevels) {
+        levels = systemDoc.data()?.referralSystemV4?.referralLevels;
+      }
+
+      let matchedLevel = levels[0];
+      for (const level of levels) {
+        if (level.enabled && approvedCount >= level.minReferrals && approvedCount <= level.maxReferrals) {
+          matchedLevel = level;
+        }
+      }
+
+      res.json({
+        success: true,
+        referrer: {
+          id: referrerDoc.id,
+          name: rData.enteredName || rData.firstName || rData.username || "Admin",
+          level: rData.referralLevel || matchedLevel.name,
+          referrals: approvedCount,
+          earnings: Number(rData.referralEarnings || rData.totalEarnings || 0),
+          avatar: rData.username ? `https://t.me/i/userpic?username=${rData.username}` : null
+        }
+      });
+    } catch (err: any) {
+      console.error("Error verifying referral code:", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Route 3: Pre-register Mobile and Invite Code
+  app.post("/api/referral/pre-register", async (req, res) => {
+    try {
+      const { mobileNumber, referralCode } = req.body;
+      const cleanMobile = String(mobileNumber || "").replace(/[^0-9]/g, "");
+      const cleanCode = String(referralCode || "").trim();
+
+      if (cleanMobile.length !== 10) {
+        return res.status(400).json({ success: false, message: "Please enter a valid 10-digit mobile number." });
+      }
+
+      if (!cleanCode) {
+        return res.status(400).json({ success: false, message: "Invite Code is required." });
+      }
+
+      // Verify referrer exists
+      let referrerDoc = null;
+      const q1 = query(collection(db, "users"), where("referralCode", "==", cleanCode));
+      const snap1 = await getDocs(q1);
+      if (!snap1.empty) {
+        referrerDoc = snap1.docs[0];
+      } else {
+        const userDocRef = doc(db, "users", cleanCode);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          referrerDoc = userDocSnap;
+        }
+      }
+
+      if (!referrerDoc) {
+        return res.status(404).json({ success: false, message: "Invalid Referral Code." });
+      }
+
+      const rData = referrerDoc.data();
+      const rId = String(referrerDoc.id);
+
+      // Create/Update pre-registration with ID as the mobile number (to prevent multiple referral claims for same number)
+      const preRegRef = doc(db, "referral_pre_registrations", cleanMobile);
+      const preRegSnap = await getDoc(preRegRef);
+
+      const now = new Date().toISOString();
+      const referrerName = rData.enteredName || rData.firstName || rData.username || "Referrer";
+
+      await setDoc(preRegRef, {
+        mobile: cleanMobile,
+        referrerId: rId,
+        referrerName: referrerName,
+        referralCode: cleanCode,
+        createdAt: now,
+        status: "Waiting Registration"
+      }, { merge: true });
+
+      // Track click count for referrer as page click/pre-registration
+      const refCountRef = doc(db, "referral_clicks", `${rId}_${cleanMobile}`);
+      await setDoc(refCountRef, {
+        referrerId: rId,
+        mobile: cleanMobile,
+        createdAt: now
+      });
+
+      // Fetch Bot Link
+      let botUsername = "Roysharearn_bot";
+      try {
+        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        if (telegramSettingsSnap.exists()) {
+          botUsername = telegramSettingsSnap.data()?.botUsername || "Roysharearn_bot";
+        }
+      } catch (botErr) {
+        console.error("Error reading bot username:", botErr);
+      }
+
+      const botUrl = `https://t.me/${botUsername}?start=ref_${rId}`;
+
+      res.json({
+        success: true,
+        message: "Mobile verified successfully!",
+        botUrl
+      });
+    } catch (err: any) {
+      console.error("Error in pre-register API:", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Route 4: Real-time Analytics & Self-Healing Sync for Dashboard
+  app.get("/api/referral/analytics", async (req, res) => {
+    try {
+      const userId = String(req.query.userId || "");
+      if (!userId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
+
+      // Self-Healing Evaluation: Check and update all referrals for this referrer
+      // Query referrals that are not completed or reject, to run live checks
+      const refsQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
+      const refsSnap = await getDocs(refsQuery);
+      
+      let botToken = "";
+      try {
+        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+        if (telegramSettingsSnap.exists()) {
+          botToken = telegramSettingsSnap.data()?.botToken || "";
+        }
+      } catch (e) {
+        console.error("Error loading botToken:", e);
+      }
+
+      // For any pending/working referral, evaluate in parallel
+      const evaluationPromises: Promise<any>[] = [];
+      refsSnap.forEach((refDoc) => {
+        const refData = refDoc.data();
+        if (refData.status !== "Commission Paid" && refData.status !== "Rejected") {
+          evaluationPromises.push(evaluateReferralStatusLocal(db, refDoc.id, botToken));
+        }
+      });
+      if (evaluationPromises.length > 0) {
+        await Promise.all(evaluationPromises);
+      }
+
+      // Now query the updated referrer's profile and referrals
+      const referrerDocRef = doc(db, "users", userId);
+      const referrerSnap = await getDoc(referrerDocRef);
+      if (!referrerSnap.exists()) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const rData = referrerSnap.data();
+
+      // Query updated referrals
+      const updatedRefsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", userId)));
+      let approvedCount = 0;
+      let pendingCount = 0;
+      let rejectedCount = 0;
+
+      updatedRefsSnap.forEach((ref) => {
+        const status = ref.data().status;
+        if (status === "Referral Approved" || status === "Commission Paid") {
+          approvedCount++;
+        } else if (status === "Rejected") {
+          rejectedCount++;
+        } else {
+          pendingCount++;
+        }
+      });
+
+      // Count pre-registrations clicks
+      const clicksSnap = await getDocs(query(collection(db, "referral_clicks"), where("referrerId", "==", userId)));
+      const clicksCount = clicksSnap.size;
+
+      // Define standard level metrics
+      const systemDoc = await getDoc(doc(db, "settings", "system"));
+      let levels = [
+        { name: "Bronze", commission: 5, minReferrals: 0, maxReferrals: 25, enabled: true },
+        { name: "Silver", commission: 10, minReferrals: 26, maxReferrals: 100, enabled: true },
+        { name: "Gold", commission: 15, minReferrals: 101, maxReferrals: 500, enabled: true },
+        { name: "Diamond", commission: 25, minReferrals: 501, maxReferrals: 999999, enabled: true }
+      ];
+      if (systemDoc.exists() && systemDoc.data()?.referralSystemV4?.referralLevels) {
+        levels = systemDoc.data()?.referralSystemV4?.referralLevels;
+      }
+
+      // Determine current and next levels
+      let currentLevel = levels[0];
+      let nextLevel = null;
+      for (let i = 0; i < levels.length; i++) {
+        const level = levels[i];
+        if (level.enabled && approvedCount >= level.minReferrals) {
+          currentLevel = level;
+          nextLevel = levels[i + 1] || null;
+        }
+      }
+
+      // Calculate level progress
+      let levelProgress = 100;
+      if (nextLevel) {
+        const range = nextLevel.minReferrals - currentLevel.minReferrals;
+        const currentProgress = approvedCount - currentLevel.minReferrals;
+        levelProgress = Math.min(100, Math.max(0, Math.round((currentProgress / range) * 100)));
+      }
+
+      // Conversion Rate
+      const conversionRate = clicksCount > 0 ? Math.round((approvedCount / clicksCount) * 100) : 0;
+
+      // Construct simple chart data
+      const last7Days = Array.from({ length: 7 }).map((_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        return d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
+      }).reverse();
+
+      const growthData = last7Days.map((day, idx) => ({
+        day,
+        referrals: idx === 6 ? approvedCount : Math.max(0, Math.round(approvedCount * (idx / 6))),
+        earnings: idx === 6 ? Number(rData.referralEarnings || 0) : Math.max(0, Math.round(Number(rData.referralEarnings || 0) * (idx / 6)))
+      }));
+
+      res.json({
+        success: true,
+        analytics: {
+          totalReferrals: approvedCount,
+          pendingReferrals: pendingCount,
+          rejectedReferrals: rejectedCount,
+          clicksCount: clicksCount,
+          conversionRate,
+          todayReferralEarnings: Number(rData.todayReferralEarnings || 0),
+          monthlyReferralEarnings: Number(rData.monthlyReferralEarnings || 0),
+          lifetimeReferralEarnings: Number(rData.referralEarnings || 0),
+          levelName: rData.referralLevel || currentLevel.name,
+          commissionPercent: rData.referralLevelCommission || currentLevel.commission,
+          levelProgress,
+          nextLevelName: nextLevel ? nextLevel.name : "Maximum Level",
+          nextLevelMin: nextLevel ? nextLevel.minReferrals : approvedCount,
+          growthData,
+          levelData: levels.map(l => ({ name: l.name, commission: l.commission, active: l.name === (rData.referralLevel || currentLevel.name) }))
+        }
+      });
+    } catch (err: any) {
+      console.error("Error in referral analytics API:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Route 5: Get Referral List (paginated & filtered)
+  app.get("/api/referral/list", async (req, res) => {
+    try {
+      const userId = String(req.query.userId || "");
+      const page = parseInt(String(req.query.page || "1"), 10);
+      const limitVal = parseInt(String(req.query.limit || "10"), 10);
+      const search = String(req.query.search || "").trim().toLowerCase();
+      const statusFilter = String(req.query.status || "").trim();
+
+      if (!userId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
+
+      const refsQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
+      const snap = await getDocs(refsQuery);
+      
+      let allReferrals: any[] = [];
+      snap.forEach((doc) => {
+        const d = doc.data();
+        allReferrals.push({
+          referredUserId: doc.id,
+          referredName: d.referredName || "New Friend",
+          referredUsername: d.referredUsername || "",
+          mobileNumber: d.mobileNumber || "N/A",
+          status: d.status || "Pending",
+          joinDate: d.joinDate || "N/A",
+          createdAt: d.createdAt || "",
+          urlClickCount: Number(d.urlClickCount || 0),
+          downloadCount: Number(d.downloadCount || 0),
+          withdrawalStatus: d.withdrawalStatus || "None"
+        });
+      });
+
+      // Filter by status if provided
+      if (statusFilter) {
+        if (statusFilter === "Approved") {
+          allReferrals = allReferrals.filter(r => r.status === "Referral Approved" || r.status === "Commission Paid");
+        } else if (statusFilter === "Pending") {
+          allReferrals = allReferrals.filter(r => r.status !== "Referral Approved" && r.status !== "Commission Paid" && r.status !== "Rejected");
+        } else if (statusFilter === "Rejected") {
+          allReferrals = allReferrals.filter(r => r.status === "Rejected");
+        }
+      }
+
+      // Filter by search query
+      if (search) {
+        allReferrals = allReferrals.filter(r => 
+          r.referredName.toLowerCase().includes(search) || 
+          r.referredUsername.toLowerCase().includes(search) || 
+          r.mobileNumber.includes(search)
+        );
+      }
+
+      // Sort by newest first
+      allReferrals.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+      // Paginate
+      const startIndex = (page - 1) * limitVal;
+      const paginatedList = allReferrals.slice(startIndex, startIndex + limitVal);
+
+      // Mask mobile numbers for privacy
+      const processedList = paginatedList.map(r => {
+        let masked = r.mobileNumber;
+        if (masked && masked.length === 10) {
+          masked = masked.substring(0, 3) + "****" + masked.substring(7);
+        }
+        return { ...r, mobileNumber: masked };
+      });
+
+      res.json({
+        success: true,
+        referrals: processedList,
+        total: allReferrals.length,
+        page,
+        totalPages: Math.ceil(allReferrals.length / limitVal)
+      });
+    } catch (err: any) {
+      console.error("Error in Referral list API:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Route 6: Get Referral Milestones & Claim Statuses
+  app.get("/api/referral/milestones", async (req, res) => {
+    try {
+      const userId = String(req.query.userId || "");
+      if (!userId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
+
+      // Load referral settings milestones
+      const systemDoc = await getDoc(doc(db, "settings", "system"));
+      let milestones = [
+        { referrals: 10, reward: 50, enabled: true },
+        { referrals: 25, reward: 200, enabled: true },
+        { referrals: 50, reward: 500, enabled: true },
+        { referrals: 100, reward: 1500, enabled: true },
+        { referrals: 500, reward: 5000, enabled: true }
+      ];
+
+      if (systemDoc.exists() && systemDoc.data()?.referralSystemV4?.milestones) {
+        milestones = systemDoc.data()?.referralSystemV4?.milestones;
+      }
+
+      // Count approved referrals
+      const approvedRefsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", userId), where("status", "in", ["Referral Approved", "Commission Paid"])));
+      const approvedCount = approvedRefsSnap.size;
+
+      // Get claimed milestones
+      const claimedSnap = await getDocs(query(collection(db, "claimed_milestones"), where("userId", "==", userId)));
+      const claimedReferralMilestones: number[] = [];
+      claimedSnap.forEach(d => {
+        claimedReferralMilestones.push(Number(d.data().referrals));
+      });
+
+      const responseMilestones = milestones.map(m => {
+        const isClaimed = claimedReferralMilestones.includes(m.referrals);
+        const canClaim = !isClaimed && approvedCount >= m.referrals;
+        return {
+          referrals: m.referrals,
+          reward: m.reward,
+          enabled: m.enabled,
+          status: isClaimed ? "claimed" : (canClaim ? "ready" : "locked"),
+          progress: Math.min(100, Math.round((approvedCount / m.referrals) * 100))
+        };
+      });
+
+      res.json({
+        success: true,
+        approvedCount,
+        milestones: responseMilestones
+      });
+    } catch (err: any) {
+      console.error("Error in referral milestones API:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/system-settings", async (req, res) => {
     try {
       const docRef = doc(db, "settings", "system");
@@ -5384,9 +6198,39 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
   app.post("/api/withdrawal/submit", async (req, res) => {
     try {
-      const { userId, amount, upiId } = req.body;
-      if (!userId || !amount || !upiId) {
+      const { 
+        userId, 
+        amount, 
+        method,
+        upiId,
+        accountHolderName,
+        accountNumber,
+        ifscCode,
+        bankName,
+        walletAddress,
+        processingFee,
+        receiveAmount
+      } = req.body;
+
+      if (!userId || !amount || !method) {
         return res.status(400).json({ success: false, message: "Missing required parameters." });
+      }
+
+      // Validation check for fields
+      if (method === "UPI ID") {
+        if (!upiId || !upiId.trim()) {
+          return res.status(400).json({ success: false, message: "UPI ID is required." });
+        }
+      } else if (method === "Bank Account") {
+        if (!accountHolderName || !accountNumber || !ifscCode || !bankName) {
+          return res.status(400).json({ success: false, message: "All bank account details are required." });
+        }
+      } else if (method === "USDT (TRC20)") {
+        if (!walletAddress || !walletAddress.trim()) {
+          return res.status(400).json({ success: false, message: "USDT Wallet address is required." });
+        }
+      } else {
+        return res.status(400).json({ success: false, message: "Invalid payment method selected." });
       }
 
       const userDocRef = doc(db, "users", String(userId));
@@ -5407,6 +6251,16 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
 
       const availableBalance = fileEarnings + linkEarnings + referralEarnings + bonusBalance + rewardBalance + userBalance - withdrawnAmount - pendingWithdrawals;
 
+      // Calculate amount in INR
+      const requestedAmount = Number(amount);
+      const isUsdtMethod = method === "USDT (TRC20)";
+      const USDT_RATE = 90;
+      const requestedAmountInINR = isUsdtMethod ? (requestedAmount * USDT_RATE) : requestedAmount;
+
+      if (isNaN(requestedAmount) || requestedAmount <= 0) {
+        return res.status(400).json({ success: false, message: "Invalid withdrawal amount." });
+      }
+
       // Get minimum withdrawal from system settings
       const settingsSnap = await getDoc(doc(db, "settings", "system"));
       let minWithdrawal = 100; // Default
@@ -5418,16 +6272,14 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         }
       }
 
-      const requestedAmount = Number(amount);
-      if (isNaN(requestedAmount) || requestedAmount <= 0) {
-        return res.status(400).json({ success: false, message: "Invalid withdrawal amount." });
+      // Ensure minimum is checked correctly. 
+      // If USDT, min is also evaluated after converting or natively depending on display. 
+      // Let's verify if requestedAmountInINR < minWithdrawal in INR terms
+      if (requestedAmountInINR < minWithdrawal) {
+        return res.status(400).json({ success: false, message: `Minimum withdrawal amount is ₹${minWithdrawal} (or equivalent).` });
       }
 
-      if (requestedAmount < minWithdrawal) {
-        return res.status(400).json({ success: false, message: `Minimum withdrawal amount is ₹${minWithdrawal}.` });
-      }
-
-      if (requestedAmount > availableBalance) {
+      if (requestedAmountInINR > availableBalance) {
         return res.status(400).json({ success: false, message: "Insufficient wallet balance." });
       }
 
@@ -5447,7 +6299,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       const now = new Date();
       const currentDateTime = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
 
-      const withdrawalDocData = {
+      const withdrawalDocData: any = {
         id: withdrawalId,
         withdrawalId,
         userId: String(userId),
@@ -5456,25 +6308,59 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         username: userData.username || "",
         mobile: userData.mobile || userData.phone || "",
         amount: requestedAmount,
-        upiId: upiId.trim(),
-        method: "UPI ID",
+        method,
         status: "Pending",
+        processingFee: Number(processingFee || 0),
+        receiveAmount: Number(receiveAmount || 0),
         createdAt: now.toISOString()
       };
+
+      if (method === "UPI ID") {
+        withdrawalDocData.upiId = upiId.trim();
+      } else if (method === "Bank Account") {
+        withdrawalDocData.accountHolderName = accountHolderName.trim();
+        withdrawalDocData.accountNumber = accountNumber.trim();
+        withdrawalDocData.ifscCode = ifscCode.trim();
+        withdrawalDocData.bankName = bankName.trim();
+      } else if (method === "USDT (TRC20)") {
+        withdrawalDocData.walletAddress = walletAddress.trim();
+        withdrawalDocData.network = "TRC20";
+      }
 
       // 1. Create the withdrawal request
       await setDoc(doc(db, "withdrawals", withdrawalId), withdrawalDocData);
 
       // 2. Deduct available balance immediately by adding it to pendingWithdrawals on the user doc
-      // Also save UPI ID on the user profile so it acts as "Saved UPI ID"
-      await setDoc(userDocRef, {
-        pendingWithdrawals: pendingWithdrawals + requestedAmount,
-        upiId: upiId.trim(),
+      // Also save details on user profile so it acts as "Saved Account details"
+      const userUpdateData: any = {
+        pendingWithdrawals: pendingWithdrawals + requestedAmountInINR,
         updatedAt: now.toISOString()
-      }, { merge: true });
+      };
+
+      if (method === "UPI ID" && upiId) {
+        userUpdateData.upiId = upiId.trim();
+      } else if (method === "Bank Account") {
+        userUpdateData.bankDetails = {
+          accountHolderName: accountHolderName.trim(),
+          accountNumber: accountNumber.trim(),
+          ifscCode: ifscCode.trim(),
+          bankName: bankName.trim()
+        };
+      } else if (method === "USDT (TRC20)" && walletAddress) {
+        userUpdateData.usdtWalletAddress = walletAddress.trim();
+      }
+
+      await setDoc(userDocRef, userUpdateData, { merge: true });
 
       // 3. Immediately send Telegram Bot notification
-      const tgMsg = `💸 <b>Withdrawal Request Submitted</b>\n\nAmount: ₹${requestedAmount}\nStatus: Pending\nRequest ID: ${withdrawalId}\nDate & Time: ${currentDateTime}\n\nYour request has been received successfully.\nPlease wait for admin approval.`;
+      let tgMsg = "";
+      if (method === "USDT (TRC20)") {
+        tgMsg = `💸 <b>USDT Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ${requestedAmount} USDT (≈ ₹${requestedAmountInINR.toFixed(2)})\n<b>Fee:</b> ${processingFee} USDT\n<b>Receive Amount:</b> <b>${receiveAmount} USDT</b>\n<b>Wallet:</b> <code>${walletAddress.trim()}</code>\n<b>Network:</b> TRC20 (Fixed)\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> Pending\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
+      } else if (method === "Bank Account") {
+        tgMsg = `💸 <b>Bank Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>Bank Name:</b> ${bankName.trim()}\n<b>A/C No:</b> <code>${accountNumber.trim()}</code>\n<b>Holder:</b> ${accountHolderName.trim()}\n<b>IFSC:</b> <code>${ifscCode.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> Pending\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
+      } else {
+        tgMsg = `💸 <b>UPI Withdrawal Request Submitted</b>\n\n<b>Amount:</b> ₹${requestedAmount.toFixed(2)}\n<b>Fee:</b> ₹${processingFee.toFixed(2)}\n<b>Receive Amount:</b> <b>₹${receiveAmount.toFixed(2)}</b>\n<b>UPI ID:</b> <code>${upiId.trim()}</code>\n<b>Request ID:</b> <code>${withdrawalId}</code>\n<b>Status:</b> Pending\n<b>Date & Time:</b> ${currentDateTime}\n\nPlease wait for admin approval.`;
+      }
 
       await sendTgMessage(String(userId), tgMsg);
 
@@ -7139,6 +8025,12 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           const escapedName = fileName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
           const messageText = `✅ <b>Large File Uploaded Successfully</b>\n\n📄 <b>File Name:</b> <code>${escapedName}</code>\n📦 <b>File Size:</b> ${formattedSize}\n☁ <b>Storage:</b> Google Drive\n\n🔗 <b>RoyShare Link:</b> ${royshareLink}`;
           
+          const rawAppUrl = process.env.APP_URL || "https://royshare.online";
+          const appUrl = (rawAppUrl.includes("run.app") || rawAppUrl.includes("ais-dev") || rawAppUrl === "MY_APP_URL") 
+            ? rawAppUrl 
+            : "https://royshare.online";
+          const cleanAppUrl = appUrl.replace(/\/$/, "");
+
           const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -7149,8 +8041,8 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
               reply_markup: {
                 inline_keyboard: [
                   [
-                    { text: "📁 My Files", callback_data: "mycontent_myfiles" },
-                    { text: "⬆️ Upload Another", callback_data: "mycontent_upload" }
+                    { text: "📁 My Files", web_app: { url: `${cleanAppUrl}/app?page=files&userId=${tg_id}` } },
+                    { text: "⬆️ Upload Another", web_app: { url: `${cleanAppUrl}/app?page=upload&userId=${tg_id}` } }
                   ]
                 ]
               }
