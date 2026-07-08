@@ -7,27 +7,50 @@ export default function ReferralCenter({ user }: { user: any }) {
   const [stats, setStats] = useState<any>(null);
   const [milestones, setMilestones] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = async () => {
+    if (!user?.id) {
+      setError("User information not found.");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const [statsRes, milestonesRes] = await Promise.all([
+        fetch(`${API_BASE}/api/referral/analytics?userId=${user.id}`),
+        fetch(`${API_BASE}/api/referral/milestones?userId=${user.id}`)
+      ]);
+      
+      if (!statsRes.ok) throw new Error("Failed to fetch analytics");
+      if (!milestonesRes.ok) throw new Error("Failed to fetch milestones");
+      
+      const statsData = await statsRes.json();
+      const milestonesData = await milestonesRes.json();
+      
+      setStats(statsData);
+      setMilestones(milestonesData || []);
+    } catch (err) {
+      console.error("Error fetching referral data:", err);
+      setError("Unable to load Referral Center. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (!user?.id) return;
-    
-    Promise.all([
-      fetch(`${API_BASE}/api/referral/analytics?userId=${user.id}`).then(res => res.json()),
-      fetch(`${API_BASE}/api/referral/milestones?userId=${user.id}`).then(res => res.json())
-    ])
-      .then(([statsData, milestonesData]) => {
-        setStats(statsData);
-        setMilestones(milestonesData || []);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error("Error fetching referral data:", err);
-        setLoading(false);
-      });
+    fetchData();
   }, [user]);
 
   if (loading) return <div className="text-white text-center p-10">Loading Referral Center...</div>;
-  if (!stats) return <div className="text-white text-center p-10">Error loading data.</div>;
+  if (error) return (
+    <div className="text-white text-center p-10 space-y-4">
+      <p>{error}</p>
+      <button onClick={fetchData} className="bg-indigo-600 px-4 py-2 rounded-xl text-sm font-bold">Retry</button>
+    </div>
+  );
+  if (!stats) return <div className="text-white text-center p-10">No data available.</div>;
 
   const referralLink = `https://royshare.online/ref/${stats.referralCode}`;
 
