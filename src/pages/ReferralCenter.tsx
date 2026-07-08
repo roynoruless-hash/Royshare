@@ -10,7 +10,9 @@ export default function ReferralCenter({ user }: { user: any }) {
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
+    console.log("[ReferralCenter] Fetching data for user:", user);
     if (!user?.id) {
+      console.error("[ReferralCenter] User information not found or missing ID.");
       setError("User information not found.");
       setLoading(false);
       return;
@@ -18,16 +20,22 @@ export default function ReferralCenter({ user }: { user: any }) {
     setLoading(true);
     setError(null);
     try {
+      console.log("[ReferralCenter] Fetching analytics from: /api/referral/analytics");
       const [statsRes, milestonesRes] = await Promise.all([
-        fetch(`${API_BASE}/api/referral/analytics?userId=${user.id}`),
-        fetch(`${API_BASE}/api/referral/milestones?userId=${user.id}`)
+        fetch(`/api/referral/analytics?userId=${user.id}`),
+        fetch(`/api/referral/milestones?userId=${user.id}`)
       ]);
       
-      if (!statsRes.ok) throw new Error("Failed to fetch analytics");
-      if (!milestonesRes.ok) throw new Error("Failed to fetch milestones");
+      console.log("[ReferralCenter] Analytics response status:", statsRes.status);
+      console.log("[ReferralCenter] Milestones response status:", milestonesRes.status);
+      
+      if (!statsRes.ok) throw new Error(`Failed to fetch analytics: ${statsRes.status}`);
+      if (!milestonesRes.ok) throw new Error(`Failed to fetch milestones: ${milestonesRes.status}`);
       
       const statsData = await statsRes.json();
       const milestonesData = await milestonesRes.json();
+      
+      console.log("[ReferralCenter] Data fetched successfully.");
       
       setStats(statsData);
       setMilestones(milestonesData || []);

@@ -283,6 +283,7 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
 export const MiniAppHome: React.FC = () => {
   const { user } = useTelegramAuth();
   const [currentView, setCurrentView] = useState<string>(() => {
+    console.log("[MiniAppHome] Initializing view. Pathname:", window.location.pathname, "Search:", window.location.search);
     const params = new URLSearchParams(window.location.search);
     const page = params.get("page");
     if (page === "referral" || window.location.pathname === "/referral") return "referral";
@@ -308,6 +309,12 @@ export const MiniAppHome: React.FC = () => {
       setCheckingVerification(false);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (window.location.pathname === "/referral" && currentView !== "referral") {
+      setCurrentView("referral");
+    }
+  }, [currentView]);
 
   const displayName = user ? ((user as any).enteredName || `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username || "User") : "User";
 

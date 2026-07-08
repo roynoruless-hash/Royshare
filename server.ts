@@ -3121,139 +3121,104 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
 
   // Route 4: Real-time Analytics & Self-Healing Sync for Dashboard
   app.get("/api/referral/analytics", async (req, res) => {
+    const startTime = Date.now();
+    console.log(`[API] Start GET /api/referral/analytics for userId: ${req.query.userId}`);
+    
     try {
       const userId = String(req.query.userId || "");
       if (!userId) {
-        return res.status(400).json({ error: "userId is required" });
+        return res.status(400).json({ success: false, error: "userId is required" });
       }
 
-      // Self-Healing Evaluation: Check and update all referrals for this referrer
-      // Query referrals that are not completed or reject, to run live checks
-      const refsQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
-      const refsSnap = await getDocs(refsQuery);
-      
-      let botToken = "";
-      try {
-        const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
-        if (telegramSettingsSnap.exists()) {
-          botToken = telegramSettingsSnap.data()?.botToken || "";
+      // 1. Fire-and-forget: Self-Healing Evaluation
+      // Run in background without awaiting
+      (async () => {
+        try {
+          const refsQuery = query(collection(db, "referrals"), where("referrerId", "==", userId));
+          const refsSnap = await getDocs(refsQuery);
+          
+          let botToken = "";
+          const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
+          if (telegramSettingsSnap.exists()) {
+            botToken = telegramSettingsSnap.data()?.botToken || "";
+          }
+
+          for (const refDoc of refsSnap.docs) {
+            const refData = refDoc.data();
+            if (refData.status !== "Commission Paid" && refData.status !== "Rejected") {
+              await evaluateReferralStatusLocal(db, refDoc.id, botToken);
+            }
+          }
+          console.log(`[Background] Self-healing evaluation completed for userId: ${userId}`);
+        } catch (e) {
+          console.error(`[Background] Error in self-healing evaluation for userId: ${userId}:`, e);
         }
-      } catch (e) {
-        console.error("Error loading botToken:", e);
-      }
+      })();
 
-      // For any pending/working referral, evaluate in parallel
-      const evaluationPromises: Promise<any>[] = [];
-      refsSnap.forEach((refDoc) => {
-        const refData = refDoc.data();
-        if (refData.status !== "Commission Paid" && refData.status !== "Rejected") {
-          evaluationPromises.push(evaluateReferralStatusLocal(db, refDoc.id, botToken));
+      // 2. Main Analytics Read with Timeout
+      const analyticsPromise = (async () => {
+        const referrerDocRef = doc(db, "users", userId);
+        const referrerSnap = await getDoc(referrerDocRef);
+        if (!referrerSnap.exists()) {
+          throw new Error("User not found");
         }
-      });
-      if (evaluationPromises.length > 0) {
-        await Promise.all(evaluationPromises);
-      }
+        const rData = referrerSnap.data();
 
-      // Now query the updated referrer's profile and referrals
-      const referrerDocRef = doc(db, "users", userId);
-      const referrerSnap = await getDoc(referrerDocRef);
-      if (!referrerSnap.exists()) {
-        return res.status(404).json({ error: "User not found" });
-      }
+        // Query referrals
+        const updatedRefsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", userId)));
+        let approvedCount = 0;
+        let pendingCount = 0;
+        let rejectedCount = 0;
 
-      const rData = referrerSnap.data();
+        updatedRefsSnap.forEach((ref) => {
+          const status = ref.data().status;
+          if (status === "Referral Approved" || status === "Commission Paid") {
+            approvedCount++;
+          } else if (status === "Rejected") {
+            rejectedCount++;
+          } else {
+            pendingCount++;
+          }
+        });
 
-      // Query updated referrals
-      const updatedRefsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", userId)));
-      let approvedCount = 0;
-      let pendingCount = 0;
-      let rejectedCount = 0;
+        // Count pre-registrations clicks
+        const clicksSnap = await getDocs(query(collection(db, "referral_clicks"), where("referrerId", "==", userId)));
+        const clicksCount = clicksSnap.size;
 
-      updatedRefsSnap.forEach((ref) => {
-        const status = ref.data().status;
-        if (status === "Referral Approved" || status === "Commission Paid") {
-          approvedCount++;
-        } else if (status === "Rejected") {
-          rejectedCount++;
-        } else {
-          pendingCount++;
-        }
-      });
+        // Determine levels (simplified for speed)
+        let currentLevelName = rData.referralLevel || "Bronze";
+        let commission = rData.referralLevelCommission || 5;
 
-      // Count pre-registrations clicks
-      const clicksSnap = await getDocs(query(collection(db, "referral_clicks"), where("referrerId", "==", userId)));
-      const clicksCount = clicksSnap.size;
-
-      // Define standard level metrics
-      const systemDoc = await getDoc(doc(db, "settings", "system"));
-      let levels = [
-        { name: "Bronze", commission: 5, minReferrals: 0, maxReferrals: 25, enabled: true },
-        { name: "Silver", commission: 10, minReferrals: 26, maxReferrals: 100, enabled: true },
-        { name: "Gold", commission: 15, minReferrals: 101, maxReferrals: 500, enabled: true },
-        { name: "Diamond", commission: 25, minReferrals: 501, maxReferrals: 999999, enabled: true }
-      ];
-      if (systemDoc.exists() && systemDoc.data()?.referralSystemV4?.referralLevels) {
-        levels = systemDoc.data()?.referralSystemV4?.referralLevels;
-      }
-
-      // Determine current and next levels
-      let currentLevel = levels[0];
-      let nextLevel = null;
-      for (let i = 0; i < levels.length; i++) {
-        const level = levels[i];
-        if (level.enabled && approvedCount >= level.minReferrals) {
-          currentLevel = level;
-          nextLevel = levels[i + 1] || null;
-        }
-      }
-
-      // Calculate level progress
-      let levelProgress = 100;
-      if (nextLevel) {
-        const range = nextLevel.minReferrals - currentLevel.minReferrals;
-        const currentProgress = approvedCount - currentLevel.minReferrals;
-        levelProgress = Math.min(100, Math.max(0, Math.round((currentProgress / range) * 100)));
-      }
-
-      // Conversion Rate
-      const conversionRate = clicksCount > 0 ? Math.round((approvedCount / clicksCount) * 100) : 0;
-
-      // Construct simple chart data
-      const last7Days = Array.from({ length: 7 }).map((_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        return d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
-      }).reverse();
-
-      const growthData = last7Days.map((day, idx) => ({
-        day,
-        referrals: idx === 6 ? approvedCount : Math.max(0, Math.round(approvedCount * (idx / 6))),
-        earnings: idx === 6 ? Number(rData.referralEarnings || 0) : Math.max(0, Math.round(Number(rData.referralEarnings || 0) * (idx / 6)))
-      }));
-
-      res.json({
-        success: true,
-        analytics: {
+        return {
           totalReferrals: approvedCount,
           pendingReferrals: pendingCount,
           rejectedReferrals: rejectedCount,
           clicksCount: clicksCount,
-          conversionRate,
           todayReferralEarnings: Number(rData.todayReferralEarnings || 0),
           monthlyReferralEarnings: Number(rData.monthlyReferralEarnings || 0),
           lifetimeReferralEarnings: Number(rData.referralEarnings || 0),
-          levelName: rData.referralLevel || currentLevel.name,
-          commissionPercent: rData.referralLevelCommission || currentLevel.commission,
-          levelProgress,
-          nextLevelName: nextLevel ? nextLevel.name : "Maximum Level",
-          nextLevelMin: nextLevel ? nextLevel.minReferrals : approvedCount,
-          growthData,
-          levelData: levels.map(l => ({ name: l.name, commission: l.commission, active: l.name === (rData.referralLevel || currentLevel.name) }))
-        }
+          levelName: currentLevelName,
+          commissionPercent: commission
+        };
+      })();
+
+      // Timeout: 4 seconds
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Analytics timeout")), 4000)
+      );
+
+      const analytics = await Promise.race([analyticsPromise, timeoutPromise]);
+      
+      const duration = Date.now() - startTime;
+      console.log(`[API] Success GET /api/referral/analytics for userId: ${userId} in ${duration}ms`);
+      
+      res.json({
+        success: true,
+        ...analytics
       });
     } catch (err: any) {
-      console.error("Error in referral analytics API:", err);
-      res.status(500).json({ error: err.message });
+      console.error(`[API] Error GET /api/referral/analytics:`, err);
+      res.status(500).json({ success: false, error: err.message || "Failed to load analytics" });
     }
   });
 
