@@ -285,7 +285,7 @@ export const MiniAppHome: React.FC = () => {
   const [currentView, setCurrentView] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
     const page = params.get("page");
-    if (page === "referral") return "referral";
+    if (page === "referral" || window.location.pathname === "/referral") return "referral";
     if (page === "content") return "dashboard";
     if (page === "files") return "my-content";
     if (page === "links") return "my-links";

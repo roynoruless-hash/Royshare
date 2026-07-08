@@ -5,19 +5,23 @@ import { API_BASE } from "../config/api";
 export default function ReferralCenter({ user }: { user: any }) {
   const [copied, setCopied] = useState(false);
   const [stats, setStats] = useState<any>(null);
+  const [milestones, setMilestones] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user?.id) return;
     
-    fetch(`${API_BASE}/api/referral/analytics?userId=${user.id}`)
-      .then(res => res.json())
-      .then(data => {
-        setStats(data);
+    Promise.all([
+      fetch(`${API_BASE}/api/referral/analytics?userId=${user.id}`).then(res => res.json()),
+      fetch(`${API_BASE}/api/referral/milestones?userId=${user.id}`).then(res => res.json())
+    ])
+      .then(([statsData, milestonesData]) => {
+        setStats(statsData);
+        setMilestones(milestonesData || []);
         setLoading(false);
       })
       .catch(err => {
-        console.error("Error fetching referral stats:", err);
+        console.error("Error fetching referral data:", err);
         setLoading(false);
       });
   }, [user]);
@@ -64,10 +68,10 @@ export default function ReferralCenter({ user }: { user: any }) {
       <section>
         <h2 className="text-xl font-bold mb-4">Milestone Rewards</h2>
         <div className="grid grid-cols-3 md:grid-cols-5 gap-4">
-            {[10, 25, 50, 100, 500].map(m => (
-                <div key={m} className={`p-4 rounded-2xl text-center border ${stats.approvedCount >= m ? "bg-emerald-900 border-emerald-700" : "bg-slate-800 border-slate-700"}`}>
-                    <Award className={`w-8 h-8 mx-auto mb-2 ${stats.approvedCount >= m ? "text-yellow-400" : "text-slate-500"}`} />
-                    <p className="font-bold text-xl">{m}+</p>
+            {milestones.map(m => (
+                <div key={m.referrals} className={`p-4 rounded-2xl text-center border ${stats.approvedCount >= m.referrals ? "bg-emerald-900 border-emerald-700" : "bg-slate-800 border-slate-700"}`}>
+                    <Award className={`w-8 h-8 mx-auto mb-2 ${stats.approvedCount >= m.referrals ? "text-yellow-400" : "text-slate-500"}`} />
+                    <p className="font-bold text-xl">{m.referrals}+</p>
                 </div>
             ))}
         </div>
