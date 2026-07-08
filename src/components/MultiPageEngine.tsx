@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from "react";
 import { API_BASE } from "../config/api";
 import { motion, AnimatePresence } from "motion/react";
-import { Clock, ShieldAlert, ArrowRight, Download, ExternalLink, CheckCircle2 } from "lucide-react";
+import { Clock, ShieldAlert, ArrowRight, Download, ExternalLink, CheckCircle2, Share2, Copy, Check, FileIcon } from "lucide-react";
 import AnimatedBackground from "./AnimatedBackground";
 
 
@@ -154,6 +154,86 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
   const [redirecting, setRedirecting] = useState(false);
   const [destinationUrl, setDestinationUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+
+  // Redesign Download Page Custom States & Helpers
+  const [copiedShare, setCopiedShare] = useState(false);
+  const [relatedFiles, setRelatedFiles] = useState<any[]>([]);
+
+  const handleCopyShare = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setCopiedShare(true);
+    setTimeout(() => setCopiedShare(false), 2000);
+  };
+
+  const getFileType = (fileName?: string) => {
+    if (!fileName) return "Unknown Document";
+    const ext = fileName.split(".").pop()?.toLowerCase();
+    if (!ext) return "Unknown Document";
+    
+    const mimeMap: Record<string, string> = {
+      pdf: "PDF Document",
+      doc: "Word Document",
+      docx: "Word Document",
+      xls: "Excel Spreadsheet",
+      xlsx: "Excel Spreadsheet",
+      ppt: "PowerPoint Presentation",
+      pptx: "PowerPoint Presentation",
+      txt: "Plain Text File",
+      zip: "ZIP Archive",
+      rar: "RAR Archive",
+      tar: "TAR Archive",
+      gz: "Gzipped Archive",
+      "7z": "7-Zip Archive",
+      png: "PNG Image",
+      jpg: "JPEG Image",
+      jpeg: "JPEG Image",
+      gif: "GIF Image",
+      mp3: "MP3 Audio",
+      wav: "WAV Audio",
+      mp4: "MP4 Video",
+      mkv: "MKV Video",
+      avi: "AVI Video",
+      mov: "QuickTime Video",
+      html: "HTML File",
+      css: "CSS Stylesheet",
+      js: "JavaScript File",
+      ts: "TypeScript File"
+    };
+    
+    return mimeMap[ext] || `${ext.toUpperCase()} File`;
+  };
+
+  useEffect(() => {
+    if (type === "download" && itemData?.fileName) {
+      const fetchRelated = async () => {
+        try {
+          const ext = itemData.fileName.split(".").pop()?.toLowerCase() || "";
+          const { db } = await import("../lib/firebase");
+          const { collection, getDocs, limit, query, where } = await import("firebase/firestore");
+          
+          const q = query(collection(db, "uploads"), where("status", "==", "active"), limit(12));
+          const snap = await getDocs(q);
+          const list: any[] = [];
+          snap.forEach((doc) => {
+            const data = doc.data();
+            if (doc.id !== id) {
+              list.push({ id: doc.id, ...data });
+            }
+          });
+          
+          let filtered = list.filter((f) => f.fileName?.toLowerCase().endsWith(`.${ext}`));
+          if (filtered.length < 3) {
+            const otherFiles = list.filter((f) => !f.fileName?.toLowerCase().endsWith(`.${ext}`));
+            filtered = [...filtered, ...otherFiles];
+          }
+          setRelatedFiles(filtered.slice(0, 3));
+        } catch (err) {
+          console.error("Error fetching related files:", err);
+        }
+      };
+      fetchRelated();
+    }
+  }, [type, itemData, id]);
   
   // Security
   const [securityChecked, setSecurityChecked] = useState(false);
@@ -757,29 +837,140 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                   </div>
                 </div>
 
-                {type === "download" ? (
-                  // DOWNLOAD FINAL CORE VIEW
-                  <div className="bg-slate-950/60 rounded-xl p-6 border border-white/5 space-y-4 text-sm text-left">
-                    <p className="text-slate-400 font-semibold">Your secure file is ready for download:</p>
-                    <div className="h-px bg-white/5 my-2"></div>
-                    <div className="space-y-2 font-medium">
-                      <div className="grid grid-cols-[100px_1fr] gap-x-2">
-                        <span className="text-slate-500">File Name:</span>
-                        <span className="text-white font-bold break-all">{itemData?.fileName || "Unknown File"}</span>
+                 {type === "download" ? (
+                  <div className="space-y-6">
+                    {downloadUrl ? (
+                      /* ANIMATED SUCCESS SCREEN AFTER DOWNLOAD */
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.5 }}
+                        className="bg-emerald-950/20 rounded-xl p-6 border border-emerald-500/20 text-center space-y-4"
+                      >
+                        <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto text-emerald-400 animate-pulse relative">
+                          <div className="absolute inset-0 bg-emerald-500/10 rounded-full animate-ping"></div>
+                          <CheckCircle2 size={32} />
+                        </div>
+                        <h3 className="text-lg font-bold text-emerald-400">Secure Download Started!</h3>
+                        <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                          Your secure file transfer has been authorized and started. If it didn't begin automatically, please click below:
+                        </p>
+                        <a
+                          href={downloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition"
+                        >
+                          <Download size={14} /> Re-download File
+                        </a>
+
+                        {/* SHARE BUTTONS - ONLY AFTER SUCCESSFUL DOWNLOAD */}
+                        <div className="h-px bg-white/5 my-4"></div>
+                        <div className="space-y-3">
+                          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider text-left flex items-center gap-1.5">
+                            <Share2 size={12} /> Share this file link
+                          </p>
+                          <div className="grid grid-cols-3 gap-2">
+                            <a
+                              href={`https://api.whatsapp.com/send?text=${encodeURIComponent("Download this secure file on RoyShare: " + window.location.href)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="py-2.5 bg-green-600/10 hover:bg-green-600/20 text-green-400 border border-green-500/10 rounded-xl text-xs font-semibold transition text-center block"
+                            >
+                              WhatsApp
+                            </a>
+                            <a
+                              href={`https://t.me/share/url?url=${encodeURIComponent(window.location.href)}&text=${encodeURIComponent("Secure File Shared via RoyShare")}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="py-2.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/10 rounded-xl text-xs font-semibold transition text-center block"
+                            >
+                              Telegram
+                            </a>
+                            <button
+                              onClick={handleCopyShare}
+                              className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1 relative"
+                            >
+                              {copiedShare ? (
+                                <>
+                                  <Check size={12} className="text-emerald-400" /> Copied
+                                </>
+                              ) : (
+                                <>
+                                  <Copy size={12} /> Copy Link
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ) : (
+                      /* READY STAGE FOR FILE DOWNLOAD */
+                      <div className="bg-slate-950/60 rounded-xl p-6 border border-white/5 space-y-4 text-sm text-left">
+                        <p className="text-slate-400 font-semibold flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Secure file is ready for download:
+                        </p>
+                        <div className="h-px bg-white/5 my-2"></div>
+                        <div className="space-y-3 font-medium">
+                          <div className="grid grid-cols-[100px_1fr] gap-x-2">
+                            <span className="text-slate-500">File Name:</span>
+                            <span className="text-white font-bold break-all">{itemData?.fileName || "Unknown File"}</span>
+                          </div>
+                          <div className="grid grid-cols-[100px_1fr] gap-x-2">
+                            <span className="text-slate-500">File Size:</span>
+                            <span className="text-teal-400 font-semibold">
+                              {typeof itemData?.fileSize === "number"
+                                ? (itemData.fileSize / (1024 * 1024)).toFixed(2) + " MB"
+                                : itemData?.fileSize || "Unknown"}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-[100px_1fr] gap-x-2">
+                            <span className="text-slate-500">File Type:</span>
+                            <span className="text-indigo-400 font-semibold">{getFileType(itemData?.fileName)}</span>
+                          </div>
+                          <div className="grid grid-cols-[100px_1fr] gap-x-2">
+                            <span className="text-slate-500">Upload Date:</span>
+                            <span className="text-slate-300">{itemData?.uploadDate || "N/A"}</span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="grid grid-cols-[100px_1fr] gap-x-2">
-                        <span className="text-slate-500">File Size:</span>
-                        <span className="text-teal-400 font-semibold">
-                          {typeof itemData?.fileSize === "number"
-                            ? (itemData.fileSize / (1024 * 1024)).toFixed(2) + " MB"
-                            : itemData?.fileSize || "Unknown"}
-                        </span>
+                    )}
+
+                    {/* RELATED FILES SECTION */}
+                    {relatedFiles && relatedFiles.length > 0 && (
+                      <div className="space-y-3 pt-2 text-left">
+                        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <FileIcon size={12} className="text-indigo-400" /> Related Files
+                        </h4>
+                        <div className="space-y-2">
+                          {relatedFiles.map((rf) => (
+                            <a
+                              key={rf.id}
+                              href={`/download/${rf.id}`}
+                              className="flex items-center gap-3 p-3 bg-slate-950/40 hover:bg-slate-950/80 border border-white/5 rounded-xl transition group"
+                            >
+                              <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400 group-hover:bg-indigo-500/20 transition">
+                                <FileIcon size={16} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-semibold text-slate-200 truncate group-hover:text-white transition">
+                                  {rf.fileName || "Unnamed File"}
+                                </p>
+                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                  {typeof rf.fileSize === "number"
+                                    ? (rf.fileSize / (1024 * 1024)).toFixed(2) + " MB"
+                                    : rf.fileSize || "Unknown size"}
+                                </p>
+                              </div>
+                              <span className="text-[10px] font-bold text-indigo-400 opacity-60 group-hover:opacity-100 transition uppercase tracking-wider bg-indigo-500/5 group-hover:bg-indigo-500/10 px-2 py-1 rounded">
+                                View
+                              </span>
+                            </a>
+                          ))}
+                        </div>
                       </div>
-                      <div className="grid grid-cols-[100px_1fr] gap-x-2">
-                        <span className="text-slate-500">Date:</span>
-                        <span className="text-slate-300">{itemData?.uploadDate || "N/A"}</span>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 ) : (
                   // SHORTENER FINAL CORE VIEW
@@ -805,16 +996,7 @@ function MultiPageEngineInner({ type, id }: MultiPageEngineProps) {
                 {/* Final Trigger CTA */}
                 <div className="pt-2">
                   {type === "download" ? (
-                    downloadUrl ? (
-                      <a
-                        href={downloadUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full py-4 rounded-xl font-bold text-sm tracking-wide bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white shadow-lg shadow-emerald-500/10 transition flex items-center justify-center gap-2 cursor-pointer"
-                      >
-                        <Download size={16} /> Click to Direct Download File
-                      </a>
-                    ) : (
+                    !downloadUrl && (
                       <button
                         onClick={handleClaim}
                         disabled={redirecting}

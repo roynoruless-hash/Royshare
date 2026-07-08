@@ -27,7 +27,8 @@ import {
   ShieldAlert,
   Smartphone,
   KeyRound,
-  Link as LinkIcon
+  Link as LinkIcon,
+  FolderOpen
 } from "lucide-react";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
@@ -39,6 +40,7 @@ import RewardTasksPage from "./RewardTasksPage";
 import { API_BASE } from "../config/api";
 import { MyLinksPage } from "./MyLinksPage";
 import { UrlShortenerAnalyticsPage } from "./UrlShortenerAnalyticsPage";
+import { MyContentPage } from "./MyContentPage";
 
 interface PhoneVerificationProps {
   user: any;
@@ -408,6 +410,15 @@ export const MiniAppHome: React.FC = () => {
   }
 
   // Render Sub-Views
+  if (currentView === "my-content") {
+    return (
+      <MyContentPage 
+        user={user} 
+        onBack={() => setCurrentView("home")} 
+      />
+    );
+  }
+
   if (currentView === "my-links") {
     return (
       <MyLinksPage 
@@ -475,6 +486,7 @@ export const MiniAppHome: React.FC = () => {
   const actionButtons = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
     { id: "my-links", label: "My Short Links", icon: LinkIcon, color: "bg-indigo-600", shadow: "shadow-indigo-500/20" },
+    { id: "my-content", label: "My Content", icon: FolderOpen, color: "bg-sky-500", shadow: "shadow-sky-500/20" },
     { id: "balance", label: "Balance", icon: Wallet, color: "bg-emerald-500", shadow: "shadow-emerald-500/20" },
     { id: "refer", label: "Refer & Earn", icon: Share2, color: "bg-indigo-500", shadow: "shadow-indigo-500/20" },
     { id: "daily-bonus", label: "Daily Bonus", icon: Gift, color: "bg-amber-500", shadow: "shadow-amber-500/20" },

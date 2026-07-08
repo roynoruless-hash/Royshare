@@ -5847,26 +5847,31 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       if (!sessionSnap.exists()) return res.status(404).json({ success: false, message: "Session not found" });
       const sessionData = sessionSnap.data();
 
-      // Find the link
-      let linkSnap = await getDoc(doc(db, "smart_links", sessionData.linkId));
-      if (!linkSnap.exists()) {
-         linkSnap = await getDoc(doc(db, "links", sessionData.linkId));
-      }
-      if (!linkSnap.exists()) {
-        const qLinkAlias = query(collection(db, "links"), where("alias", "==", sessionData.linkId));
-        const qLinkAliasSnap = await getDocs(qLinkAlias);
-        if (!qLinkAliasSnap.empty) {
-          linkSnap = qLinkAliasSnap.docs[0];
-        } else {
-          const qSmart = query(collection(db, "smart_links"), where("alias", "==", sessionData.linkId));
-          const qSmartSnap = await getDocs(qSmart);
-          if (!qSmartSnap.empty) {
-             linkSnap = qSmartSnap.docs[0];
+      // Find the link or file
+      let linkSnap: any = null;
+      if (sessionData.type === "download") {
+        linkSnap = await getDoc(doc(db, "uploads", sessionData.linkId));
+      } else {
+        linkSnap = await getDoc(doc(db, "smart_links", sessionData.linkId));
+        if (!linkSnap.exists()) {
+           linkSnap = await getDoc(doc(db, "links", sessionData.linkId));
+        }
+        if (!linkSnap.exists()) {
+          const qLinkAlias = query(collection(db, "links"), where("alias", "==", sessionData.linkId));
+          const qLinkAliasSnap = await getDocs(qLinkAlias);
+          if (!qLinkAliasSnap.empty) {
+            linkSnap = qLinkAliasSnap.docs[0];
+          } else {
+            const qSmart = query(collection(db, "smart_links"), where("alias", "==", sessionData.linkId));
+            const qSmartSnap = await getDocs(qSmart);
+            if (!qSmartSnap.empty) {
+               linkSnap = qSmartSnap.docs[0];
+            }
           }
         }
       }
 
-      if (!linkSnap || !linkSnap.exists()) return res.status(404).json({ success: false, message: "Link not found" });
+      if (!linkSnap || !linkSnap.exists()) return res.status(404).json({ success: false, message: "Item not found" });
       
       const linkData = linkSnap.data();
       
@@ -6934,7 +6939,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
     console.log(`[Google API Trace] === START FINALIZE UPLOAD ===`);
     console.log(`[Google API Trace] Finalize request payload received:`, JSON.stringify(req.body, null, 2));
 
-    let { tg_id, driveFileId, fileName, fileSize, mimeType, uploadUrl } = req.body;
+    let { tg_id, driveFileId, fileName, fileSize, mimeType, uploadUrl, customAlias, password } = req.body;
 
     try {
       // Step 1: Validate core inputs and check token
@@ -7056,7 +7061,11 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       }
 
       if (!uniqueFileId) {
-        uniqueFileId = "gd_" + Math.random().toString(36).substring(2, 10);
+        if (customAlias && customAlias.trim()) {
+          uniqueFileId = customAlias.trim();
+        } else {
+          uniqueFileId = "gd_" + Math.random().toString(36).substring(2, 10);
+        }
         royshareLink = `https://royshare.online/download/${uniqueFileId}`;
         console.log(`[Google API Trace] Generated new RoyShare download ID: ${uniqueFileId}`);
       }
@@ -7087,7 +7096,10 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
           earnings: existingDoc ? (existingDoc.earnings || 0) : 0,
           storage: "google_drive",
           ownerEmail,
-          status: "active"
+          status: "active",
+          customAlias: customAlias || "",
+          password: password || "",
+          isPasswordProtected: !!password
         }, { merge: true });
 
         console.log(`[Google API Trace] [Step 4] Firestore metadata successfully written.`);

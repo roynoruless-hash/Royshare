@@ -37,6 +37,60 @@ export default function DriveUploadPage() {
   const [currentDriveFileId, setCurrentDriveFileId] = useState<string>("");
   const [failedStep, setFailedStep] = useState<number | null>(null);
 
+  // Custom Settings States
+  const [wantRename, setWantRename] = useState<"no" | "yes">("no");
+  const [customFileName, setCustomFileName] = useState("");
+  const [wantAlias, setWantAlias] = useState<"no" | "yes">("no");
+  const [customAlias, setCustomAlias] = useState("");
+  const [aliasError, setAliasError] = useState("");
+  const [aliasValidating, setAliasValidating] = useState(false);
+  const [wantPassword, setWantPassword] = useState<"no" | "yes">("no");
+  const [password, setPassword] = useState("");
+
+  const getFinalFileName = () => {
+    if (!selectedFile) return "";
+    if (wantRename === "yes" && customFileName.trim()) {
+      const originalExt = selectedFile.name.split(".").pop() || "";
+      let enteredName = customFileName.trim();
+      if (originalExt && !enteredName.endsWith(`.${originalExt}`)) {
+        enteredName = `${enteredName}.${originalExt}`;
+      }
+      return enteredName;
+    }
+    return selectedFile.name;
+  };
+
+  // Check alias uniqueness
+  useEffect(() => {
+    if (wantAlias === "no" || !customAlias.trim()) {
+      setAliasError("");
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(customAlias)) {
+      setAliasError("Alias must only contain letters, numbers, hyphens, and underscores.");
+      return;
+    }
+
+    const delayDebounce = setTimeout(async () => {
+      setAliasValidating(true);
+      setAliasError("");
+      try {
+        const dSnap = await getDoc(doc(db, "uploads", customAlias.trim()));
+        if (dSnap.exists()) {
+          setAliasError("❌ This custom alias is already taken. Please choose another.");
+        } else {
+          setAliasError("");
+        }
+      } catch (err) {
+        console.error("Error checking alias uniqueness:", err);
+      }
+      setAliasValidating(false);
+    }, 500);
+
+    return () => clearTimeout(delayDebounce);
+  }, [customAlias, wantAlias]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
 
@@ -120,7 +174,7 @@ export default function DriveUploadPage() {
     setError(null);
 
     let targetDriveFileId = fileId || currentDriveFileId;
-    const targetFileName = selectedFile.name;
+    const targetFileName = getFinalFileName();
     const targetFileSize = selectedFile.size;
 
     console.log("=== Google Drive Upload Completed ===");
@@ -179,7 +233,9 @@ export default function DriveUploadPage() {
       fileName: targetFileName,
       fileSize: targetFileSize,
       mimeType: selectedFile.type || "application/octet-stream",
-      uploadUrl: url
+      uploadUrl: url,
+      customAlias: wantAlias === "yes" && customAlias.trim() ? customAlias.trim() : "",
+      password: wantPassword === "yes" && password.trim() ? password.trim() : ""
     };
 
     console.log("Finalize request payload:", JSON.stringify(payload, null, 2));
@@ -243,7 +299,7 @@ export default function DriveUploadPage() {
         },
         body: JSON.stringify({
           tg_id: tgId,
-          fileName: selectedFile.name,
+          fileName: getFinalFileName(),
           fileSize: selectedFile.size,
           mimeType: selectedFile.type
         })
@@ -455,30 +511,206 @@ export default function DriveUploadPage() {
                 </span>
               </div>
             ) : (
-              <div id="selected-file-view" className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80 flex items-center gap-4">
-                <div className="p-3 bg-blue-500/10 rounded-lg text-blue-400">
-                  <FileIcon className="w-8 h-8" />
+              <div className="space-y-6">
+                <div id="selected-file-view" className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80 flex items-center gap-4">
+                  <div className="p-3 bg-blue-500/10 rounded-lg text-blue-400">
+                    <FileIcon className="w-8 h-8" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">
+                      {getFinalFileName()}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">{formatBytes(selectedFile.size)}</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setSelectedFile(null);
+                      setWantRename("no");
+                      setCustomFileName("");
+                      setWantAlias("no");
+                      setCustomAlias("");
+                      setWantPassword("no");
+                      setPassword("");
+                    }} 
+                    className="text-xs text-rose-400 hover:text-rose-300 font-semibold uppercase tracking-wider px-2.5 py-1.5 rounded-lg hover:bg-rose-500/10 transition"
+                  >
+                    Clear
+                  </button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{selectedFile.name}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">{formatBytes(selectedFile.size)}</p>
+
+                {/* OPTIONS PANEL */}
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 space-y-5 text-left">
+                  <h3 className="text-sm font-semibold text-white tracking-wide uppercase opacity-90 border-b border-slate-800 pb-2 flex items-center gap-2">
+                    <span>🛡️</span> Upload Settings
+                  </h3>
+
+                  {/* 1. Rename Option */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                      Do you want to rename this file?
+                    </label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-300">
+                        <input
+                          type="radio"
+                          name="wantRename"
+                          value="no"
+                          checked={wantRename === "no"}
+                          onChange={() => setWantRename("no")}
+                          className="text-blue-500 bg-slate-950 border-slate-700 focus:ring-blue-500"
+                        />
+                        No
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-300">
+                        <input
+                          type="radio"
+                          name="wantRename"
+                          value="yes"
+                          checked={wantRename === "yes"}
+                          onChange={() => setWantRename("yes")}
+                          className="text-blue-500 bg-slate-950 border-slate-700 focus:ring-blue-500"
+                        />
+                        Yes
+                      </label>
+                    </div>
+
+                    {wantRename === "yes" && (
+                      <div className="space-y-1 pt-1">
+                        <span className="text-xs text-slate-400 font-medium">File Name</span>
+                        <input
+                          type="text"
+                          value={customFileName}
+                          onChange={(e) => setCustomFileName(e.target.value)}
+                          placeholder="Enter new file name (excluding extension)..."
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 2. Custom Alias Option */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                      Custom Alias
+                    </label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-300">
+                        <input
+                          type="radio"
+                          name="wantAlias"
+                          value="no"
+                          checked={wantAlias === "no"}
+                          onChange={() => setWantAlias("no")}
+                          className="text-blue-500 bg-slate-950 border-slate-700 focus:ring-blue-500"
+                        />
+                        No
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-300">
+                        <input
+                          type="radio"
+                          name="wantAlias"
+                          value="yes"
+                          checked={wantAlias === "yes"}
+                          onChange={() => setWantAlias("yes")}
+                          className="text-blue-500 bg-slate-950 border-slate-700 focus:ring-blue-500"
+                        />
+                        Yes
+                      </label>
+                    </div>
+
+                    {wantAlias === "yes" && (
+                      <div className="space-y-1 pt-1">
+                        <span className="text-xs text-slate-400 font-medium">Alias</span>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={customAlias}
+                            onChange={(e) => setCustomAlias(e.target.value)}
+                            placeholder="my-custom-link"
+                            className={`w-full bg-slate-950 border rounded-lg px-3 py-2 text-sm text-white focus:outline-none ${
+                              aliasError 
+                                ? "border-rose-500 focus:border-rose-500" 
+                                : customAlias.trim() && !aliasValidating 
+                                  ? "border-emerald-500 focus:border-emerald-500" 
+                                  : "border-slate-800 focus:border-blue-500"
+                            }`}
+                          />
+                          {aliasValidating && (
+                            <span className="absolute right-3 top-2.5 text-xs text-slate-500">Checking...</span>
+                          )}
+                        </div>
+                        {aliasError && (
+                          <p className="text-xs text-rose-400 font-medium">{aliasError}</p>
+                        )}
+                        {!aliasError && customAlias.trim() && !aliasValidating && (
+                          <p className="text-xs text-emerald-400 font-medium">✓ Alias is unique and available</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. Password Protection Option */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                      Password Protect
+                    </label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-300">
+                        <input
+                          type="radio"
+                          name="wantPassword"
+                          value="no"
+                          checked={wantPassword === "no"}
+                          onChange={() => setWantPassword("no")}
+                          className="text-blue-500 bg-slate-950 border-slate-700 focus:ring-blue-500"
+                        />
+                        No
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-300">
+                        <input
+                          type="radio"
+                          name="wantPassword"
+                          value="yes"
+                          checked={wantPassword === "yes"}
+                          onChange={() => setWantPassword("yes")}
+                          className="text-blue-500 bg-slate-950 border-slate-700 focus:ring-blue-500"
+                        />
+                        Yes
+                      </label>
+                    </div>
+
+                    {wantPassword === "yes" && (
+                      <div className="space-y-1 pt-1">
+                        <span className="text-xs text-slate-400 font-medium">Password</span>
+                        <input
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="Enter file password..."
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <button 
-                  onClick={() => setSelectedFile(null)} 
-                  className="text-xs text-rose-400 hover:text-rose-300 font-semibold uppercase tracking-wider px-2.5 py-1.5 rounded-lg hover:bg-rose-500/10 transition"
-                >
-                  Clear
-                </button>
               </div>
             )}
 
             <div id="actions-footer" className="flex gap-3">
               <button
-                disabled={!selectedFile}
+                disabled={
+                  !selectedFile ||
+                  (wantRename === "yes" && !customFileName.trim()) ||
+                  (wantAlias === "yes" && (!customAlias.trim() || !!aliasError || aliasValidating)) ||
+                  (wantPassword === "yes" && !password.trim())
+                }
                 onClick={startUpload}
                 className={`flex-1 py-3 px-4 rounded-xl font-semibold text-sm transition text-center flex items-center justify-center gap-2 ${
-                  selectedFile
-                    ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20"
+                  selectedFile &&
+                  !(wantRename === "yes" && !customFileName.trim()) &&
+                  !(wantAlias === "yes" && (!customAlias.trim() || !!aliasError || aliasValidating)) &&
+                  !(wantPassword === "yes" && !password.trim())
+                    ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20 cursor-pointer"
                     : "bg-slate-800 text-slate-500 cursor-not-allowed"
                 }`}
               >
