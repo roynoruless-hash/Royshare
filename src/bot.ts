@@ -5471,7 +5471,7 @@ https://youtube.com`;
             await processDashboard(botToken, chatId, callbackQuery.from);
         } else if (data.startsWith("referral_copy_")) {
             const code = data.replace("referral_copy_", "");
-            let botUsername = "Royshareearn_bot";
+            let botUsername = "Roysharearn_bot";
             try {
                 const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
                 const bToken = decryptSecret(settingsDoc.data()?.botToken);

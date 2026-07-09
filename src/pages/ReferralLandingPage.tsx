@@ -63,7 +63,7 @@ export default function ReferralLandingPage() {
         console.error("Error loading Telegram config:", err);
         setTelegramConfig({
           clientId: "",
-          botUsername: "Royshareearn_bot",
+          botUsername: "Roysharearn_bot",
           miniAppShortName: "earn",
           redirectUri: "",
           trustedOrigin: "",
@@ -172,7 +172,7 @@ export default function ReferralLandingPage() {
   const getBotDeepLink = () => {
     const codeParam = inviteToken || "none";
     if (!telegramConfig) {
-      return `https://t.me/Royshareearn_bot?start=${codeParam}`;
+      return `https://t.me/Roysharearn_bot?start=${codeParam}`;
     }
     if (telegramConfig.miniAppShortName) {
       return `https://t.me/${telegramConfig.botUsername}/${telegramConfig.miniAppShortName}?startapp=${codeParam}`;

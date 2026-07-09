@@ -22,7 +22,7 @@ export default function RewardTasksPage({ userIdProp, taskIdProp, onBack }: { us
   const [userName, setUserName] = useState("User");
   const [currency, setCurrency] = useState("INR");
   const [currentTask, setCurrentTask] = useState<Task | null>(null);
-  const [botUsername, setBotUsername] = useState("Royshareearn_bot");
+  const [botUsername, setBotUsername] = useState("Roysharearn_bot");
   const [firestoreReadStatus, setFirestoreReadStatus] = useState("Pending");
 
   const [submitting, setSubmitting] = useState(false);
@@ -98,7 +98,7 @@ export default function RewardTasksPage({ userIdProp, taskIdProp, onBack }: { us
 
         setCurrency(data.currency || "INR");
         setUserName(data.userName || "User");
-        setBotUsername(data.botUsername || "Royshareearn_bot");
+        setBotUsername(data.botUsername || "Roysharearn_bot");
 
         let resolvedTask: Task | null = null;
         let firestoreReadStatusLocal = "Pending";

@@ -2944,7 +2944,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
 
       res.json({
         clientId: data.clientId || "",
-        botUsername: data.botUsername || "Royshareearn_bot",
+        botUsername: data.botUsername || "Roysharearn_bot",
         miniAppShortName: data.miniAppShortName || "earn",
         redirectUri: data.redirectUri || "",
         trustedOrigin: data.trustedOrigin || ""
@@ -2953,7 +2953,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       console.error("Error reading Telegram config:", e);
       res.json({
         clientId: "",
-        botUsername: "Royshareearn_bot",
+        botUsername: "Roysharearn_bot",
         miniAppShortName: "earn",
         redirectUri: "",
         trustedOrigin: ""
@@ -3039,7 +3039,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
             <script 
               async 
               src="https://telegram.org/js/telegram-widget.js?22" 
-              data-telegram-login="Royshareearn_bot" 
+              data-telegram-login="Roysharearn_bot" 
               data-size="large" 
               data-radius="16" 
               data-auth-url="https://royshare.online/auth/telegram/callback" 
@@ -3062,7 +3062,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
             </div>
             <div class="meta-item">
               <span>Target Bot:</span>
-              <span class="meta-value">Royshareearn_bot</span>
+              <span class="meta-value">Roysharearn_bot</span>
             </div>
           </div>
         </div>
@@ -6207,7 +6207,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         });
       }
 
-      let botUsername = "Royshareearn_bot";
+      let botUsername = "Roysharearn_bot";
       try {
         const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
         const botToken = telegramSettingsDoc.data()?.botToken;
