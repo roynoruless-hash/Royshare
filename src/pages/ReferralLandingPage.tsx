@@ -361,12 +361,13 @@ export default function ReferralLandingPage() {
               )}
 
               {/* simulated/fallback button for dev preview environment */}
-              {process.env.NODE_ENV !== "production" && (
+              {(process.env.NODE_ENV !== "production" || (typeof window !== "undefined" && window.location.hostname !== "royshare.online")) && (
                 <button
                   type="button"
                   onClick={handleSimulatedTestLogin}
                   disabled={loading}
                   className="w-full bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-800 rounded-2xl py-3 px-4 font-bold text-xs flex items-center justify-center gap-2 transition-all mt-4"
+                  id="btn-simulated-login"
                 >
                   {loading ? (
                     <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />

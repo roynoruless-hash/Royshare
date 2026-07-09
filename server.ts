@@ -45,23 +45,44 @@ const decryptSecret = (text: string): string => {
   }
 };
 
-const getDoc = async (ref: any): Promise<any> => {
-  const snap = await firestoreGetDoc(ref);
-  if (ref && ref.path === "settings/telegram" && snap.exists()) {
-    const originalData = snap.data;
-    if (originalData) {
-      snap.data = function() {
-        const d = originalData.apply(snap);
-        if (!d) return d;
-        return {
-          ...d,
-          botToken: d.botToken && d.botToken.startsWith("enc:") ? decryptSecret(d.botToken) : d.botToken,
-          clientSecret: d.clientSecret && d.clientSecret.startsWith("enc:") ? decryptSecret(d.clientSecret) : d.clientSecret
-        };
-      };
+const getDoc = async (ref: any, attempts = 5, initialDelay = 500): Promise<any> => {
+  let lastError: any;
+  let delay = initialDelay;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const snap = await firestoreGetDoc(ref);
+      if (ref && ref.path === "settings/telegram" && snap.exists()) {
+        const originalData = snap.data;
+        if (originalData) {
+          snap.data = function() {
+            const d = originalData.apply(snap);
+            if (!d) return d;
+            return {
+              ...d,
+              botToken: d.botToken && d.botToken.startsWith("enc:") ? decryptSecret(d.botToken) : d.botToken,
+              clientSecret: d.clientSecret && d.clientSecret.startsWith("enc:") ? decryptSecret(d.clientSecret) : d.clientSecret
+            };
+          };
+        }
+      }
+      return snap;
+    } catch (e: any) {
+      lastError = e;
+      const isOfflineError = e.message && (
+        e.message.toLowerCase().includes("offline") || 
+        e.message.toLowerCase().includes("unavailable") || 
+        e.code === "unavailable"
+      );
+      if (isOfflineError && i < attempts - 1) {
+        console.warn(`[Firestore Retry] getDoc failed for path "${ref?.path || 'unknown'}": ${e.message || e}. Retrying in ${delay}ms... (Attempt ${i + 1}/${attempts})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2;
+      } else {
+        throw e;
+      }
     }
   }
-  return snap;
+  throw lastError;
 };
 
 import { REWARD_TASKS } from "./src/lib/tasks";
@@ -2940,6 +2961,121 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  // Standalone Telegram Login Widget Test Route
+  app.get("/tg-test.html", (req, res) => {
+    res.setHeader("Content-Type", "text/html");
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Telegram Login Widget Standalone Test</title>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f1f5f9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+          }
+          .card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 480px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+          }
+          h1 {
+            font-size: 20px;
+            margin-bottom: 8px;
+            color: #38bdf8;
+          }
+          p {
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1.6;
+            margin-bottom: 24px;
+          }
+          .widget-container {
+            display: inline-block;
+            margin: 20px 0;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+          }
+          .meta {
+            font-size: 12px;
+            color: #64748b;
+            border-top: 1px solid #334155;
+            padding-top: 16px;
+            margin-top: 24px;
+          }
+          .meta-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+          }
+          .meta-value {
+            font-family: monospace;
+            color: #e2e8f0;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Standalone Telegram Login Widget Audit</h1>
+          <p>This is a raw HTML page loaded outside of React to determine if any virtual DOM, CSP headers, or SPA routing interferes with the Telegram widget initialization.</p>
+          
+          <div class="widget-container">
+            <!-- Official Telegram Widget Script -->
+            <script 
+              async 
+              src="https://telegram.org/js/telegram-widget.js?22" 
+              data-telegram-login="Royshareearn_bot" 
+              data-size="large" 
+              data-radius="16" 
+              data-auth-url="https://royshare.online/auth/telegram/callback" 
+              data-request-access="write">
+            </script>
+          </div>
+
+          <p style="font-size: 11px; margin-top: 10px; color: #cbd5e1;">
+            If the widget above renders with a "Log in with Telegram" button, React or DOM manipulation is causing issues in the main app. If it shows "Bot domain invalid", the domain configuration/binding on BotFather or the domain ownership is incorrect.
+          </p>
+
+          <div class="meta">
+            <div class="meta-item">
+              <span>Domain Origin:</span>
+              <span class="meta-value" id="origin-val"></span>
+            </div>
+            <div class="meta-item">
+              <span>Current URL:</span>
+              <span class="meta-value" id="url-val"></span>
+            </div>
+            <div class="meta-item">
+              <span>Target Bot:</span>
+              <span class="meta-value">Royshareearn_bot</span>
+            </div>
+          </div>
+        </div>
+
+        <script>
+          document.getElementById('origin-val').textContent = window.location.origin;
+          document.getElementById('url-val').textContent = window.location.hostname;
+        </script>
+      </body>
+      </html>
+    `);
+  });
+
   app.get("/api/admin/system-settings", async (req, res) => {
     try {
       const docRef = doc(db, "settings", "system");
@@ -5331,24 +5467,26 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       res.json(pollingState);
   });
 
-  // Auto-start polling on app startup if token exists
-  getDoc(doc(db, "settings", "telegram")).then(async (docSnap) => {
-      const data = docSnap.data();
-      if (!docSnap.exists()) {
-        console.log("Initializing settings/telegram document...");
-        await setDoc(doc(db, "settings", "telegram"), {
-          botToken: "",
-          channelUsername: "",
-          groupUsername: "",
-          storageChannelId: "",
-          adminChatId: ""
-        });
-      } else if (data?.botToken) {
-          console.log("Auto-start polling skipped: Webhook is the only active update method.");
-      }
-  }).catch(e => {
-      console.error("Failed to auto-start polling:", e);
-  });
+  // Auto-start polling on app startup if token exists (delayed slightly for network initialization)
+  setTimeout(() => {
+    getDoc(doc(db, "settings", "telegram")).then(async (docSnap) => {
+        const data = docSnap.data();
+        if (!docSnap.exists()) {
+          console.log("Initializing settings/telegram document...");
+          await setDoc(doc(db, "settings", "telegram"), {
+            botToken: "",
+            channelUsername: "",
+            groupUsername: "",
+            storageChannelId: "",
+            adminChatId: ""
+          });
+        } else if (data?.botToken) {
+            console.log("Auto-start polling skipped: Webhook is the only active update method.");
+        }
+    }).catch(e => {
+        console.error("Failed to auto-start polling:", e);
+    });
+  }, 2000);
 
   // Daily Bonus Endpoints
   app.get("/api/daily-bonus/status", async (req, res) => {
