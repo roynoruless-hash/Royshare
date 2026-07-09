@@ -14,7 +14,56 @@ import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 fs.appendFileSync(path.join(process.cwd(), "server_debug.log"), `[${new Date().toISOString()}] Vite import removed\n`);
 import { getDb } from "./src/lib/firebase";
-import { doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch } from "firebase/firestore";
+import { doc, getDoc as firestoreGetDoc, setDoc, collection, addDoc, query, where, getDocs, getCountFromServer, collectionGroup, deleteDoc, orderBy, updateDoc, limit, increment, runTransaction, arrayUnion, writeBatch } from "firebase/firestore";
+
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "royshare_aes_256_encryption_key_32bytes_long!";
+const hashKey = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
+
+const encryptSecret = (text: string): string => {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv("aes-256-cbc", hashKey, iv);
+  let encrypted = cipher.update(text, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  return `enc:${iv.toString("hex")}:${encrypted}`;
+};
+
+const decryptSecret = (text: string): string => {
+  if (!text) return "";
+  if (!text.startsWith("enc:")) return text;
+  try {
+    const raw = text.substring(4);
+    const parts = raw.split(":");
+    const iv = Buffer.from(parts.shift() || "", "hex");
+    const encryptedText = parts.join(":");
+    const decipher = crypto.createDecipheriv("aes-256-cbc", hashKey, iv);
+    let decrypted = decipher.update(encryptedText, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  } catch (e) {
+    console.error("Decryption failed:", e);
+    return text;
+  }
+};
+
+const getDoc = async (ref: any): Promise<any> => {
+  const snap = await firestoreGetDoc(ref);
+  if (ref && ref.path === "settings/telegram" && snap.exists()) {
+    const originalData = snap.data;
+    if (originalData) {
+      snap.data = function() {
+        const d = originalData.apply(snap);
+        if (!d) return d;
+        return {
+          ...d,
+          botToken: d.botToken && d.botToken.startsWith("enc:") ? decryptSecret(d.botToken) : d.botToken,
+          clientSecret: d.clientSecret && d.clientSecret.startsWith("enc:") ? decryptSecret(d.clientSecret) : d.clientSecret
+        };
+      };
+    }
+  }
+  return snap;
+};
+
 import { REWARD_TASKS } from "./src/lib/tasks";
 import { GoogleGenAI, Type } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./src/lib/gemini";
@@ -2353,32 +2402,6 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
   // ==========================================
   // TELEGRAM LOGIN & SECURE REFERRAL ENGINE
   // ==========================================
-  const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "royshare_aes_256_encryption_key_32bytes_long!";
-  const hashKey = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
-
-  const encryptSecret = (text: string): string => {
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv("aes-256-cbc", hashKey, iv);
-    let encrypted = cipher.update(text, "utf8", "hex");
-    encrypted += cipher.final("hex");
-    return `${iv.toString("hex")}:${encrypted}`;
-  };
-
-  const decryptSecret = (text: string): string => {
-    try {
-      const parts = text.split(":");
-      const iv = Buffer.from(parts.shift() || "", "hex");
-      const encryptedText = parts.join(":");
-      const decipher = crypto.createDecipheriv("aes-256-cbc", hashKey, iv);
-      let decrypted = decipher.update(encryptedText, "hex", "utf8");
-      decrypted += decipher.final("utf8");
-      return decrypted;
-    } catch (e) {
-      console.error("Decryption failed:", e);
-      return text;
-    }
-  };
-
   const REFERRAL_SECRET = process.env.REFERRAL_SECRET || "royshare_super_secure_salt_9182";
 
   const generateSecureReferralToken = (userId: string, referralCode: string): string => {
@@ -2471,37 +2494,41 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
   // Admin APIs for Telegram settings
   app.get("/api/admin/telegram-settings", async (req, res) => {
     try {
-      const configRef = doc(db, "telegram_settings", "config");
+      const configRef = doc(db, "settings", "telegram");
       let configSnap = await getDoc(configRef);
       
       let data: any = {};
       if (configSnap.exists()) {
         data = configSnap.data();
       } else {
-        const legacyRef = doc(db, "settings", "telegram");
+        const legacyRef = doc(db, "telegram_settings", "config");
         const legacySnap = await getDoc(legacyRef);
         if (legacySnap.exists()) {
-          const legacyData = legacySnap.data();
+          const d = legacySnap.data();
           data = {
-            clientId: legacyData.clientId || "",
-            encryptedClientSecret: legacyData.encryptedClientSecret || legacyData.botToken || "",
-            botUsername: legacyData.botUsername || "",
-            miniAppShortName: legacyData.miniAppShortName || "",
-            redirectUri: legacyData.redirectUri || "",
-            trustedOrigin: legacyData.trustedOrigin || ""
+            botToken: d.encryptedClientSecret || "",
+            botUsername: d.botUsername || "",
+            miniAppShortName: d.miniAppShortName || "",
+            clientId: d.clientId || "",
+            clientSecret: d.encryptedClientSecret || "",
+            redirectUri: d.redirectUri || "",
+            trustedOrigin: d.trustedOrigin || "",
+            botConnected: true,
+            loginConnected: true
           };
         }
       }
 
-      const hasClientSecret = !!(data.encryptedClientSecret || data.clientSecret);
       res.json({
-        clientId: data.clientId || "",
+        botToken: data.botToken ? "••••••••••••••" : "",
         botUsername: data.botUsername || "",
         miniAppShortName: data.miniAppShortName || "",
+        clientId: data.clientId || "",
+        clientSecret: data.clientSecret ? "••••••••••••••" : "",
         redirectUri: data.redirectUri || "",
         trustedOrigin: data.trustedOrigin || "",
-        hasClientSecret,
-        isConnected: hasClientSecret && !!data.clientId && !!data.botUsername
+        botConnected: !!data.botConnected,
+        loginConnected: !!data.loginConnected
       });
     } catch (e: any) {
       console.error("Error reading Telegram settings:", e);
@@ -2511,57 +2538,108 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
 
   app.post("/api/admin/telegram-settings/save", async (req, res) => {
     try {
-      const { clientId, clientSecret, botUsername, miniAppShortName, redirectUri, trustedOrigin } = req.body;
+      const {
+        botToken,
+        botUsername,
+        miniAppShortName,
+        clientId,
+        clientSecret,
+        redirectUri,
+        trustedOrigin
+      } = req.body;
       
-      const configRef = doc(db, "telegram_settings", "config");
+      const configRef = doc(db, "settings", "telegram");
       const configSnap = await getDoc(configRef);
       
-      let finalEncryptedSecret = "";
+      let currentBotTokenEnc = "";
+      let currentClientSecretEnc = "";
       if (configSnap.exists()) {
-        finalEncryptedSecret = configSnap.data().encryptedClientSecret || "";
-      }
-      if (!finalEncryptedSecret) {
-        const legacyRef = doc(db, "settings", "telegram");
+        const d = configSnap.data();
+        currentBotTokenEnc = d.botToken || "";
+        currentClientSecretEnc = d.clientSecret || "";
+      } else {
+        const legacyRef = doc(db, "telegram_settings", "config");
         const legacySnap = await getDoc(legacyRef);
         if (legacySnap.exists()) {
-          finalEncryptedSecret = legacySnap.data().encryptedClientSecret || legacySnap.data().botToken || "";
+          currentBotTokenEnc = legacySnap.data().encryptedClientSecret || "";
+          currentClientSecretEnc = legacySnap.data().encryptedClientSecret || "";
         }
       }
 
-      if (clientSecret && clientSecret !== "••••••••••••••••") {
-        finalEncryptedSecret = encryptSecret(clientSecret);
+      let finalBotToken = currentBotTokenEnc;
+      if (botToken && botToken !== "••••••••••••••" && botToken !== "••••••••••••••••") {
+        finalBotToken = encryptSecret(botToken);
       }
 
-      const updatedBy = "Admin";
+      let finalClientSecret = currentClientSecretEnc;
+      if (clientSecret && clientSecret !== "••••••••••••••" && clientSecret !== "••••••••••••••••") {
+        finalClientSecret = encryptSecret(clientSecret);
+      }
+
       const updatedAt = new Date().toISOString();
 
+      // VALIDATE BOT
+      let botConnected = false;
+      if (botUsername && miniAppShortName && finalBotToken) {
+        try {
+          const decBotToken = decryptSecret(finalBotToken);
+          const response = await fetch(`https://api.telegram.org/bot${decBotToken}/getMe`);
+          const d = await response.json();
+          if (response.ok && d.ok) {
+            botConnected = true;
+          }
+        } catch (e) {
+          console.error("Bot validation failed on save:", e);
+        }
+      }
+
+      // VALIDATE LOGIN
+      let loginConnected = false;
+      if (clientId && finalClientSecret && redirectUri && trustedOrigin) {
+        try {
+          const decClientSecret = decryptSecret(finalClientSecret);
+          const rUrl = new URL(redirectUri);
+          const tOrigin = new URL(trustedOrigin);
+          const isUrlValid = (rUrl.protocol === "https:" || rUrl.hostname === "localhost" || rUrl.hostname === "127.0.0.1") &&
+                            (tOrigin.protocol === "https:" || tOrigin.hostname === "localhost" || tOrigin.hostname === "127.0.0.1");
+          
+          if (isUrlValid) {
+            if (decClientSecret.includes(":")) {
+              const response = await fetch(`https://api.telegram.org/bot${decClientSecret}/getMe`);
+              const d = await response.json();
+              if (response.ok && d.ok) {
+                loginConnected = true;
+              }
+            } else {
+              loginConnected = true;
+            }
+          }
+        } catch (e) {
+          console.error("Login validation failed on save:", e);
+        }
+      }
+
       const saveData = {
-        clientId: clientId || "",
-        encryptedClientSecret: finalEncryptedSecret,
+        botToken: finalBotToken,
         botUsername: botUsername || "",
         miniAppShortName: miniAppShortName || "",
+        clientId: clientId || "",
+        clientSecret: finalClientSecret,
         redirectUri: redirectUri || "",
         trustedOrigin: trustedOrigin || "",
-        updatedAt,
-        updatedBy
+        botConnected,
+        loginConnected,
+        updatedAt
       };
 
       await setDoc(configRef, saveData);
 
-      const legacyRef = doc(db, "settings", "telegram");
-      const decryptedToken = finalEncryptedSecret ? decryptSecret(finalEncryptedSecret) : "";
-      await setDoc(legacyRef, {
-        clientId: clientId || "",
-        botToken: decryptedToken,
-        encryptedClientSecret: finalEncryptedSecret,
-        botUsername: botUsername || "",
-        miniAppShortName: miniAppShortName || "",
-        redirectUri: redirectUri || "",
-        trustedOrigin: trustedOrigin || "",
-        updatedAt
-      }, { merge: true });
-
-      res.json({ success: true, isConnected: true });
+      res.json({
+        success: true,
+        botConnected,
+        loginConnected,
+        message: "Telegram configuration saved."
+      });
     } catch (e: any) {
       console.error("Error saving Telegram settings:", e);
       res.status(500).json({ error: e.message || "Failed to save settings" });
@@ -2570,51 +2648,97 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
 
   app.post("/api/admin/telegram-settings/verify", async (req, res) => {
     try {
-      const { clientId, clientSecret, redirectUri, trustedOrigin } = req.body;
+      const {
+        botToken,
+        botUsername,
+        miniAppShortName,
+        clientId,
+        clientSecret,
+        redirectUri,
+        trustedOrigin
+      } = req.body;
+
+      const configRef = doc(db, "settings", "telegram");
+      const configSnap = await getDoc(configRef);
       
-      let secretToVerify = clientSecret;
-      if (!secretToVerify || secretToVerify === "••••••••••••••••") {
-        const configRef = doc(db, "telegram_settings", "config");
-        const configSnap = await getDoc(configRef);
-        if (configSnap.exists()) {
-          const enc = configSnap.data().encryptedClientSecret;
-          if (enc) secretToVerify = decryptSecret(enc);
-        }
+      let currentBotTokenEnc = "";
+      let currentClientSecretEnc = "";
+      if (configSnap.exists()) {
+        const d = configSnap.data();
+        currentBotTokenEnc = d.botToken || "";
+        currentClientSecretEnc = d.clientSecret || "";
       }
 
+      let finalBotToken = currentBotTokenEnc;
+      if (botToken && botToken !== "••••••••••••••" && botToken !== "••••••••••••••••") {
+        finalBotToken = encryptSecret(botToken);
+      }
+
+      let finalClientSecret = currentClientSecretEnc;
+      if (clientSecret && clientSecret !== "••••••••••••••" && clientSecret !== "••••••••••••••••") {
+        finalClientSecret = encryptSecret(clientSecret);
+      }
+
+      // 1. Verify Bot Token
+      if (!botToken || botToken === "") {
+        return res.status(400).json({ success: false, error: "Bot Token is required." });
+      }
+      if (!botUsername) {
+        return res.status(400).json({ success: false, error: "Bot Username is required." });
+      }
+      if (!miniAppShortName) {
+        return res.status(400).json({ success: false, error: "Mini App Short Name is required." });
+      }
+
+      const decBotToken = decryptSecret(finalBotToken);
+      const botResponse = await fetch(`https://api.telegram.org/bot${decBotToken}/getMe`);
+      const botData = await botResponse.json();
+      if (!botResponse.ok || !botData.ok) {
+        return res.status(400).json({ success: false, error: "❌ Invalid Bot Token" });
+      }
+
+      // 2. Verify Telegram Login
       if (!clientId) {
-        return res.status(400).json({ error: "Client ID is required" });
+        return res.status(400).json({ success: false, error: "Client ID is required." });
       }
-      if (!secretToVerify) {
-        return res.status(400).json({ error: "Client Secret / Bot Token is required" });
+      if (!clientSecret || clientSecret === "") {
+        return res.status(400).json({ success: false, error: "Client Secret is required." });
+      }
+      if (!redirectUri) {
+        return res.status(400).json({ success: false, error: "Redirect URI is required." });
+      }
+      if (!trustedOrigin) {
+        return res.status(400).json({ success: false, error: "Trusted Origin is required." });
       }
 
-      if (redirectUri) {
-        const u = new URL(redirectUri);
-        if (u.protocol !== "https:" && u.hostname !== "localhost" && u.hostname !== "127.0.0.1") {
-          return res.status(400).json({ error: "Redirect URI must use HTTPS protocol" });
+      try {
+        const rUrl = new URL(redirectUri);
+        if (rUrl.protocol !== "https:" && rUrl.hostname !== "localhost" && rUrl.hostname !== "127.0.0.1") {
+          return res.status(400).json({ success: false, error: "Redirect URI must use HTTPS" });
         }
-      } else {
-        return res.status(400).json({ error: "Redirect URI is required" });
+      } catch (e) {
+        return res.status(400).json({ success: false, error: "Invalid Redirect URI" });
       }
 
-      if (trustedOrigin) {
-        const u = new URL(trustedOrigin);
-        if (u.protocol !== "https:" && u.hostname !== "localhost" && u.hostname !== "127.0.0.1") {
-          return res.status(400).json({ error: "Trusted Origin must use HTTPS protocol" });
+      try {
+        const tOrigin = new URL(trustedOrigin);
+        if (tOrigin.protocol !== "https:" && tOrigin.hostname !== "localhost" && tOrigin.hostname !== "127.0.0.1") {
+          return res.status(400).json({ success: false, error: "Trusted Origin must use HTTPS" });
         }
-      } else {
-        return res.status(400).json({ error: "Trusted Origin is required" });
+      } catch (e) {
+        return res.status(400).json({ success: false, error: "Invalid Trusted Origin" });
       }
 
-      const telegramApiUrl = `https://api.telegram.org/bot${secretToVerify}/getMe`;
-      const response = await fetch(telegramApiUrl);
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        return res.status(400).json({ error: "Failed to connect to Telegram. Invalid Bot Token/Client Secret." });
+      const decClientSecret = decryptSecret(finalClientSecret);
+      if (decClientSecret.includes(":")) {
+        const response = await fetch(`https://api.telegram.org/bot${decClientSecret}/getMe`);
+        const d = await response.json();
+        if (!response.ok || !d.ok) {
+          return res.status(400).json({ success: false, error: "❌ Invalid Telegram Login Configuration" });
+        }
       }
 
-      res.json({ success: true });
+      res.json({ success: true, botConnected: true, loginConnected: true });
     } catch (e: any) {
       console.error("Error verifying Telegram configuration:", e);
       res.status(500).json({ error: e.message || "Failed to verify configuration" });
@@ -2668,26 +2792,32 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         return res.status(400).json({ error: "Missing user details" });
       }
 
-      let botToken = process.env.TELEGRAM_BOT_TOKEN || "";
-      const configRef = doc(db, "telegram_settings", "config");
+      let clientSecret = "";
+      const configRef = doc(db, "settings", "telegram");
       const configSnap = await getDoc(configRef);
       if (configSnap.exists()) {
-        const enc = configSnap.data().encryptedClientSecret;
-        if (enc) botToken = decryptSecret(enc);
+        const enc = configSnap.data().clientSecret;
+        if (enc) clientSecret = decryptSecret(enc);
       }
-      if (!botToken) {
-        const legacyRef = doc(db, "settings", "telegram");
+      
+      // Legacy fallback
+      if (!clientSecret) {
+        const legacyRef = doc(db, "telegram_settings", "config");
         const legacySnap = await getDoc(legacyRef);
         if (legacySnap.exists()) {
-          botToken = legacySnap.data().botToken || "";
+          const enc = legacySnap.data().encryptedClientSecret;
+          if (enc) clientSecret = decryptSecret(enc);
         }
+      }
+      if (!clientSecret) {
+        clientSecret = process.env.TELEGRAM_BOT_TOKEN || "";
       }
 
       let isValid = false;
       if (user.hash === "simulated_hash") {
         isValid = true;
-      } else if (botToken) {
-        isValid = verifyTelegramWidgetAuth(user, botToken);
+      } else if (clientSecret) {
+        isValid = verifyTelegramWidgetAuth(user, clientSecret);
       }
 
       if (!isValid) {

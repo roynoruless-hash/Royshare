@@ -5,6 +5,27 @@ import { GoogleGenAI } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./lib/gemini";
 import crypto from "crypto";
 
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "royshare_aes_256_encryption_key_32bytes_long!";
+const hashKey = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
+
+function decryptSecret(text: string): string {
+    if (!text) return "";
+    if (!text.startsWith("enc:")) return text;
+    try {
+        const raw = text.substring(4);
+        const parts = raw.split(":");
+        const iv = Buffer.from(parts.shift() || "", "hex");
+        const encryptedText = parts.join(":");
+        const decipher = crypto.createDecipheriv("aes-256-cbc", hashKey, iv);
+        let decrypted = decipher.update(encryptedText, "hex", "utf8");
+        decrypted += decipher.final("utf8");
+        return decrypted;
+    } catch (e) {
+        console.error("Decryption failed:", e);
+        return text;
+    }
+}
+
 function formatCurrency(amount: number, currency: string = "INR", includeSymbol: boolean = true): string {
     if (currency === "USD") {
         const converted = amount * 0.0118;
@@ -578,7 +599,7 @@ async function handleAdminReplyTextInput(botToken: string, adminChatId: number, 
 
     // Fetch the USER BOT token from settings/telegram
     const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
-    const userBotToken = telegramSettingsDoc.data()?.botToken || botToken;
+    const userBotToken = decryptSecret(telegramSettingsDoc.data()?.botToken) || botToken;
 
     const originalUserId = ticketData.userId;
     const rawStatus = "replied";
@@ -5453,7 +5474,7 @@ https://youtube.com`;
             let botUsername = "RoyShareEarnBot";
             try {
                 const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
-                const bToken = settingsDoc.data()?.botToken;
+                const bToken = decryptSecret(settingsDoc.data()?.botToken);
                 if (bToken) {
                     const botMeRes = await fetch(`https://api.telegram.org/bot${bToken}/getMe`);
                     const botMeData = await botMeRes.json();
