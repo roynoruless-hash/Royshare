@@ -127,6 +127,10 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
     setLoading(true);
     setError(null);
     try {
+      const tg = (window as any).Telegram?.WebApp;
+      const urlParams = new URLSearchParams(window.location.search);
+      const startParam = tg?.initDataUnsafe?.start_param || urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || urlParams.get("start_param") || "";
+
       if (tg) {
         console.log("[TelegramAuthContext] Calling tg.ready() and tg.expand() inside standard verification block");
         tg.ready();
@@ -137,7 +141,7 @@ export const TelegramAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
       const response = await fetchWithTimeout(verifyUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData }),
+        body: JSON.stringify({ initData, startParam }),
       });
 
       const data: TelegramAuthResponse = await response.json();

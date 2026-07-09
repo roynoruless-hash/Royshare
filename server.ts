@@ -438,6 +438,57 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       }
 
       const user = await ensureTelegramUserSynced(tgUser);
+
+      // Extract and save start_param / startParam for referral tracking
+      const urlParams = new URLSearchParams(initData);
+      const startParam = urlParams.get("start_param") || req.body.startParam || req.body.start_param || "";
+
+      if (startParam && user) {
+        const cleanParam = startParam.trim();
+        console.log(`[telegram-verify] start_param detected: ${cleanParam} for user: ${user.id}`);
+        
+        const userDocRef = doc(db, "users", user.id);
+        const userSnap = await getDoc(userDocRef);
+        
+        if (userSnap.exists()) {
+          const uData = userSnap.data();
+          const isCompleted = uData.registrationStep === 'completed';
+          const hasReferrer = uData.referredBy || uData.pendingReferrerId;
+          
+          if (!isCompleted && !hasReferrer) {
+            let refCode = cleanParam;
+            if (cleanParam.startsWith("ref_")) {
+              refCode = cleanParam.substring(4);
+            }
+            
+            let referrerId: string | null = null;
+            
+            // Try direct ID
+            const directDoc = await getDoc(doc(db, "users", refCode));
+            if (directDoc.exists()) {
+              referrerId = directDoc.id;
+            } else {
+              // Try query by referralCode field
+              const qRef = query(collection(db, "users"), where("referralCode", "==", refCode));
+              const snapRef = await getDocs(qRef);
+              if (!snapRef.empty) {
+                referrerId = snapRef.docs[0].id;
+              }
+            }
+            
+            if (referrerId && referrerId !== user.id) {
+              await updateDoc(userDocRef, {
+                pendingReferrerId: referrerId
+              });
+              console.log(`[telegram-verify] Saved pendingReferrerId: ${referrerId} for user: ${user.id}`);
+              user.pendingReferrerId = referrerId;
+            } else {
+              console.log(`[telegram-verify] No valid referrer found for code: ${refCode}`);
+            }
+          }
+        }
+      }
+
       res.json({ success: true, user });
     } catch (e: any) {
       console.error("Auth error:", e);
@@ -3110,18 +3161,27 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         createdAt: now
       });
 
-      // Fetch Bot Link
+      // Fetch Bot Link and Mini App Url
       let botUsername = "Roysharearn_bot";
+      let miniAppUrl = "";
       try {
         const telegramSettingsSnap = await getDoc(doc(db, "settings", "telegram"));
         if (telegramSettingsSnap.exists()) {
-          botUsername = telegramSettingsSnap.data()?.botUsername || "Roysharearn_bot";
+          const tgSettings = telegramSettingsSnap.data();
+          botUsername = tgSettings?.botUsername || "Roysharearn_bot";
+          miniAppUrl = tgSettings?.miniAppUrl || "";
         }
       } catch (botErr) {
         console.error("Error reading bot username:", botErr);
       }
 
-      const botUrl = `https://t.me/${botUsername}?start=ref_${rId}`;
+      let botUrl = "";
+      if (miniAppUrl) {
+        const baseUrl = miniAppUrl.split('?')[0];
+        botUrl = `${baseUrl}?startapp=${cleanCode}`;
+      } else {
+        botUrl = `https://t.me/${botUsername}/app?startapp=${cleanCode}`;
+      }
 
       res.json({
         success: true,
@@ -4691,20 +4751,45 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
   app.get("/ref/:userId", async (req, res) => {
       const { userId } = req.params;
       let botUsername = "RoyShareEarnBot";
+      let miniAppUrl = "";
       try {
           const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
-          const botToken = settingsDoc.data()?.botToken;
-          if (botToken) {
-              const botMeRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
-              const botMeData = await botMeRes.json();
-              if (botMeData.ok && botMeData.result?.username) {
-                  botUsername = botMeData.result.username;
+          if (settingsDoc.exists()) {
+              const tgData = settingsDoc.data();
+              botUsername = tgData?.botUsername || "RoyShareEarnBot";
+              miniAppUrl = tgData?.miniAppUrl || "";
+              
+              if (!botUsername && tgData?.botToken) {
+                  const botMeRes = await fetch(`https://api.telegram.org/bot${tgData.botToken}/getMe`);
+                  const botMeData = await botMeRes.json();
+                  if (botMeData.ok && botMeData.result?.username) {
+                      botUsername = botMeData.result.username;
+                  }
               }
           }
       } catch (e) {
           console.error("Error getting bot username for ref redirect:", e);
       }
-      res.redirect(`https://t.me/${botUsername}?start=ref_${userId}`);
+
+      let cleanCode = userId;
+      try {
+          const userSnap = await getDoc(doc(db, "users", userId));
+          if (userSnap.exists()) {
+              cleanCode = userSnap.data()?.referralCode || userId;
+          }
+      } catch (e) {
+          console.error("Error resolving referral code in /ref/:userId:", e);
+      }
+
+      let redirectUrl = "";
+      if (miniAppUrl) {
+          const baseUrl = miniAppUrl.split('?')[0];
+          redirectUrl = `${baseUrl}?startapp=${cleanCode}`;
+      } else {
+          redirectUrl = `https://t.me/${botUsername}/app?startapp=${cleanCode}`;
+      }
+
+      res.redirect(redirectUrl);
   });
 
   // Daily Bonus Endpoints
