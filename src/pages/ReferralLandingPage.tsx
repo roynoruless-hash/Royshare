@@ -22,6 +22,7 @@ export default function ReferralLandingPage() {
   const [verifying, setVerifying] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [referrer, setReferrer] = useState<ReferrerInfo | null>(null);
+  const [startedLogin, setStartedLogin] = useState(false);
   
   const [telegramConfig, setTelegramConfig] = useState({
     clientId: "",
@@ -60,9 +61,9 @@ export default function ReferralLandingPage() {
       .catch(err => console.error("Error loading Telegram config:", err));
   }, []);
 
-  // Dynamically load the Telegram Login widget once the page/step is ready
+  // Dynamically load the Telegram Login widget once the page/step is ready AND user explicitly started login
   useEffect(() => {
-    if (step === 2 && telegramConfig.botUsername) {
+    if (step === 2 && telegramConfig.botUsername && startedLogin) {
       // Clean up any old script first
       const container = document.getElementById("telegram-login-container");
       if (container) {
@@ -86,7 +87,7 @@ export default function ReferralLandingPage() {
         container.appendChild(script);
       }
     }
-  }, [step, telegramConfig.botUsername]);
+  }, [step, telegramConfig.botUsername, startedLogin]);
 
   const verifyReferralToken = async (tokenToVerify: string) => {
     if (!tokenToVerify.trim()) return;
@@ -303,12 +304,32 @@ export default function ReferralLandingPage() {
 
             {/* Telegram Login Button Wrapper */}
             <div className="space-y-4 pt-2">
-              <div className="text-center space-y-2">
-                <div id="telegram-login-container" className="inline-block" />
-                <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                  Secured by Telegram OpenID Connect. Your credentials are encrypted server-side.
-                </p>
-              </div>
+              {!startedLogin ? (
+                <button
+                  type="button"
+                  onClick={() => setStartedLogin(true)}
+                  className="w-full bg-[#229ED9] hover:bg-[#1d8db2] text-white font-black py-4 px-6 rounded-2xl shadow-lg shadow-indigo-950/20 flex items-center justify-center gap-2 text-sm transition-all tracking-wide cursor-pointer"
+                  id="btn-continue-telegram"
+                >
+                  <MessageCircle className="w-5 h-5 fill-white text-[#229ED9]" />
+                  Continue with Telegram
+                </button>
+              ) : (
+                <div className="text-center space-y-3 p-4 bg-slate-900/40 border border-slate-800/80 rounded-2xl animate-fade-in">
+                  <p className="text-xs font-bold text-indigo-400">
+                    🔒 Secure Telegram Auth Ready
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Please click the official button below to verify your Telegram account:
+                  </p>
+                  <div className="flex justify-center py-2">
+                    <div id="telegram-login-container" className="inline-block" />
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    Secured by Telegram OpenID Connect. Your credentials are encrypted server-side.
+                  </p>
+                </div>
+              )}
 
               {/* simulated/fallback button for dev preview environment */}
               {process.env.NODE_ENV !== "production" && (

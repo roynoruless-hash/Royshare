@@ -103,6 +103,11 @@ export default function App() {
       );
     }
 
+    // PRIORITIZE Referral Landing Page routing for ALL /ref requests
+    if (window.location.pathname.startsWith("/ref") || window.location.pathname === "/ref") {
+      return <ReferralLandingPage />;
+    }
+
     // Check if we are in Telegram Mini App context
     const searchParams = new URLSearchParams(window.location.search);
     const hasTgParams = searchParams.has("tgWebAppData") || searchParams.has("tgWebAppVersion") || searchParams.has("userId") || searchParams.has("tgWebAppStartParam");
@@ -120,10 +125,6 @@ export default function App() {
     // Fallback for non-Telegram (Web Browser)
     if (window.location.pathname === "/dashboard/admin") {
       return <AdminDashboard />;
-    }
-
-    if (window.location.pathname.startsWith("/ref") || window.location.pathname === "/ref") {
-      return <ReferralLandingPage />;
     }
 
     const params = new URLSearchParams(window.location.search);

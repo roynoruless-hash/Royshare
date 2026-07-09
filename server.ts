@@ -5357,50 +5357,6 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
       console.error("Failed to auto-start polling:", e);
   });
 
-  app.get("/ref/:userId", async (req, res) => {
-      const { userId } = req.params;
-      let botUsername = "RoyShareEarnBot";
-      let miniAppUrl = "";
-      try {
-          const settingsDoc = await getDoc(doc(db, "settings", "telegram"));
-          if (settingsDoc.exists()) {
-              const tgData = settingsDoc.data();
-              botUsername = tgData?.botUsername || "RoyShareEarnBot";
-              miniAppUrl = tgData?.miniAppUrl || "";
-              
-              if (!botUsername && tgData?.botToken) {
-                  const botMeRes = await fetch(`https://api.telegram.org/bot${tgData.botToken}/getMe`);
-                  const botMeData = await botMeRes.json();
-                  if (botMeData.ok && botMeData.result?.username) {
-                      botUsername = botMeData.result.username;
-                  }
-              }
-          }
-      } catch (e) {
-          console.error("Error getting bot username for ref redirect:", e);
-      }
-
-      let cleanCode = userId;
-      try {
-          const userSnap = await getDoc(doc(db, "users", userId));
-          if (userSnap.exists()) {
-              cleanCode = userSnap.data()?.referralCode || userId;
-          }
-      } catch (e) {
-          console.error("Error resolving referral code in /ref/:userId:", e);
-      }
-
-      let redirectUrl = "";
-      if (miniAppUrl) {
-          const baseUrl = miniAppUrl.split('?')[0];
-          redirectUrl = `${baseUrl}?startapp=${cleanCode}`;
-      } else {
-          redirectUrl = `https://t.me/${botUsername}/app?startapp=${cleanCode}`;
-      }
-
-      res.redirect(redirectUrl);
-  });
-
   // Daily Bonus Endpoints
   app.get("/api/daily-bonus/status", async (req, res) => {
     try {
