@@ -3,6 +3,7 @@ import { REWARD_TASKS } from "./lib/tasks";
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, orderBy, deleteDoc, limit } from "firebase/firestore";
 import { GoogleGenAI } from "@google/genai";
 import { safeGenerateContent, safeSendMessage } from "./lib/gemini";
+import crypto from "crypto";
 
 function formatCurrency(amount: number, currency: string = "INR", includeSymbol: boolean = true): string {
     if (currency === "USD") {
@@ -724,24 +725,61 @@ async function ensureSettings() {
     }
 }
 
+const REFERRAL_SECRET = process.env.REFERRAL_SECRET || "royshare_super_secure_salt_9182";
+
+function verifySecureReferralToken(token: string): { userId: string; referralCode: string; createdAt: number; expiresAt: number } | null {
+    try {
+      const raw = Buffer.from(token, "base64url").toString("utf8");
+      const tokenObj = JSON.parse(raw);
+      if (!tokenObj || !tokenObj.p || !tokenObj.s) return null;
+      
+      const payloadStr = JSON.stringify(tokenObj.p);
+      const expectedSignature = crypto.createHmac("sha256", REFERRAL_SECRET).update(payloadStr).digest("hex");
+      if (expectedSignature !== tokenObj.s) {
+        console.warn("[ReferralToken] Signature mismatch in bot!");
+        return null;
+      }
+      
+      if (Date.now() > tokenObj.p.expiresAt) {
+        console.warn("[ReferralToken] Token expired in bot!");
+        return null;
+      }
+      
+      return tokenObj.p;
+    } catch (e) {
+      console.error("[ReferralToken] Error verifying token in bot:", e);
+      return null;
+    }
+}
+
 async function findReferrerByCode(db: any, code: string): Promise<any> {
     if (!code) return null;
     const cleanCode = code.trim();
+
+    // 1. Try decoding as secure token first
+    const decodedToken = verifySecureReferralToken(cleanCode);
+    if (decodedToken && decodedToken.userId) {
+        const userDocRef = doc(db, "users", decodedToken.userId);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+            return { id: userDocSnap.id, data: userDocSnap.data() };
+        }
+    }
     
-    // 1. Try to find by Telegram ID directly
+    // 2. Try to find by Telegram ID directly
     const directDoc = await getDoc(doc(db, "users", cleanCode));
     if (directDoc.exists()) {
         return { id: directDoc.id, data: directDoc.data() };
     }
 
-    // 2. Try to find by referralCode field
+    // 3. Try to find by referralCode field
     const q1 = query(collection(db, "users"), where("referralCode", "==", cleanCode));
     const snap1 = await getDocs(q1);
     if (!snap1.empty) {
         return { id: snap1.docs[0].id, data: snap1.docs[0].data() };
     }
 
-    // 3. Try to find if code starts with ref_ and strip it
+    // 4. Try to find if code starts with ref_ and strip it
     if (cleanCode.startsWith("ref_")) {
         const stripped = cleanCode.substring(4);
         const refDoc = await getDoc(doc(db, "users", stripped));

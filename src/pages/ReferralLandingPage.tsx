@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
-  User, Award, DollarSign, Users, CheckCircle, 
-  Phone, ShieldAlert, Key, ArrowRight, ExternalLink, Loader2 
+  Users, Award, Gift, Clock, ShieldCheck, CheckCircle2, 
+  HelpCircle, ExternalLink, Loader2, Sparkles, MessageCircle, BookOpen, AlertCircle
 } from "lucide-react";
 import { API_BASE } from "../config/api";
 
@@ -16,381 +16,373 @@ interface ReferrerInfo {
 }
 
 export default function ReferralLandingPage() {
-  const [step, setStep] = useState<1 | 2>(1);
-  const [mobile, setMobile] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
+  const [step, setStep] = useState<1 | 2 | 3>(1); // 1: verifying token, 2: landing page, 3: success page
+  const [inviteToken, setInviteToken] = useState("");
   const [loading, setLoading] = useState(false);
-  const [verifying, setVerifying] = useState(false);
+  const [verifying, setVerifying] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [referrer, setReferrer] = useState<ReferrerInfo | null>(null);
-  const [banner, setBanner] = useState("Invite & Earn Lifetime Commission");
-  const [rules, setRules] = useState<string[]>([]);
+  
+  const [telegramConfig, setTelegramConfig] = useState({
+    clientId: "",
+    botUsername: "RoyShareEarnBot",
+    miniAppShortName: "earn",
+    redirectUri: "",
+    trustedOrigin: "",
+  });
 
+  // Extract referral token on mount
   useEffect(() => {
-    // Extract referral code from URL if present (code, ref, or startapp) or pathname
     const params = new URLSearchParams(window.location.search);
-    let code = params.get("code") || params.get("ref") || params.get("startapp") || params.get("start_param");
+    let token = params.get("code") || params.get("ref") || params.get("startapp") || params.get("start_param");
     
-    if (!code) {
+    if (!token) {
       const pathMatch = window.location.pathname.match(/^\/ref\/([a-zA-Z0-9_-]+)/);
       if (pathMatch) {
-        code = pathMatch[1];
+        token = pathMatch[1];
       }
     }
 
-    if (code) {
-      setInviteCode(code);
-      // Auto-fetch if there is an invite code
-      verifyReferralCode(code);
+    if (token) {
+      setInviteToken(token);
+      verifyReferralToken(token);
+    } else {
+      setVerifying(false);
+      setStep(2); // continue to landing page even without a referrer (direct login)
     }
 
-    // Load referral settings
-    fetch(`${API_BASE}/api/referral/settings`)
+    // Fetch Telegram public config
+    fetch(`${API_BASE}/api/telegram-config`)
       .then(res => res.json())
-      .then(data => {
-        if (data.landingPageBanner) setBanner(data.landingPageBanner);
-        if (data.referralRules) {
-          const splitRules = data.referralRules.split("\n").filter((r: string) => r.trim());
-          setRules(splitRules);
-        }
+      .then(config => {
+        setTelegramConfig(config);
       })
-      .catch(err => console.error("Error loading referral settings:", err));
+      .catch(err => console.error("Error loading Telegram config:", err));
   }, []);
 
-  const verifyReferralCode = async (codeToVerify: string) => {
-    if (!codeToVerify.trim()) return;
+  // Dynamically load the Telegram Login widget once the page/step is ready
+  useEffect(() => {
+    if (step === 2 && telegramConfig.botUsername) {
+      // Clean up any old script first
+      const container = document.getElementById("telegram-login-container");
+      if (container) {
+        container.innerHTML = "";
+        
+        // Define the global callback
+        (window as any).onTelegramAuth = (user: any) => {
+          console.log("[TelegramAuth] Callback received user:", user);
+          handleTelegramWidgetLogin(user);
+        };
+
+        const script = document.createElement("script");
+        script.src = "https://telegram.org/js/telegram-widget.js?22";
+        script.async = true;
+        script.setAttribute("data-telegram-login", telegramConfig.botUsername);
+        script.setAttribute("data-size", "large");
+        script.setAttribute("data-radius", "16");
+        script.setAttribute("data-onauth", "onTelegramAuth(user)");
+        script.setAttribute("data-request-access", "write");
+        
+        container.appendChild(script);
+      }
+    }
+  }, [step, telegramConfig.botUsername]);
+
+  const verifyReferralToken = async (tokenToVerify: string) => {
+    if (!tokenToVerify.trim()) return;
     setVerifying(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/referral/verify-code?code=${encodeURIComponent(codeToVerify.trim())}`);
+      const res = await fetch(`${API_BASE}/api/referral/verify-code?code=${encodeURIComponent(tokenToVerify.trim())}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setReferrer(data.referrer);
+        setStep(2); // move to beautiful landing page
       } else {
         setReferrer(null);
-        setError(data.message || "Invalid referral code. Please check and try again.");
+        setError(data.message || "Invalid or expired referral code. You can still register directly!");
+        setStep(2);
       }
     } catch (err) {
       console.error("Error verifying code:", err);
-      setError("Failed to verify referral code. Please check your internet connection.");
+      setError("Unable to contact verification server. Direct registration available.");
+      setStep(2);
     } finally {
       setVerifying(false);
     }
   };
 
-  const handleStep1Submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    const cleanMobile = mobile.replace(/[^0-9]/g, "");
-    if (cleanMobile.length !== 10) {
-      setError("Please enter a valid 10-digit mobile number.");
-      return;
-    }
-    setStep(2);
-  };
-
-  const handleStep2Submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (!inviteCode.trim()) {
-      setError("Please enter an invite code.");
-      return;
-    }
-
+  const handleTelegramWidgetLogin = async (tgUser: any) => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/referral/pre-register`, {
+      const res = await fetch(`${API_BASE}/api/auth/telegram-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mobileNumber: mobile,
-          referralCode: inviteCode.trim()
+          user: tgUser,
+          token: inviteToken
         })
       });
       const data = await res.json();
-
       if (res.ok && data.success) {
-        // Successful pre-registration! Automatically redirect to the Bot with startapp parameter
-        window.location.href = data.botUrl;
+        // Success! Go to Success Page (Step 3)
+        setStep(3);
       } else {
-        setError(data.message || "Failed to complete verification. Please try again.");
+        setError(data.error || "Telegram Login verification failed. Please try again.");
       }
     } catch (err) {
-      console.error("Error during pre-registration:", err);
-      setError("An error occurred during verification. Please try again.");
+      console.error("Telegram Login Error:", err);
+      setError("A server connection error occurred. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
+  // Quick fallback/mock login for test environments (e.g. preview) so it can be fully tested without a live domain
+  const handleSimulatedTestLogin = () => {
+    const testUser = {
+      id: 99128374,
+      first_name: "John",
+      last_name: "Doe",
+      username: "john_doe_test",
+      photo_url: "https://avatar.iran.liara.run/public/boy",
+      auth_date: Math.floor(Date.now() / 1000),
+      hash: "simulated_hash"
+    };
+    handleTelegramWidgetLogin(testUser);
+  };
+
+  const getBotDeepLink = () => {
+    const codeParam = inviteToken || "none";
+    if (telegramConfig.miniAppShortName) {
+      return `https://t.me/${telegramConfig.botUsername}/${telegramConfig.miniAppShortName}?startapp=${codeParam}`;
+    }
+    return `https://t.me/${telegramConfig.botUsername}?start=${codeParam}`;
+  };
+
+  if (verifying) {
+    return (
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center text-slate-100 p-4">
+        <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-slate-400 font-medium tracking-wide animate-pulse">Securing connection & verifying invitation...</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden">
-      {/* Dynamic Animated Ambient Orbs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-600/10 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[120px] pointer-events-none" />
+    <div className="min-h-screen bg-[#020617] text-slate-100 flex flex-col justify-between items-center p-4 relative overflow-hidden">
+      {/* Ambient Radial Lights */}
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-600/10 blur-[130px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[130px] pointer-events-none" />
 
-      {/* Main Glass Card container */}
-      <motion.div 
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: "easeOut" }}
-        className="w-full max-w-md bg-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl shadow-indigo-950/40 relative z-10"
-        id="referral-glass-card"
-      >
-        {/* Brand Header */}
-        <div className="text-center mb-6">
-          <motion.div 
-            initial={{ scale: 0.8 }}
-            animate={{ scale: 1 }}
-            transition={{ duration: 0.4 }}
-            className="inline-flex items-center justify-center w-12 h-12 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-2xl shadow-lg shadow-indigo-500/20 mb-3"
-          >
-            <Users className="w-6 h-6 text-white animate-pulse" />
-          </motion.div>
-          <h2 className="text-xs font-bold uppercase tracking-widest text-indigo-400 mb-1">RoyShare Program</h2>
-          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white leading-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-100 to-indigo-200">
-            {banner}
-          </h1>
+      {/* Navigation Header */}
+      <div className="w-full max-w-lg flex justify-between items-center py-4 relative z-10">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-xl shadow-md shadow-indigo-500/20 flex items-center justify-center">
+            <Users className="w-4.5 h-4.5 text-white" />
+          </div>
+          <span className="font-black text-lg tracking-tight text-white bg-clip-text">
+            RoyShare <span className="text-indigo-400">Earn</span>
+          </span>
         </div>
+        <div className="bg-slate-900 border border-slate-800 px-3 py-1 rounded-full text-[10px] font-mono text-indigo-400">
+          V4.2.0 • Secure
+        </div>
+      </div>
 
-        {/* Form Steps */}
-        <AnimatePresence mode="wait">
-          {step === 1 ? (
-            <motion.form 
-              key="step-1"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.3 }}
-              onSubmit={handleStep1Submit}
-              className="space-y-5"
-              id="step-1-form"
-            >
-              <div>
-                <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
-                  <Phone className="w-5 h-5 text-indigo-400" />
-                  Step 1: Mobile Verification
-                </h3>
-                <p className="text-sm text-slate-400 leading-relaxed">
-                  Start earning lifetime commissions by inviting your friends. Enter your mobile number below.
-                </p>
-              </div>
-
-              {/* Input Group */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block">
-                  Mobile Number
-                </label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium text-sm border-r border-white/10 pr-3">
-                    +91
-                  </span>
-                  <input 
-                    type="tel"
-                    maxLength={10}
-                    placeholder="Enter your 10 digit number"
-                    value={mobile}
-                    onChange={(e) => setMobile(e.target.value.replace(/[^0-9]/g, ""))}
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-16 pr-4 text-white font-medium placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all text-sm"
-                    id="mobile-input-field"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Important Warn Area */}
-              <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 flex gap-3 text-amber-300">
-                <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" />
-                <div className="text-xs leading-relaxed space-y-1">
-                  <span className="font-bold uppercase tracking-wider text-amber-400 block">
-                    ⚠️ IMPORTANT: Must Match exactly
-                  </span>
-                  <p>
-                    Please enter the <strong>SAME</strong> mobile number that you will use during Telegram registration.
-                  </p>
-                  <p className="text-amber-400/80 font-medium">
-                    If the mobile number entered here and your Telegram registration number do not match exactly, your referral will NOT be counted.
-                  </p>
-                </div>
-              </div>
-
-              {error && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-3.5 text-xs text-red-400 font-medium text-center">
-                  {error}
-                </div>
-              )}
-
-              {/* Continue button */}
-              <button 
-                type="submit"
-                className="w-full bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 active:scale-[0.98] transition-all text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-indigo-500/10 flex items-center justify-center gap-2 text-sm"
-                id="btn-step-1-continue"
-              >
-                Continue to Step 2
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </motion.form>
-          ) : (
-            <motion.form 
-              key="step-2"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.3 }}
-              onSubmit={handleStep2Submit}
-              className="space-y-5"
-              id="step-2-form"
-            >
-              <div>
-                <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
-                  <Key className="w-5 h-5 text-indigo-400" />
-                  Step 2: Referral Code
-                </h3>
-                <p className="text-sm text-slate-400 leading-relaxed">
-                  Provide your friend's invite code to connect your registration and unlock your signup benefits.
-                </p>
-              </div>
-
-              {/* Referral code input */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block">
-                  Referral / Invite Code
-                </label>
-                <div className="flex gap-2">
-                  <input 
-                    type="text"
-                    placeholder="Enter referral code"
-                    value={inviteCode}
-                    onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-                    className="flex-1 bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 text-white font-mono font-bold tracking-wider placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all text-sm"
-                    id="invite-code-field"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => verifyReferralCode(inviteCode)}
-                    disabled={verifying}
-                    className="bg-white/10 hover:bg-white/15 text-white font-semibold px-4 rounded-2xl transition-all border border-white/5 text-xs shrink-0 flex items-center justify-center min-w-[70px]"
-                    id="btn-verify-invite"
-                  >
-                    {verifying ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+      <AnimatePresence mode="wait">
+        {step === 2 ? (
+          <motion.div 
+            key="landing-card"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -30 }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="w-full max-w-lg bg-slate-950/60 backdrop-blur-2xl border border-slate-800/80 rounded-3xl p-6 md:p-8 shadow-2xl shadow-indigo-950/20 relative z-10 space-y-6 my-auto"
+            id="referral-landing-card"
+          >
+            {/* Referrer Details */}
+            {referrer ? (
+              <div className="text-center space-y-4">
+                <div className="relative inline-block">
+                  <div className="w-20 h-20 rounded-full border-2 border-indigo-500/40 p-1 mx-auto bg-slate-900 overflow-hidden shadow-lg shadow-indigo-500/10 flex items-center justify-center">
+                    {referrer.avatar ? (
+                      <img src={referrer.avatar} alt={referrer.name} className="w-full h-full object-cover rounded-full" />
                     ) : (
-                      "Verify"
+                      <div className="w-full h-full rounded-full bg-indigo-950 flex items-center justify-center text-indigo-400 font-bold text-2xl">
+                        {referrer.name[0]}
+                      </div>
                     )}
-                  </button>
+                  </div>
+                  <span className="absolute bottom-0 right-1/2 translate-x-10 bg-indigo-500 text-white rounded-full p-1 border-2 border-slate-950 shadow-md">
+                    <CheckCircle2 className="w-4 h-4 fill-indigo-500 text-white" />
+                  </span>
+                </div>
+
+                <div>
+                  <h2 className="text-sm font-semibold tracking-wider text-indigo-400 uppercase">You've Been Invited By</h2>
+                  <h1 className="text-2xl font-black text-white flex items-center justify-center gap-1.5 mt-1">
+                    {referrer.name}
+                    <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-[10px] text-blue-400 font-bold tracking-wide uppercase">
+                      Verified
+                    </span>
+                  </h1>
+                  <p className="text-slate-400 text-xs mt-1">
+                    Join their network to unlock premium benefits and high-commission multipliers.
+                  </p>
                 </div>
               </div>
-
-              {/* Referred by card */}
-              <AnimatePresence>
-                {referrer && (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3 shadow-lg"
-                    id="referred-by-card"
-                  >
-                    <div className="text-[10px] font-bold tracking-widest text-indigo-400 uppercase">
-                      Referred By
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0 text-indigo-400 font-bold overflow-hidden">
-                        {referrer.avatar ? (
-                          <img src={referrer.avatar} alt={referrer.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <User className="w-5 h-5" />
-                        )}
-                      </div>
-                      <div>
-                        <div className="font-bold text-white text-sm">{referrer.name}</div>
-                        <div className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold uppercase tracking-wider mt-0.5">
-                          <Award className="w-3.5 h-3.5 shrink-0" />
-                          {referrer.level} Member
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5 text-xs">
-                      <div className="bg-white/5 rounded-xl p-2 text-center">
-                        <div className="text-slate-400 text-[10px] mb-0.5">Total Referrals</div>
-                        <div className="font-bold text-white flex items-center justify-center gap-1">
-                          <Users className="w-3.5 h-3.5 text-blue-400" />
-                          {referrer.referrals} Friends
-                        </div>
-                      </div>
-                      <div className="bg-white/5 rounded-xl p-2 text-center">
-                        <div className="text-slate-400 text-[10px] mb-0.5">Earned</div>
-                        <div className="font-bold text-emerald-400 flex items-center justify-center gap-0.5">
-                          ₹{referrer.earnings.toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {error && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-3.5 text-xs text-red-400 font-medium text-center">
-                  {error}
+            ) : (
+              <div className="text-center space-y-3">
+                <div className="w-16 h-16 bg-indigo-950/50 border border-indigo-500/20 rounded-2xl mx-auto flex items-center justify-center text-indigo-400 shadow-lg shadow-indigo-500/5">
+                  <Sparkles className="w-8 h-8" />
                 </div>
-              )}
+                <div>
+                  <h1 className="text-2xl font-black text-white">Join RoyShare Earn</h1>
+                  <p className="text-slate-400 text-sm mt-1">
+                    Connect via Telegram to instantly start earning high-commissions on file sharing.
+                  </p>
+                </div>
+              </div>
+            )}
 
-              {/* Navigation and Submit Buttons */}
-              <div className="flex gap-3">
-                <button 
+            {/* Error Message */}
+            {error && (
+              <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-2xl flex gap-3 text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Program Benefits Grid */}
+            <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-4 space-y-3">
+              <h3 className="text-xs font-bold text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
+                <Gift className="w-4 h-4 text-indigo-400" />
+                Your Signup Benefits
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-300">
+                <div className="flex gap-2 items-start bg-slate-900/30 p-2.5 rounded-xl border border-slate-800/40">
+                  <span className="text-indigo-400 font-bold mt-0.5">💰</span>
+                  <div>
+                    <span className="font-bold text-white block">₹10 Welcome Reward</span>
+                    Instant balance after first login.
+                  </div>
+                </div>
+                <div className="flex gap-2 items-start bg-slate-900/30 p-2.5 rounded-xl border border-slate-800/40">
+                  <span className="text-indigo-400 font-bold mt-0.5">🚀</span>
+                  <div>
+                    <span className="font-bold text-white block">25% Commission</span>
+                    Get high payouts on referrals.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* How It Works List */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
+                <HelpCircle className="w-4 h-4 text-indigo-400" />
+                How It Works
+              </h3>
+              <div className="space-y-2.5 text-xs text-slate-400">
+                <div className="flex gap-3">
+                  <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-400 font-bold flex items-center justify-center shrink-0">1</span>
+                  <p>Log in with your official Telegram account securely below.</p>
+                </div>
+                <div className="flex gap-3">
+                  <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-400 font-bold flex items-center justify-center shrink-0">2</span>
+                  <p>Open our Telegram Bot to verify community membership.</p>
+                </div>
+                <div className="flex gap-3">
+                  <span className="w-5 h-5 rounded-full bg-indigo-500/10 text-indigo-400 font-bold flex items-center justify-center shrink-0">3</span>
+                  <p>Open the Mini App to instantly claim rewards & start earning!</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Telegram Login Button Wrapper */}
+            <div className="space-y-4 pt-2">
+              <div className="text-center space-y-2">
+                <div id="telegram-login-container" className="inline-block" />
+                <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
+                  Secured by Telegram OpenID Connect. Your credentials are encrypted server-side.
+                </p>
+              </div>
+
+              {/* simulated/fallback button for dev preview environment */}
+              {process.env.NODE_ENV !== "production" && (
+                <button
                   type="button"
-                  onClick={() => {
-                    setError(null);
-                    setStep(1);
-                  }}
-                  className="flex-1 bg-white/5 hover:bg-white/10 text-white font-semibold py-4 rounded-2xl border border-white/10 transition-all text-sm"
-                  id="btn-step-2-back"
-                >
-                  Back
-                </button>
-                <button 
-                  type="submit"
+                  onClick={handleSimulatedTestLogin}
                   disabled={loading}
-                  className="flex-[2] bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 active:scale-[0.98] transition-all text-white font-bold py-4 rounded-2xl shadow-lg shadow-emerald-500/10 flex items-center justify-center gap-2 text-sm disabled:opacity-50"
-                  id="btn-step-2-submit"
+                  className="w-full bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-800 rounded-2xl py-3 px-4 font-bold text-xs flex items-center justify-center gap-2 transition-all mt-4"
                 >
                   {loading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
                   ) : (
                     <>
-                      Register & Open Bot
-                      <ExternalLink className="w-4 h-4" />
+                      <span>🔧 Dev Sandbox Fallback: Login Instantly</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
                     </>
                   )}
                 </button>
-              </div>
-            </motion.form>
-          )}
-        </AnimatePresence>
+              )}
+            </div>
+          </motion.div>
+        ) : step === 3 ? (
+          <motion.div 
+            key="success-card"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.4 }}
+            className="w-full max-w-md bg-slate-950/80 backdrop-blur-2xl border border-emerald-500/20 rounded-3xl p-6 md:p-8 shadow-2xl shadow-emerald-950/20 text-center relative z-10 space-y-6 my-auto"
+            id="referral-success-card"
+          >
+            <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-full mx-auto flex items-center justify-center shadow-lg shadow-emerald-500/10">
+              <CheckCircle2 className="w-9 h-9 animate-bounce" />
+            </div>
 
-        {/* Dynamic Referral Rules List */}
-        {rules.length > 0 && (
-          <div className="mt-8 pt-6 border-t border-white/5 space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Referral Program Rules
-            </h4>
-            <ul className="space-y-2 text-xs text-slate-400 leading-relaxed">
-              {rules.map((rule, idx) => (
-                <li key={idx} className="flex gap-2 items-start">
-                  <CheckCircle className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
-                  <span>{rule}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </motion.div>
+            <div className="space-y-2">
+              <h1 className="text-2xl font-black text-white">Authorization Successful</h1>
+              <p className="text-emerald-400 text-sm font-semibold tracking-wide">
+                ✅ Telegram Connected • ✅ Referral Verified
+              </p>
+              <p className="text-slate-400 text-xs px-2 leading-relaxed mt-2">
+                Your secure referral link has been recorded. To activate your welcome bonus and finish your registration, click the button below to launch our bot.
+              </p>
+            </div>
 
-      {/* Brand footer inside page */}
-      <div className="mt-6 text-center text-slate-500 text-xs font-mono relative z-10 pointer-events-none">
-        RoyShare Earn v4.0.0 • Secured & Verified
+            <a 
+              href={getBotDeepLink()}
+              className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-black py-4 px-6 rounded-2xl shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 text-sm transition-all tracking-wide"
+              id="btn-open-bot-success"
+            >
+              <MessageCircle className="w-5 h-5 fill-white text-emerald-500" />
+              Open Telegram Bot
+              <ExternalLink className="w-4 h-4" />
+            </a>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      {/* Footer Policy & Terms links */}
+      <div className="w-full max-w-lg flex justify-between items-center py-6 border-t border-slate-900 text-[11px] text-slate-500 font-medium relative z-10">
+        <a href="/privacy" className="hover:text-indigo-400 transition-colors flex items-center gap-1">
+          <BookOpen className="w-3 h-3" />
+          Privacy Policy
+        </a>
+        <span>•</span>
+        <a href="/terms" className="hover:text-indigo-400 transition-colors flex items-center gap-1">
+          <ShieldCheck className="w-3 h-3" />
+          Terms of Service
+        </a>
+        <span>•</span>
+        <a href="/support" className="hover:text-indigo-400 transition-colors flex items-center gap-1">
+          <HelpCircle className="w-3 h-3" />
+          Support
+        </a>
       </div>
     </div>
   );

@@ -10,6 +10,7 @@ export default function ReferralCenter({ user }: { user: any }) {
   const [milestones, setMilestones] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [secureLink, setSecureLink] = useState("");
 
   const fetchData = async () => {
     if (authLoading) {
@@ -40,6 +41,19 @@ export default function ReferralCenter({ user }: { user: any }) {
         ? milestonesData
         : [];
       setMilestones(milestonesArray);
+
+      // Fetch secure link
+      try {
+        const secureRes = await fetch(`/api/referral/secure-link?userId=${user.id}`);
+        if (secureRes.ok) {
+          const secureData = await secureRes.json();
+          if (secureData.secureLink) {
+            setSecureLink(secureData.secureLink);
+          }
+        }
+      } catch (secErr) {
+        console.error("Error loading secure link:", secErr);
+      }
     } catch (err) {
       console.error("Error fetching referral data:", err);
       setError("Unable to load Referral Center. Please try again.");
@@ -62,7 +76,7 @@ export default function ReferralCenter({ user }: { user: any }) {
   );
   if (!stats) return <div className="text-white text-center p-10">No data available.</div>;
 
-  const referralLink = `https://royshare.online/ref/${stats.referralCode}`;
+  const referralLink = secureLink || `https://royshare.online/ref/${stats.referralCode}`;
 
   return (
     <div className="min-h-screen bg-[#020617] text-white p-6 space-y-8">

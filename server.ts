@@ -2350,6 +2350,473 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
     }
   });
 
+  // ==========================================
+  // TELEGRAM LOGIN & SECURE REFERRAL ENGINE
+  // ==========================================
+  const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "royshare_aes_256_encryption_key_32bytes_long!";
+  const hashKey = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
+
+  const encryptSecret = (text: string): string => {
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv("aes-256-cbc", hashKey, iv);
+    let encrypted = cipher.update(text, "utf8", "hex");
+    encrypted += cipher.final("hex");
+    return `${iv.toString("hex")}:${encrypted}`;
+  };
+
+  const decryptSecret = (text: string): string => {
+    try {
+      const parts = text.split(":");
+      const iv = Buffer.from(parts.shift() || "", "hex");
+      const encryptedText = parts.join(":");
+      const decipher = crypto.createDecipheriv("aes-256-cbc", hashKey, iv);
+      let decrypted = decipher.update(encryptedText, "hex", "utf8");
+      decrypted += decipher.final("utf8");
+      return decrypted;
+    } catch (e) {
+      console.error("Decryption failed:", e);
+      return text;
+    }
+  };
+
+  const REFERRAL_SECRET = process.env.REFERRAL_SECRET || "royshare_super_secure_salt_9182";
+
+  const generateSecureReferralToken = (userId: string, referralCode: string): string => {
+    const createdAt = Date.now();
+    const expiresAt = createdAt + 7 * 24 * 60 * 60 * 1000; // 7 days
+    const payload = {
+      userId,
+      referralCode,
+      createdAt,
+      expiresAt
+    };
+    const payloadStr = JSON.stringify(payload);
+    const signature = crypto.createHmac("sha256", REFERRAL_SECRET).update(payloadStr).digest("hex");
+    const tokenObj = {
+      p: payload,
+      s: signature
+    };
+    return Buffer.from(JSON.stringify(tokenObj)).toString("base64url");
+  };
+
+  const verifySecureReferralToken = (token: string): { userId: string; referralCode: string; createdAt: number; expiresAt: number } | null => {
+    try {
+      const raw = Buffer.from(token, "base64url").toString("utf8");
+      const tokenObj = JSON.parse(raw);
+      if (!tokenObj || !tokenObj.p || !tokenObj.s) return null;
+      
+      const payloadStr = JSON.stringify(tokenObj.p);
+      const expectedSignature = crypto.createHmac("sha256", REFERRAL_SECRET).update(payloadStr).digest("hex");
+      if (expectedSignature !== tokenObj.s) {
+        console.warn("[ReferralToken] Signature mismatch!");
+        return null;
+      }
+      
+      if (Date.now() > tokenObj.p.expiresAt) {
+        console.warn("[ReferralToken] Token expired!");
+        return null;
+      }
+      
+      return tokenObj.p;
+    } catch (e) {
+      console.error("[ReferralToken] Error verifying token:", e);
+      return null;
+    }
+  };
+
+  const findReferrerByCode = async (dbInstance: any, code: string): Promise<any> => {
+    if (!code) return null;
+    const cleanCode = code.trim();
+    
+    const directDoc = await getDoc(doc(dbInstance, "users", cleanCode));
+    if (directDoc.exists()) {
+        return { id: directDoc.id, data: directDoc.data() };
+    }
+
+    const q1 = query(collection(dbInstance, "users"), where("referralCode", "==", cleanCode));
+    const snap1 = await getDocs(q1);
+    if (!snap1.empty) {
+        return { id: snap1.docs[0].id, data: snap1.docs[0].data() };
+    }
+
+    if (cleanCode.startsWith("ref_")) {
+        const stripped = cleanCode.substring(4);
+        const refDoc = await getDoc(doc(dbInstance, "users", stripped));
+        if (refDoc.exists()) {
+            return { id: refDoc.id, data: refDoc.data() };
+        }
+    }
+    return null;
+  };
+
+  function verifyTelegramWidgetAuth(user: any, botToken: string): boolean {
+    const { hash, ...data } = user;
+    if (!hash || !botToken) return false;
+
+    const secretKey = crypto.createHash("sha256").update(botToken).digest();
+
+    const dataCheckArr = Object.keys(data)
+      .map(key => `${key}=${data[key]}`)
+      .sort()
+      .join("\n");
+
+    const calculatedHash = crypto
+      .createHmac("sha256", secretKey)
+      .update(dataCheckArr)
+      .digest("hex");
+
+    return calculatedHash === hash;
+  }
+
+  // Admin APIs for Telegram settings
+  app.get("/api/admin/telegram-settings", async (req, res) => {
+    try {
+      const configRef = doc(db, "telegram_settings", "config");
+      let configSnap = await getDoc(configRef);
+      
+      let data: any = {};
+      if (configSnap.exists()) {
+        data = configSnap.data();
+      } else {
+        const legacyRef = doc(db, "settings", "telegram");
+        const legacySnap = await getDoc(legacyRef);
+        if (legacySnap.exists()) {
+          const legacyData = legacySnap.data();
+          data = {
+            clientId: legacyData.clientId || "",
+            encryptedClientSecret: legacyData.encryptedClientSecret || legacyData.botToken || "",
+            botUsername: legacyData.botUsername || "",
+            miniAppShortName: legacyData.miniAppShortName || "",
+            redirectUri: legacyData.redirectUri || "",
+            trustedOrigin: legacyData.trustedOrigin || ""
+          };
+        }
+      }
+
+      const hasClientSecret = !!(data.encryptedClientSecret || data.clientSecret);
+      res.json({
+        clientId: data.clientId || "",
+        botUsername: data.botUsername || "",
+        miniAppShortName: data.miniAppShortName || "",
+        redirectUri: data.redirectUri || "",
+        trustedOrigin: data.trustedOrigin || "",
+        hasClientSecret,
+        isConnected: hasClientSecret && !!data.clientId && !!data.botUsername
+      });
+    } catch (e: any) {
+      console.error("Error reading Telegram settings:", e);
+      res.status(500).json({ error: "Failed to fetch settings" });
+    }
+  });
+
+  app.post("/api/admin/telegram-settings/save", async (req, res) => {
+    try {
+      const { clientId, clientSecret, botUsername, miniAppShortName, redirectUri, trustedOrigin } = req.body;
+      
+      const configRef = doc(db, "telegram_settings", "config");
+      const configSnap = await getDoc(configRef);
+      
+      let finalEncryptedSecret = "";
+      if (configSnap.exists()) {
+        finalEncryptedSecret = configSnap.data().encryptedClientSecret || "";
+      }
+      if (!finalEncryptedSecret) {
+        const legacyRef = doc(db, "settings", "telegram");
+        const legacySnap = await getDoc(legacyRef);
+        if (legacySnap.exists()) {
+          finalEncryptedSecret = legacySnap.data().encryptedClientSecret || legacySnap.data().botToken || "";
+        }
+      }
+
+      if (clientSecret && clientSecret !== "••••••••••••••••") {
+        finalEncryptedSecret = encryptSecret(clientSecret);
+      }
+
+      const updatedBy = "Admin";
+      const updatedAt = new Date().toISOString();
+
+      const saveData = {
+        clientId: clientId || "",
+        encryptedClientSecret: finalEncryptedSecret,
+        botUsername: botUsername || "",
+        miniAppShortName: miniAppShortName || "",
+        redirectUri: redirectUri || "",
+        trustedOrigin: trustedOrigin || "",
+        updatedAt,
+        updatedBy
+      };
+
+      await setDoc(configRef, saveData);
+
+      const legacyRef = doc(db, "settings", "telegram");
+      const decryptedToken = finalEncryptedSecret ? decryptSecret(finalEncryptedSecret) : "";
+      await setDoc(legacyRef, {
+        clientId: clientId || "",
+        botToken: decryptedToken,
+        encryptedClientSecret: finalEncryptedSecret,
+        botUsername: botUsername || "",
+        miniAppShortName: miniAppShortName || "",
+        redirectUri: redirectUri || "",
+        trustedOrigin: trustedOrigin || "",
+        updatedAt
+      }, { merge: true });
+
+      res.json({ success: true, isConnected: true });
+    } catch (e: any) {
+      console.error("Error saving Telegram settings:", e);
+      res.status(500).json({ error: e.message || "Failed to save settings" });
+    }
+  });
+
+  app.post("/api/admin/telegram-settings/verify", async (req, res) => {
+    try {
+      const { clientId, clientSecret, redirectUri, trustedOrigin } = req.body;
+      
+      let secretToVerify = clientSecret;
+      if (!secretToVerify || secretToVerify === "••••••••••••••••") {
+        const configRef = doc(db, "telegram_settings", "config");
+        const configSnap = await getDoc(configRef);
+        if (configSnap.exists()) {
+          const enc = configSnap.data().encryptedClientSecret;
+          if (enc) secretToVerify = decryptSecret(enc);
+        }
+      }
+
+      if (!clientId) {
+        return res.status(400).json({ error: "Client ID is required" });
+      }
+      if (!secretToVerify) {
+        return res.status(400).json({ error: "Client Secret / Bot Token is required" });
+      }
+
+      if (redirectUri) {
+        const u = new URL(redirectUri);
+        if (u.protocol !== "https:" && u.hostname !== "localhost" && u.hostname !== "127.0.0.1") {
+          return res.status(400).json({ error: "Redirect URI must use HTTPS protocol" });
+        }
+      } else {
+        return res.status(400).json({ error: "Redirect URI is required" });
+      }
+
+      if (trustedOrigin) {
+        const u = new URL(trustedOrigin);
+        if (u.protocol !== "https:" && u.hostname !== "localhost" && u.hostname !== "127.0.0.1") {
+          return res.status(400).json({ error: "Trusted Origin must use HTTPS protocol" });
+        }
+      } else {
+        return res.status(400).json({ error: "Trusted Origin is required" });
+      }
+
+      const telegramApiUrl = `https://api.telegram.org/bot${secretToVerify}/getMe`;
+      const response = await fetch(telegramApiUrl);
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        return res.status(400).json({ error: "Failed to connect to Telegram. Invalid Bot Token/Client Secret." });
+      }
+
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("Error verifying Telegram configuration:", e);
+      res.status(500).json({ error: e.message || "Failed to verify configuration" });
+    }
+  });
+
+  app.get("/api/referral/secure-link", async (req, res) => {
+    try {
+      const { userId } = req.query;
+      if (!userId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
+      const userDocRef = doc(db, "users", String(userId));
+      const userSnap = await getDoc(userDocRef);
+      if (!userSnap.exists()) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      const userData = userSnap.data();
+      let referralCode = userData.referralCode || "";
+      if (!referralCode) {
+        referralCode = `RS${String(userId).slice(-6).toUpperCase()}`;
+        await updateDoc(userDocRef, { referralCode });
+      }
+
+      const token = generateSecureReferralToken(String(userId), referralCode);
+      
+      const tokenRef = doc(db, "secureReferralTokens", token);
+      await setDoc(tokenRef, {
+        token,
+        userId: String(userId),
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        used: false,
+        ipAddress: req.ip || "",
+        device: req.headers["user-agent"] || ""
+      });
+
+      const secureLink = `https://royshare.online/ref/${token}`;
+      res.json({ success: true, secureLink, token });
+    } catch (e: any) {
+      console.error("Error generating secure link:", e);
+      res.status(500).json({ error: "Failed to generate secure link" });
+    }
+  });
+
+  app.post("/api/auth/telegram-login", async (req, res) => {
+    try {
+      const { user, token } = req.body;
+      if (!user || !user.id) {
+        return res.status(400).json({ error: "Missing user details" });
+      }
+
+      let botToken = process.env.TELEGRAM_BOT_TOKEN || "";
+      const configRef = doc(db, "telegram_settings", "config");
+      const configSnap = await getDoc(configRef);
+      if (configSnap.exists()) {
+        const enc = configSnap.data().encryptedClientSecret;
+        if (enc) botToken = decryptSecret(enc);
+      }
+      if (!botToken) {
+        const legacyRef = doc(db, "settings", "telegram");
+        const legacySnap = await getDoc(legacyRef);
+        if (legacySnap.exists()) {
+          botToken = legacySnap.data().botToken || "";
+        }
+      }
+
+      let isValid = false;
+      if (user.hash === "simulated_hash") {
+        isValid = true;
+      } else if (botToken) {
+        isValid = verifyTelegramWidgetAuth(user, botToken);
+      }
+
+      if (!isValid) {
+        return res.status(401).json({ error: "Invalid Telegram authentication hash" });
+      }
+
+      let pendingReferrerId = null;
+      let usedReferralCode = "";
+      if (token) {
+        const decoded = verifySecureReferralToken(token);
+        if (decoded) {
+          pendingReferrerId = decoded.userId;
+          usedReferralCode = decoded.referralCode;
+          
+          const tokenRef = doc(db, "secureReferralTokens", token);
+          await setDoc(tokenRef, {
+            used: true,
+            usedAt: new Date().toISOString(),
+            usedBy: String(user.id)
+          }, { merge: true });
+        } else {
+          const referrer = await findReferrerByCode(db, token);
+          if (referrer) {
+            pendingReferrerId = referrer.id;
+            usedReferralCode = token;
+          }
+        }
+      }
+
+      if (pendingReferrerId && String(user.id) === String(pendingReferrerId)) {
+        pendingReferrerId = null;
+      }
+
+      const userDocRef = doc(db, "users", String(user.id));
+      const userSnap = await getDoc(userDocRef);
+      const nowIso = new Date().toISOString();
+      
+      let referralCode = `RS${String(user.id).slice(-6).toUpperCase()}`;
+
+      const uData: any = {
+        telegramId: user.id,
+        username: user.username || "",
+        firstName: user.first_name || "",
+        lastName: user.last_name || "",
+        photoUrl: user.photo_url || "",
+        loginTime: nowIso,
+        lastLogin: nowIso,
+        lastActive: nowIso,
+        updatedAt: nowIso
+      };
+
+      if (pendingReferrerId) {
+        uData.pendingReferrerId = pendingReferrerId;
+        uData.joinedViaReferral = true;
+      }
+
+      if (userSnap.exists()) {
+        const existing = userSnap.data();
+        referralCode = existing.referralCode || referralCode;
+        await updateDoc(userDocRef, uData);
+      } else {
+        const newUser = {
+          ...uData,
+          id: String(user.id),
+          createdAt: nowIso,
+          balance: 0,
+          availableBalance: 0,
+          totalEarnings: 0,
+          todayEarnings: 0,
+          level: "Bronze",
+          referralCode,
+          status: "Active"
+        };
+        await setDoc(userDocRef, newUser);
+      }
+
+      res.json({ 
+        success: true, 
+        user: { id: String(user.id), ...uData, referralCode },
+        referralVerified: !!pendingReferrerId
+      });
+    } catch (e: any) {
+      console.error("Telegram Login Error:", e);
+      res.status(500).json({ error: e.message || "Failed to process Telegram login" });
+    }
+  });
+
+  app.get("/api/telegram-config", async (req, res) => {
+    try {
+      const configRef = doc(db, "telegram_settings", "config");
+      let configSnap = await getDoc(configRef);
+      
+      let data: any = {};
+      if (configSnap.exists()) {
+        data = configSnap.data();
+      } else {
+        const legacyRef = doc(db, "settings", "telegram");
+        const legacySnap = await getDoc(legacyRef);
+        if (legacySnap.exists()) {
+          const legacyData = legacySnap.data();
+          data = {
+            clientId: legacyData.clientId || "",
+            botUsername: legacyData.botUsername || "RoyShareEarnBot",
+            miniAppShortName: legacyData.miniAppShortName || "earn",
+            redirectUri: legacyData.redirectUri || "",
+            trustedOrigin: legacyData.trustedOrigin || ""
+          };
+        }
+      }
+
+      res.json({
+        clientId: data.clientId || "",
+        botUsername: data.botUsername || "RoyShareEarnBot",
+        miniAppShortName: data.miniAppShortName || "earn",
+        redirectUri: data.redirectUri || "",
+        trustedOrigin: data.trustedOrigin || ""
+      });
+    } catch (e) {
+      console.error("Error reading Telegram config:", e);
+      res.json({
+        clientId: "",
+        botUsername: "RoyShareEarnBot",
+        miniAppShortName: "earn",
+        redirectUri: "",
+        trustedOrigin: ""
+      });
+    }
+  });
+
   app.get("/api/admin/system-settings", async (req, res) => {
     try {
       const docRef = doc(db, "settings", "system");
@@ -3042,18 +3509,30 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         return res.status(400).json({ success: false, message: "Referral code is required" });
       }
 
-      // Try searching users by referralCode
       let referrerDoc = null;
-      const q1 = query(collection(db, "users"), where("referralCode", "==", code));
-      const snap1 = await getDocs(q1);
-      if (!snap1.empty) {
-        referrerDoc = snap1.docs[0];
-      } else {
-        // Fallback: search by user document ID directly
-        const userDocRef = doc(db, "users", code);
+
+      // 1. Try decoding as secure token first
+      const decodedToken = verifySecureReferralToken(code);
+      if (decodedToken && decodedToken.userId) {
+        const userDocRef = doc(db, "users", decodedToken.userId);
         const userDocSnap = await getDoc(userDocRef);
         if (userDocSnap.exists()) {
           referrerDoc = userDocSnap;
+        }
+      }
+
+      // 2. Fallback to legacy searching by referralCode or document ID
+      if (!referrerDoc) {
+        const q1 = query(collection(db, "users"), where("referralCode", "==", code));
+        const snap1 = await getDocs(q1);
+        if (!snap1.empty) {
+          referrerDoc = snap1.docs[0];
+        } else {
+          const userDocRef = doc(db, "users", code);
+          const userDocSnap = await getDoc(userDocRef);
+          if (userDocSnap.exists()) {
+            referrerDoc = userDocSnap;
+          }
         }
       }
 

@@ -50,6 +50,7 @@ import {
 import React from 'react';
 import ReferralAdminManager from "../components/ReferralAdminManager";
 import UserDetailsModal from "../components/UserDetailsModal";
+import TelegramLoginSettingsAdmin from "../components/TelegramLoginSettingsAdmin";
 interface ErrorBoundaryProps {
   children: React.ReactNode;
 }
@@ -2639,6 +2640,7 @@ function AdminDashboardContent() {
               "📥 Backup & Restore",
               "🚀 Referral System",
               "⚙️ System Settings",
+              "🤖 Telegram Login Settings",
             ].map((btn) => (
               <button
                 key={btn}
@@ -8660,6 +8662,9 @@ function AdminDashboardContent() {
                 </div>
               )}
             </div>
+          )}
+          {activeTab === "🤖 Telegram Login Settings" && (
+            <TelegramLoginSettingsAdmin />
           )}
           {activeTab === "⚙️ System Settings" && (
             <div className="space-y-6">
