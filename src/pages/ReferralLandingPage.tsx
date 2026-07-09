@@ -24,13 +24,13 @@ export default function ReferralLandingPage() {
   const [referrer, setReferrer] = useState<ReferrerInfo | null>(null);
   const [startedLogin, setStartedLogin] = useState(false);
   
-  const [telegramConfig, setTelegramConfig] = useState({
-    clientId: "",
-    botUsername: "RoyShareEarnBot",
-    miniAppShortName: "earn",
-    redirectUri: "",
-    trustedOrigin: "",
-  });
+  const [telegramConfig, setTelegramConfig] = useState<{
+    clientId: string;
+    botUsername: string;
+    miniAppShortName: string;
+    redirectUri: string;
+    trustedOrigin: string;
+  } | null>(null);
 
   // Extract referral token on mount
   useEffect(() => {
@@ -56,14 +56,29 @@ export default function ReferralLandingPage() {
     fetch(`${API_BASE}/api/telegram-config`)
       .then(res => res.json())
       .then(config => {
+        console.log("Backend Telegram config response:", config);
         setTelegramConfig(config);
       })
-      .catch(err => console.error("Error loading Telegram config:", err));
+      .catch(err => {
+        console.error("Error loading Telegram config:", err);
+        setTelegramConfig({
+          clientId: "",
+          botUsername: "Royshareearn_bot",
+          miniAppShortName: "earn",
+          redirectUri: "",
+          trustedOrigin: "",
+        });
+      });
   }, []);
 
   // Dynamically load the Telegram Login widget once the page/step is ready AND user explicitly started login
   useEffect(() => {
-    if (step === 2 && telegramConfig.botUsername && startedLogin) {
+    if (step === 2 && telegramConfig && telegramConfig.botUsername && startedLogin) {
+      console.log("Telegram Config:", telegramConfig);
+      
+      const botUser = telegramConfig.botUsername;
+      console.log("Telegram Login Username:", botUser);
+
       // Clean up any old script first
       const container = document.getElementById("telegram-login-container");
       if (container) {
@@ -78,7 +93,7 @@ export default function ReferralLandingPage() {
         const script = document.createElement("script");
         script.src = "https://telegram.org/js/telegram-widget.js?22";
         script.async = true;
-        script.setAttribute("data-telegram-login", telegramConfig.botUsername);
+        script.setAttribute("data-telegram-login", botUser);
         script.setAttribute("data-size", "large");
         script.setAttribute("data-radius", "16");
         script.setAttribute("data-onauth", "onTelegramAuth(user)");
@@ -87,7 +102,7 @@ export default function ReferralLandingPage() {
         container.appendChild(script);
       }
     }
-  }, [step, telegramConfig.botUsername, startedLogin]);
+  }, [step, telegramConfig, startedLogin]);
 
   const verifyReferralToken = async (tokenToVerify: string) => {
     if (!tokenToVerify.trim()) return;
@@ -156,6 +171,9 @@ export default function ReferralLandingPage() {
 
   const getBotDeepLink = () => {
     const codeParam = inviteToken || "none";
+    if (!telegramConfig) {
+      return `https://t.me/Royshareearn_bot?start=${codeParam}`;
+    }
     if (telegramConfig.miniAppShortName) {
       return `https://t.me/${telegramConfig.botUsername}/${telegramConfig.miniAppShortName}?startapp=${codeParam}`;
     }
@@ -304,7 +322,18 @@ export default function ReferralLandingPage() {
 
             {/* Telegram Login Button Wrapper */}
             <div className="space-y-4 pt-2">
-              {!startedLogin ? (
+              {!telegramConfig ? (
+                <div className="flex justify-center py-4">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+                </div>
+              ) : !telegramConfig.botUsername || telegramConfig.botUsername.trim() === "" ? (
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 px-4 py-3.5 rounded-2xl flex items-start gap-3 text-sm">
+                  <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Configuration Error:</strong> The Telegram Bot Username is not configured in settings. Please contact the administrator to complete setup.
+                  </span>
+                </div>
+              ) : !startedLogin ? (
                 <button
                   type="button"
                   onClick={() => setStartedLogin(true)}

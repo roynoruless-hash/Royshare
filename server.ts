@@ -2907,30 +2907,23 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
 
   app.get("/api/telegram-config", async (req, res) => {
     try {
-      const configRef = doc(db, "telegram_settings", "config");
+      const configRef = doc(db, "settings", "telegram");
       let configSnap = await getDoc(configRef);
       
       let data: any = {};
       if (configSnap.exists()) {
         data = configSnap.data();
       } else {
-        const legacyRef = doc(db, "settings", "telegram");
+        const legacyRef = doc(db, "telegram_settings", "config");
         const legacySnap = await getDoc(legacyRef);
         if (legacySnap.exists()) {
-          const legacyData = legacySnap.data();
-          data = {
-            clientId: legacyData.clientId || "",
-            botUsername: legacyData.botUsername || "RoyShareEarnBot",
-            miniAppShortName: legacyData.miniAppShortName || "earn",
-            redirectUri: legacyData.redirectUri || "",
-            trustedOrigin: legacyData.trustedOrigin || ""
-          };
+          data = legacySnap.data();
         }
       }
 
       res.json({
         clientId: data.clientId || "",
-        botUsername: data.botUsername || "RoyShareEarnBot",
+        botUsername: data.botUsername || "Royshareearn_bot",
         miniAppShortName: data.miniAppShortName || "earn",
         redirectUri: data.redirectUri || "",
         trustedOrigin: data.trustedOrigin || ""
@@ -2939,7 +2932,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       console.error("Error reading Telegram config:", e);
       res.json({
         clientId: "",
-        botUsername: "RoyShareEarnBot",
+        botUsername: "Royshareearn_bot",
         miniAppShortName: "earn",
         redirectUri: "",
         trustedOrigin: ""
@@ -6076,7 +6069,7 @@ Please reply ONLY with the rewritten message itself. Do not include any intro, o
         });
       }
 
-      let botUsername = "RoyShareEarnBot";
+      let botUsername = "Royshareearn_bot";
       try {
         const telegramSettingsDoc = await getDoc(doc(db, "settings", "telegram"));
         const botToken = telegramSettingsDoc.data()?.botToken;

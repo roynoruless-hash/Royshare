@@ -52,7 +52,7 @@ export default function EarnRewardsPage() {
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [currentTask, setCurrentTask] = useState<Task | null>(null);
-  const [botUsername, setBotUsername] = useState<string>("RoyShareEarnBot");
+  const [botUsername, setBotUsername] = useState<string>("Royshareearn_bot");
 
   // Active Task State
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -145,7 +145,7 @@ export default function EarnRewardsPage() {
         setUserName(data.userName || "User");
         setCompletedTaskIds(data.completedTaskIds || []);
         setTasks(data.tasks || []);
-        setBotUsername(data.botUsername || "RoyShareEarnBot");
+        setBotUsername(data.botUsername || "Royshareearn_bot");
 
         const resolvedTask = (data.tasks || []).find((t: Task) => t.id === taskId);
         if (resolvedTask) {
