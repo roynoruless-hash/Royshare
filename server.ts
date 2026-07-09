@@ -390,8 +390,14 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
     };
 
     if (userSnap.exists()) {
+      const existingData = userSnap.data();
+      let referralCode = existingData.referralCode || "";
+      if (!referralCode) {
+        referralCode = `RS${userId.slice(-6).toUpperCase()}`;
+        uData.referralCode = referralCode;
+      }
       await updateDoc(userDocRef, uData);
-      return { id: userId, ...userSnap.data(), ...uData };
+      return { id: userId, ...existingData, ...uData };
     } else {
       const newUser = {
         ...uData,
@@ -444,7 +450,16 @@ async function logAdminActivity(adminId: string, userId: string, action: string,
       const { id } = req.params;
       const userSnap = await getDoc(doc(db, "users", id));
       if (!userSnap.exists()) return res.status(404).json({ error: "User not found" });
-      res.json({ success: true, user: { id: userSnap.id, ...userSnap.data() } });
+      
+      const userData = userSnap.data();
+      let referralCode = userData.referralCode || "";
+      if (!referralCode) {
+        referralCode = `RS${id.slice(-6).toUpperCase()}`;
+        await updateDoc(doc(db, "users", id), { referralCode });
+        userData.referralCode = referralCode;
+      }
+      
+      res.json({ success: true, user: { id: userSnap.id, ...userData } });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -3163,6 +3178,12 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
           throw new Error("User not found");
         }
         const rData = referrerSnap.data();
+        let referralCode = rData.referralCode || "";
+        if (!referralCode) {
+          referralCode = `RS${userId.slice(-6).toUpperCase()}`;
+          await updateDoc(referrerDocRef, { referralCode });
+          rData.referralCode = referralCode;
+        }
 
         // Query referrals
         const updatedRefsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", userId)));

@@ -27,9 +27,17 @@ export default function ReferralLandingPage() {
   const [rules, setRules] = useState<string[]>([]);
 
   useEffect(() => {
-    // Extract referral code from URL if present (code, ref, or startapp)
+    // Extract referral code from URL if present (code, ref, or startapp) or pathname
     const params = new URLSearchParams(window.location.search);
-    const code = params.get("code") || params.get("ref") || params.get("startapp") || params.get("start_param");
+    let code = params.get("code") || params.get("ref") || params.get("startapp") || params.get("start_param");
+    
+    if (!code) {
+      const pathMatch = window.location.pathname.match(/^\/ref\/([a-zA-Z0-9_-]+)/);
+      if (pathMatch) {
+        code = pathMatch[1];
+      }
+    }
+
     if (code) {
       setInviteCode(code);
       // Auto-fetch if there is an invite code

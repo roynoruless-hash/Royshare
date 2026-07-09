@@ -47,6 +47,7 @@ const RealTimeAnalyticsPage = lazy(() => import("./pages/RealTimeAnalyticsPage")
 const ReferralProgramPage = lazy(() => import("./pages/ReferralProgramPage"));
 const EnterpriseSecurityPage = lazy(() => import("./pages/EnterpriseSecurityPage"));
 const FastGlobalDeliveryPage = lazy(() => import("./pages/FastGlobalDeliveryPage"));
+const ReferralLandingPage = lazy(() => import("./pages/ReferralLandingPage"));
 
 import MoreMenu from "./components/MoreMenu";
 
@@ -119,6 +120,10 @@ export default function App() {
     // Fallback for non-Telegram (Web Browser)
     if (window.location.pathname === "/dashboard/admin") {
       return <AdminDashboard />;
+    }
+
+    if (window.location.pathname.startsWith("/ref") || window.location.pathname === "/ref") {
+      return <ReferralLandingPage />;
     }
 
     const params = new URLSearchParams(window.location.search);
