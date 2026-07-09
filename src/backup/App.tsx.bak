@@ -60,7 +60,6 @@ const ADMIN_AUTH_ENABLED = false;
 export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
-  const [, setDummyState] = useState(false);
 
   useEffect(() => {
     // Initialize Telegram WebApp
@@ -70,18 +69,6 @@ export default function App() {
       tg.expand();
     }
 
-    const handleLocationChange = () => {
-      setDummyState(prev => !prev);
-    };
-    window.addEventListener('popstate', handleLocationChange);
-    window.addEventListener('pushstate', handleLocationChange);
-    return () => {
-      window.removeEventListener('popstate', handleLocationChange);
-      window.removeEventListener('pushstate', handleLocationChange);
-    };
-  }, []);
-
-  useEffect(() => {
     fetch(`${API_BASE}/api/system-settings`)
       .then(res => res.json())
       .then(() => {
@@ -106,9 +93,8 @@ export default function App() {
     const searchParams = new URLSearchParams(window.location.search);
     const hasTgParams = searchParams.has("tgWebAppData") || searchParams.has("tgWebAppVersion") || searchParams.has("userId") || searchParams.has("tgWebAppStartParam");
     const isTelegram = !!(window as any).Telegram?.WebApp?.initData || hasTgParams || /Telegram/i.test(navigator.userAgent);
-    const isReferralPath = window.location.pathname === "/referral";
 
-    if (isTelegram || isReferralPath) {
+    if (isTelegram) {
       return (
         <TelegramAuthGuard>
           <MiniAppHome />

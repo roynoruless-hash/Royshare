@@ -281,7 +281,7 @@ const PhoneVerification: React.FC<PhoneVerificationProps> = ({ user, onVerified 
 };
 
 export const MiniAppHome: React.FC = () => {
-  const { user, loading, error } = useTelegramAuth();
+  const { user } = useTelegramAuth();
   const [currentView, setCurrentView] = useState<string>(() => {
     console.log("[MiniAppHome] Initializing view. Pathname:", window.location.pathname, "Search:", window.location.search);
     const params = new URLSearchParams(window.location.search);
@@ -298,82 +298,43 @@ export const MiniAppHome: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     return params.get("linkId");
   });
-  const tg = typeof window !== "undefined" ? (window as any).Telegram?.WebApp : null;
-  const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  const queryUserId = searchParams?.get("userId");
-  const isMiniApp = !!(tg?.initData || queryUserId);
-
-  const mockUser = {
-    id: "12345678",
-    telegramId: 12345678,
-    username: "rohit_sharma",
-    firstName: "Rohit",
-    lastName: "Sharma",
-    photoUrl: "",
-    languageCode: "en",
-    isPremium: false,
-    enteredName: "Rohit Sharma",
-    balance: 1250,
-    availableBalance: 1250,
-    totalEarnings: 1250,
-    todayEarnings: 0,
-    level: "Bronze" as const,
-    referralCode: "RS123456",
-    referredBy: null,
-    profileCompleted: true,
-    createdAt: "2023-10-01T00:00:00.000Z",
-    updatedAt: "2023-10-01T00:00:00.000Z",
-    lastActive: "2023-10-01T00:00:00.000Z",
-    status: "Active" as const
-  };
-
-  const activeUser: any = user || (!isMiniApp ? mockUser : null);
-
-  const [isPhoneVerified, setIsPhoneVerified] = useState<boolean>(!isMiniApp);
-
-  const prevViewRef = React.useRef<string>(currentView);
-  useEffect(() => {
-    console.log(`[MiniAppHome] [View State Transition] Changed from "${prevViewRef.current}" to "${currentView}". Stacktrace:`, new Error().stack);
-    prevViewRef.current = currentView;
-  }, [currentView]);
+  const [isPhoneVerified, setIsPhoneVerified] = useState<boolean>(false);
+  const [checkingVerification, setCheckingVerification] = useState<boolean>(true);
 
   useEffect(() => {
-    if (!isMiniApp) {
-      setIsPhoneVerified(true);
-    } else if (activeUser) {
-      const localVerified = localStorage.getItem(`verified_phone_${activeUser.id}`) === "true";
-      const dbVerified = !!activeUser.phoneVerifiedInMiniApp || !!activeUser.phone || !!activeUser.mobile;
+    if (user) {
+      const localVerified = localStorage.getItem(`verified_phone_${user.id}`) === "true";
+      const dbVerified = !!(user as any).phoneVerifiedInMiniApp || !!(user as any).phone || !!(user as any).mobile;
       setIsPhoneVerified(localVerified || dbVerified);
+      setCheckingVerification(false);
     }
-  }, [activeUser, isMiniApp]);
+  }, [user]);
 
   useEffect(() => {
-    console.log("[MiniAppHome] Pathname useEffect trigger. window.location.pathname:", window.location.pathname, "currentView:", currentView);
     if (window.location.pathname === "/referral" && currentView !== "referral") {
-      console.log("[MiniAppHome] Pathname useEffect MATCHED '/referral'. Calling setCurrentView('referral')");
       setCurrentView("referral");
     }
-  }, [window.location.pathname]);
+  }, [currentView]);
 
-  const displayName = activeUser ? (activeUser.enteredName || `${activeUser.firstName || ""} ${activeUser.lastName || ""}`.trim() || activeUser.username || "User") : "User";
+  const displayName = user ? ((user as any).enteredName || `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.username || "User") : "User";
 
-  const displayBalance = activeUser ? (
-    (activeUser.fileEarnings || 0) + 
-    (activeUser.linkEarnings || 0) + 
-    (activeUser.referralEarnings || 0) + 
-    (activeUser.bonusBalance !== undefined ? activeUser.bonusBalance : (activeUser.bonus || 0)) + 
-    (activeUser.rewardBalance || 0) + 
-    (activeUser.balance || 0) - 
-    (activeUser.withdrawnAmount !== undefined ? activeUser.withdrawnAmount : (activeUser.totalWithdrawn || 0)) - 
-    (activeUser.pendingWithdrawals || 0)
+  const displayBalance = user ? (
+    (user.fileEarnings || 0) + 
+    (user.linkEarnings || 0) + 
+    (user.referralEarnings || 0) + 
+    (user.bonusBalance !== undefined ? user.bonusBalance : ((user as any).bonus || 0)) + 
+    (user.rewardBalance || 0) + 
+    (user.balance || 0) - 
+    (user.withdrawnAmount !== undefined ? user.withdrawnAmount : ((user as any).totalWithdrawn || 0)) - 
+    (user.pendingWithdrawals || 0)
   ) : 0;
 
-  const displayTotalEarnings = activeUser ? (
-    (activeUser.fileEarnings || 0) + 
-    (activeUser.linkEarnings || 0) + 
-    (activeUser.referralEarnings || 0) + 
-    (activeUser.bonusBalance !== undefined ? activeUser.bonusBalance : (activeUser.bonus || 0)) + 
-    (activeUser.rewardBalance || 0)
+  const displayTotalEarnings = user ? (
+    (user.fileEarnings || 0) + 
+    (user.linkEarnings || 0) + 
+    (user.referralEarnings || 0) + 
+    (user.bonusBalance !== undefined ? user.bonusBalance : ((user as any).bonus || 0)) + 
+    (user.rewardBalance || 0)
   ) : 0;
 
   // Leaderboard State
@@ -447,7 +408,7 @@ export const MiniAppHome: React.FC = () => {
     }
   }, [currentView]);
 
-  if (loading && isMiniApp) {
+  if (!user || checkingVerification) {
     return (
       <div className="min-h-screen bg-[#020617] flex items-center justify-center">
         <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -455,21 +416,10 @@ export const MiniAppHome: React.FC = () => {
     );
   }
 
-  if (isMiniApp && (error || !activeUser || !activeUser.id)) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 text-center text-red-400">
-        <div>
-          <p className="font-bold text-lg">Authentication Failed</p>
-          <p className="text-sm mt-2">{error || "Could not identify user. Please restart."}</p>
-        </div>
-      </div>
-    );
-  }
-
   if (!isPhoneVerified) {
     return (
       <PhoneVerification 
-        user={activeUser} 
+        user={user} 
         onVerified={() => setIsPhoneVerified(true)} 
       />
     );
@@ -479,7 +429,7 @@ export const MiniAppHome: React.FC = () => {
   if (currentView === "my-content") {
     return (
       <MyContentPage 
-        user={activeUser} 
+        user={user} 
         onBack={() => setCurrentView("home")} 
       />
     );
@@ -488,7 +438,7 @@ export const MiniAppHome: React.FC = () => {
   if (currentView === "my-links") {
     return (
       <MyLinksPage 
-        user={activeUser} 
+        user={user} 
         onBack={() => setCurrentView("home")} 
         onViewAnalytics={(linkId) => {
           setSelectedLinkId(linkId);
@@ -515,7 +465,7 @@ export const MiniAppHome: React.FC = () => {
   }
 
   if (currentView === "dashboard") {
-    return <DashboardPage onBack={() => setCurrentView("home")} onNavigate={setCurrentView} />;
+    return <DashboardPage onBack={() => setCurrentView("home")} />;
   }
 
   if (currentView === "surveys") {
@@ -542,24 +492,6 @@ export const MiniAppHome: React.FC = () => {
   }
 
   if (currentView === "referral") {
-    if (loading) {
-      return (
-        <div className="min-h-screen bg-[#020617] flex items-center justify-center">
-          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-        </div>
-      );
-    }
-    if (!activeUser || !activeUser.id) {
-      return (
-        <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center p-6 text-center">
-          <h2 className="text-xl font-bold text-white mb-2">Authentication Required</h2>
-          <p className="text-slate-400 mb-4">You must be authenticated to view the Referral Center.</p>
-          <button onClick={() => setCurrentView("home")} className="bg-slate-800 hover:bg-slate-750 text-white px-6 py-2 rounded-xl text-sm font-semibold transition-colors">
-            Go Back
-          </button>
-        </div>
-      );
-    }
     return (
       <div className="min-h-screen bg-[#020617]">
         <header className="p-4 flex items-center gap-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
@@ -568,7 +500,7 @@ export const MiniAppHome: React.FC = () => {
           </button>
           <h2 className="text-xl font-bold text-white">Referral Center</h2>
         </header>
-        <ReferralCenter user={activeUser} />
+        <ReferralCenter user={user} />
       </div>
     );
   }
@@ -576,14 +508,14 @@ export const MiniAppHome: React.FC = () => {
   if (activeTaskId) {
     return (
       <RewardTasksPage 
-        userIdProp={activeUser.id} 
+        userIdProp={user.id} 
         taskIdProp={activeTaskId} 
         onBack={() => setActiveTaskId(null)} 
       />
     );
   }
 
-  const referralLink = `https://t.me/Roysharearn_bot?start=ref_${activeUser.id}`;
+  const referralLink = `https://t.me/Roysharearn_bot?start=ref_${user.id}`;
 
   const actionButtons = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, color: "bg-blue-500", shadow: "shadow-blue-500/20" },
@@ -601,14 +533,10 @@ export const MiniAppHome: React.FC = () => {
   ];
 
   const handleAction = (id: string) => {
-    console.log("[MiniAppHome] handleAction called with id:", id, "currentView before change:", currentView);
     if (id === "refer") {
-      console.log("[MiniAppHome] handleAction MATCHED 'refer'. Setting view to 'referral'.");
       setCurrentView("referral");
-      console.log("[MiniAppHome] Immediately after calling setCurrentView('referral') inside handleAction");
       return;
     }
-    console.log(`[MiniAppHome] handleAction calling setCurrentView('${id}')`);
     setCurrentView(id);
   };
 

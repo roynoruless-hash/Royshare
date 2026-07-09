@@ -3198,7 +3198,14 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
           monthlyReferralEarnings: Number(rData.monthlyReferralEarnings || 0),
           lifetimeReferralEarnings: Number(rData.referralEarnings || 0),
           levelName: currentLevelName,
-          commissionPercent: commission
+          commissionPercent: commission,
+          // Legacy compatible fields for older/different components
+          todayCount: Number(rData.todayReferralEarnings || 0),
+          totalEarnings: Number(rData.referralEarnings || 0),
+          approvedCount: approvedCount,
+          pendingCount: pendingCount,
+          referralCode: rData.referralCode || "",
+          currentLevel: { name: currentLevelName }
         };
       })();
 
@@ -3207,14 +3214,14 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         setTimeout(() => reject(new Error("Analytics timeout")), 4000)
       );
 
-      const analytics = await Promise.race([analyticsPromise, timeoutPromise]);
+      const analytics: any = await Promise.race([analyticsPromise, timeoutPromise]);
       
       const duration = Date.now() - startTime;
       console.log(`[API] Success GET /api/referral/analytics for userId: ${userId} in ${duration}ms`);
       
       res.json({
         success: true,
-        ...analytics
+        ...(analytics && typeof analytics === 'object' ? analytics : {})
       });
     } catch (err: any) {
       console.error(`[API] Error GET /api/referral/analytics:`, err);
@@ -3312,42 +3319,54 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
         return res.status(400).json({ error: "userId is required" });
       }
 
-      // Load referral settings milestones
-      const systemDoc = await getDoc(doc(db, "settings", "system"));
-      let milestones = [
-        { referrals: 10, reward: 50, enabled: true },
-        { referrals: 25, reward: 200, enabled: true },
-        { referrals: 50, reward: 500, enabled: true },
-        { referrals: 100, reward: 1500, enabled: true },
-        { referrals: 500, reward: 5000, enabled: true }
-      ];
+      const milestonePromise = (async () => {
+        // Load referral settings milestones
+        const systemDoc = await getDoc(doc(db, "settings", "system"));
+        let milestones = [
+          { referrals: 10, reward: 50, enabled: true },
+          { referrals: 25, reward: 200, enabled: true },
+          { referrals: 50, reward: 500, enabled: true },
+          { referrals: 100, reward: 1500, enabled: true },
+          { referrals: 500, reward: 5000, enabled: true }
+        ];
 
-      if (systemDoc.exists() && systemDoc.data()?.referralSystemV4?.milestones) {
-        milestones = systemDoc.data()?.referralSystemV4?.milestones;
-      }
+        if (systemDoc.exists() && systemDoc.data()?.referralSystemV4?.milestones) {
+          milestones = systemDoc.data()?.referralSystemV4?.milestones;
+        }
 
-      // Count approved referrals
-      const approvedRefsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", userId), where("status", "in", ["Referral Approved", "Commission Paid"])));
-      const approvedCount = approvedRefsSnap.size;
+        // Count approved referrals
+        const approvedRefsSnap = await getDocs(query(collection(db, "referrals"), where("referrerId", "==", userId), where("status", "in", ["Referral Approved", "Commission Paid"])));
+        const approvedCount = approvedRefsSnap.size;
 
-      // Get claimed milestones
-      const claimedSnap = await getDocs(query(collection(db, "claimed_milestones"), where("userId", "==", userId)));
-      const claimedReferralMilestones: number[] = [];
-      claimedSnap.forEach(d => {
-        claimedReferralMilestones.push(Number(d.data().referrals));
-      });
+        // Get claimed milestones
+        const claimedSnap = await getDocs(query(collection(db, "claimed_milestones"), where("userId", "==", userId)));
+        const claimedReferralMilestones: number[] = [];
+        claimedSnap.forEach(d => {
+          claimedReferralMilestones.push(Number(d.data().referrals));
+        });
 
-      const responseMilestones = milestones.map(m => {
-        const isClaimed = claimedReferralMilestones.includes(m.referrals);
-        const canClaim = !isClaimed && approvedCount >= m.referrals;
-        return {
-          referrals: m.referrals,
-          reward: m.reward,
-          enabled: m.enabled,
-          status: isClaimed ? "claimed" : (canClaim ? "ready" : "locked"),
-          progress: Math.min(100, Math.round((approvedCount / m.referrals) * 100))
-        };
-      });
+        const responseMilestones = milestones.map(m => {
+          const isClaimed = claimedReferralMilestones.includes(m.referrals);
+          const canClaim = !isClaimed && approvedCount >= m.referrals;
+          return {
+            referrals: m.referrals,
+            reward: m.reward,
+            enabled: m.enabled,
+            status: isClaimed ? "claimed" : (canClaim ? "ready" : "locked"),
+            progress: Math.min(100, Math.round((approvedCount / m.referrals) * 100))
+          };
+        });
+
+        return { approvedCount, responseMilestones };
+      })();
+
+      // Timeout: 4 seconds
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Milestones timeout")), 4000)
+      );
+
+      const result = await Promise.race([milestonePromise, timeoutPromise]);
+      const { approvedCount, responseMilestones } = result as any;
 
       res.json({
         success: true,
@@ -3356,7 +3375,7 @@ You MUST reply ONLY with a valid JSON object. Do not include any markdown format
       });
     } catch (err: any) {
       console.error("Error in referral milestones API:", err);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: err.message || "Failed to load milestones" });
     }
   });
 

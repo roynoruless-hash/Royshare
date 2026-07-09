@@ -2075,10 +2075,11 @@ function AdminDashboardContent() {
   
   let pendingCount = 0, approvedCount = 0, paidCount = 0, rejectedCount = 0;
   try {
-    pendingCount = withdrawals.filter((w) => w.status === "Pending").length;
-    approvedCount = withdrawals.filter((w) => w.status === "Approved").length;
-    paidCount = withdrawals.filter((w) => w.status === "Paid").length;
-    rejectedCount = withdrawals.filter((w) => w.status === "Rejected").length;
+    const withdrawalsArr = Array.isArray(withdrawals) ? withdrawals : [];
+    pendingCount = withdrawalsArr.filter((w) => w.status === "Pending").length;
+    approvedCount = withdrawalsArr.filter((w) => w.status === "Approved").length;
+    paidCount = withdrawalsArr.filter((w) => w.status === "Paid").length;
+    rejectedCount = withdrawalsArr.filter((w) => w.status === "Rejected").length;
   } catch (e) {
     console.error("Error calculating withdrawal counts:", e);
   }

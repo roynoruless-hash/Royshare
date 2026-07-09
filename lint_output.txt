@@ -1,5 +1,0 @@
-
-> react-example@0.0.0 lint
-> tsc --noEmit
-
-server.ts(5870,71): error TS2339: Property 'data' does not exist on type 'never'.

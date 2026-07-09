@@ -1,10 +1,8 @@
 import { useState, useEffect } from "react";
 import { Copy, Users, Target, Award, TrendingUp, CheckCircle, Clock, DollarSign } from "lucide-react";
 import { API_BASE } from "../config/api";
-import { useTelegramAuth } from "../context/TelegramAuthContext";
 
 export default function ReferralCenter({ user }: { user: any }) {
-  const { loading: authLoading, isAuthenticated } = useTelegramAuth();
   const [copied, setCopied] = useState(false);
   const [stats, setStats] = useState<any>(null);
   const [milestones, setMilestones] = useState<any[]>([]);
@@ -12,10 +10,7 @@ export default function ReferralCenter({ user }: { user: any }) {
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
-    if (authLoading) {
-      console.log("[ReferralCenter] Authentication is still in progress, skipping fetch.");
-      return;
-    }
+    console.log("[ReferralCenter] Fetching data for user:", user);
     if (!user?.id) {
       console.error("[ReferralCenter] User information not found or missing ID.");
       setError("User information not found.");
@@ -25,21 +20,25 @@ export default function ReferralCenter({ user }: { user: any }) {
     setLoading(true);
     setError(null);
     try {
-      const statsRes = await fetch(`/api/referral/analytics?userId=${user.id}`);
+      console.log("[ReferralCenter] Fetching analytics from: /api/referral/analytics");
+      const [statsRes, milestonesRes] = await Promise.all([
+        fetch(`/api/referral/analytics?userId=${user.id}`),
+        fetch(`/api/referral/milestones?userId=${user.id}`)
+      ]);
+      
+      console.log("[ReferralCenter] Analytics response status:", statsRes.status);
+      console.log("[ReferralCenter] Milestones response status:", milestonesRes.status);
+      
       if (!statsRes.ok) throw new Error(`Failed to fetch analytics: ${statsRes.status}`);
-      const statsData = await statsRes.json();
-
-      const milestonesRes = await fetch(`/api/referral/milestones?userId=${user.id}`);
       if (!milestonesRes.ok) throw new Error(`Failed to fetch milestones: ${milestonesRes.status}`);
+      
+      const statsData = await statsRes.json();
       const milestonesData = await milestonesRes.json();
       
+      console.log("[ReferralCenter] Data fetched successfully.");
+      
       setStats(statsData);
-      const milestonesArray = Array.isArray(milestonesData.milestones)
-        ? milestonesData.milestones
-        : Array.isArray(milestonesData)
-        ? milestonesData
-        : [];
-      setMilestones(milestonesArray);
+      setMilestones(milestonesData || []);
     } catch (err) {
       console.error("Error fetching referral data:", err);
       setError("Unable to load Referral Center. Please try again.");
@@ -52,7 +51,6 @@ export default function ReferralCenter({ user }: { user: any }) {
     fetchData();
   }, [user]);
 
-  if (authLoading) return <div className="text-white text-center p-10">Authenticating... Please wait.</div>;
   if (loading) return <div className="text-white text-center p-10">Loading Referral Center...</div>;
   if (error) return (
     <div className="text-white text-center p-10 space-y-4">
@@ -101,7 +99,7 @@ export default function ReferralCenter({ user }: { user: any }) {
       <section>
         <h2 className="text-xl font-bold mb-4">Milestone Rewards</h2>
         <div className="grid grid-cols-3 md:grid-cols-5 gap-4">
-            {(Array.isArray(milestones) ? milestones : []).map(m => (
+            {milestones.map(m => (
                 <div key={m.referrals} className={`p-4 rounded-2xl text-center border ${stats.approvedCount >= m.referrals ? "bg-emerald-900 border-emerald-700" : "bg-slate-800 border-slate-700"}`}>
                     <Award className={`w-8 h-8 mx-auto mb-2 ${stats.approvedCount >= m.referrals ? "text-yellow-400" : "text-slate-500"}`} />
                     <p className="font-bold text-xl">{m.referrals}+</p>

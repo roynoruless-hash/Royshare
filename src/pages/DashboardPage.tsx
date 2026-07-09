@@ -23,7 +23,8 @@ import {
   TrendingUp,
   Clock,
   CheckCircle2,
-  ArrowLeft
+  ArrowLeft,
+  Share2
 } from "lucide-react";
 
 // Mock data as requested (no backend changes)
@@ -82,14 +83,15 @@ const StatCard = ({ title, value, icon: Icon, delay }: any) => (
   </motion.div>
 );
 
-const ActionButton = ({ title, icon: Icon, color, delay }: any) => (
+const ActionButton = ({ title, icon: Icon, color, delay, onClick }: any) => (
   <motion.button
     initial={{ opacity: 0, y: 20 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ delay }}
     whileHover={{ y: -4 }}
     whileTap={{ scale: 0.98 }}
-    className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white/[0.03] border border-white/10 backdrop-blur-xl hover:bg-white/[0.08] hover:border-white/20 transition-all group relative overflow-hidden"
+    onClick={onClick}
+    className="flex flex-col items-center justify-center p-6 rounded-3xl bg-white/[0.03] border border-white/10 backdrop-blur-xl hover:bg-white/[0.08] hover:border-white/20 transition-all group relative overflow-hidden cursor-pointer"
   >
     <div className={`absolute inset-0 opacity-0 group-hover:opacity-10 ${color} transition-opacity duration-500`} />
     <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-4 transition-all duration-500 ${color.replace('bg-', 'bg-opacity-20 ')}`}>
@@ -129,7 +131,13 @@ const ActivityCard = ({ activity, delay }: any) => {
   );
 };
 
-const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
+const DashboardPage = ({ 
+  onBack, 
+  onNavigate 
+}: { 
+  onBack?: () => void; 
+  onNavigate?: (view: string) => void; 
+} = {}) => {
   const { user } = useTelegramAuth();
   const [dbStats, setDbStats] = useState({
     files: 0,
@@ -310,11 +318,12 @@ const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
         {/* QUICK ACTIONS */}
         <div className="space-y-4">
           <h2 className="text-lg font-bold text-white px-2">Quick Actions</h2>
-          <div className={isTelegram ? "max-w-xs" : "grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6"}>
-            {!isTelegram && <ActionButton title="Upload File" icon={Upload} color="bg-blue-600" delay={0.1} />}
-            {!isTelegram && <ActionButton title="Create Smart Link" icon={LinkIcon} color="bg-purple-600" delay={0.2} />}
-            {!isTelegram && <ActionButton title="Connect Drive" icon={Plus} color="bg-emerald-600" delay={0.3} />}
-            <ActionButton title="Withdraw" icon={Wallet} color="bg-orange-600" delay={0.4} />
+          <div className={isTelegram ? "grid grid-cols-2 gap-4 max-w-md" : "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6"}>
+            {!isTelegram && <ActionButton title="Upload File" icon={Upload} color="bg-blue-600" onClick={() => onNavigate?.("upload")} delay={0.1} />}
+            {!isTelegram && <ActionButton title="Create Smart Link" icon={LinkIcon} color="bg-purple-600" onClick={() => onNavigate?.("my-links")} delay={0.2} />}
+            {!isTelegram && <ActionButton title="Connect Drive" icon={Plus} color="bg-emerald-600" onClick={() => onNavigate?.("upload")} delay={0.3} />}
+            <ActionButton title="Withdraw" icon={Wallet} color="bg-orange-600" onClick={() => onNavigate?.("withdraw")} delay={0.4} />
+            <ActionButton title="Refer & Earn" icon={Share2} color="bg-indigo-600" onClick={() => onNavigate?.("referral")} delay={0.5} />
           </div>
         </div>
 
@@ -360,9 +369,16 @@ const DashboardPage = ({ onBack }: { onBack?: () => void } = {}) => {
                     <span className="text-sm font-medium text-slate-400">Wallet Balance</span>
                     <span className="text-sm font-bold text-emerald-400">₹{displayBalance.toLocaleString()}</span>
                   </div>
-                  <div className="flex justify-between items-center py-1.5 border-b border-white/5">
-                    <span className="text-sm font-medium text-slate-400">Referral Code</span>
-                    <span className="text-sm font-mono text-purple-400">{user.referralCode || "N/A"}</span>
+                  <div 
+                    className="flex justify-between items-center py-1.5 border-b border-white/5 cursor-pointer hover:bg-white/5 px-2 -mx-2 rounded-lg transition-all group/ref"
+                    onClick={() => onNavigate?.("referral")}
+                    title="Click to view Referral Center"
+                  >
+                    <span className="text-sm font-medium text-slate-400 group-hover/ref:text-purple-300 transition-colors">Referral Code</span>
+                    <span className="text-sm font-mono text-purple-400 flex items-center gap-1 group-hover/ref:scale-105 transition-all">
+                      {user.referralCode || "N/A"}
+                      <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover/ref:opacity-100 transition-all text-purple-400" />
+                    </span>
                   </div>
                   <div className="flex justify-between items-center py-1.5">
                     <span className="text-sm font-medium text-slate-400">Total Withdrawals</span>
